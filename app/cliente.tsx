@@ -1843,6 +1843,54 @@ export default function ClienteFrontendScreen() {
     [activeDayCardStride, centerDayInPicker, data, giorniDisponibili]
   );
 
+  const getWebHostScrollLeft = useCallback((event: unknown) => {
+    const rawEvent = event as {
+      nativeEvent?: { contentOffset?: { x?: number }; target?: EventTarget | null };
+      currentTarget?: { scrollLeft?: number } | null;
+      target?: { scrollLeft?: number } | null;
+    };
+
+    const nativeOffset = rawEvent.nativeEvent?.contentOffset?.x;
+    if (typeof nativeOffset === 'number' && Number.isFinite(nativeOffset)) {
+      return nativeOffset;
+    }
+
+    const currentTargetScrollLeft = rawEvent.currentTarget?.scrollLeft;
+    if (typeof currentTargetScrollLeft === 'number' && Number.isFinite(currentTargetScrollLeft)) {
+      return currentTargetScrollLeft;
+    }
+
+    const targetScrollLeft = rawEvent.target?.scrollLeft;
+    if (typeof targetScrollLeft === 'number' && Number.isFinite(targetScrollLeft)) {
+      return targetScrollLeft;
+    }
+
+    const host = dayPickerWebStripRef.current as unknown as HTMLElement | null;
+    return typeof host?.scrollLeft === 'number' ? host.scrollLeft : 0;
+  }, []);
+
+  const scheduleWebDayPickerSettle = useCallback(
+    (offsetX?: number | null, delayMs = 90) => {
+      if (dayPickerScrollSettleTimeoutRef.current) {
+        clearTimeout(dayPickerScrollSettleTimeoutRef.current);
+      }
+
+      dayPickerScrollSettleTimeoutRef.current = setTimeout(() => {
+        const host = dayPickerWebStripRef.current as unknown as HTMLElement | null;
+        const resolvedOffsetX =
+          typeof offsetX === 'number' && Number.isFinite(offsetX)
+            ? offsetX
+            : typeof host?.scrollLeft === 'number'
+              ? host.scrollLeft
+              : 0;
+
+        settleDayPickerAtOffset(resolvedOffsetX);
+        dayPickerScrollSettleTimeoutRef.current = null;
+      }, delayMs);
+    },
+    [settleDayPickerAtOffset]
+  );
+
   useEffect(() => {
     if (hasCenteredCurrentDayRef.current) return;
     hasCenteredCurrentDayRef.current = true;
@@ -5601,10 +5649,12 @@ export default function ClienteFrontendScreen() {
                 });
               }}
             >
-              <View
-                pointerEvents="none"
-                style={[styles.dayPickerCenterHalo, isWeb && styles.dayPickerCenterHaloWeb]}
-              />
+              {!isWeb ? (
+                <View
+                  pointerEvents="none"
+                  style={[styles.dayPickerCenterHalo, isWeb && styles.dayPickerCenterHaloWeb]}
+                />
+              ) : null}
               {isWeb ? (
                 <View
                   ref={dayPickerWebStripRef}
@@ -5617,16 +5667,22 @@ export default function ClienteFrontendScreen() {
                   onWheel={(e: unknown) =>
                     applyWebHorizontalStripWheelToHost(dayPickerWebStripRef, e)
                   }
-                  onScroll={(event: NativeSyntheticEvent<NativeScrollEvent>) => {
+                  onMouseUp={(event: unknown) => {
                     lockSelectionTap(220);
-                    const offsetX = event.nativeEvent.contentOffset.x;
-                    if (dayPickerScrollSettleTimeoutRef.current) {
-                      clearTimeout(dayPickerScrollSettleTimeoutRef.current);
-                    }
-                    dayPickerScrollSettleTimeoutRef.current = setTimeout(() => {
-                      settleDayPickerAtOffset(offsetX);
-                      dayPickerScrollSettleTimeoutRef.current = null;
-                    }, 90);
+                    scheduleWebDayPickerSettle(getWebHostScrollLeft(event), 40);
+                  }}
+                  onTouchEnd={(event: unknown) => {
+                    lockSelectionTap(220);
+                    scheduleWebDayPickerSettle(getWebHostScrollLeft(event), 40);
+                  }}
+                  onPointerUp={(event: unknown) => {
+                    lockSelectionTap(220);
+                    scheduleWebDayPickerSettle(getWebHostScrollLeft(event), 40);
+                  }}
+                  onScroll={(event: unknown) => {
+                    lockSelectionTap(220);
+                    const offsetX = getWebHostScrollLeft(event);
+                    scheduleWebDayPickerSettle(offsetX, 90);
                   }}
                 >
                   <View
@@ -5762,12 +5818,14 @@ export default function ClienteFrontendScreen() {
               </Text>
             ) : null}
             {shouldShowGuidedRecommendations ? (
-              <View style={styles.guidedTimePanel}>
-                <Text style={styles.guidedTimeTitle}>Orari consigliati</Text>
-                <Text style={styles.guidedTimeHint}>
+              <View style={[styles.guidedTimePanel, isWeb && styles.guidedTimePanelWeb]}>
+                <Text style={[styles.guidedTimeTitle, isWeb && styles.guidedTimeTitleWeb]}>
+                  Orari consigliati
+                </Text>
+                <Text style={[styles.guidedTimeHint, isWeb && styles.guidedTimeHintWeb]}>
                   Ti mostriamo prima gli slot migliori per questo servizio.
                 </Text>
-                <View style={styles.guidedTimeGrid}>
+                <View style={[styles.guidedTimeGrid, isWeb && styles.guidedTimeGridWeb]}>
                   {guidedRecommendedTimeSlots.map((item) => {
                     const selected = selectedTimeRange.has(item);
                     const lunchOverlapCandidate =
@@ -5779,11 +5837,19 @@ export default function ClienteFrontendScreen() {
                       });
 
                     return (
-                      <View key={`guided-${item}`} style={styles.timeSlotCard}>
+                      <View
+                        key={`guided-${item}`}
+                        style={[
+                          styles.timeSlotCard,
+                          styles.guidedTimeSlotCard,
+                          isWeb && styles.guidedTimeSlotCardWeb,
+                        ]}
+                      >
                         <TouchableOpacity
                           style={[
                             styles.timeChip,
                             styles.guidedTimeChip,
+                            isWeb && styles.guidedTimeChipWeb,
                             selected && styles.timeChipActive,
                           ]}
                           onPress={() => {
@@ -5799,15 +5865,27 @@ export default function ClienteFrontendScreen() {
                           }}
                           activeOpacity={0.9}
                         >
-                          <View style={styles.guidedTimeBadge}>
-                            <Text style={styles.guidedTimeBadgeText}>Consigliato</Text>
+                          <View style={[styles.guidedTimeBadge, isWeb && styles.guidedTimeBadgeWeb]}>
+                            <Text
+                              style={[
+                                styles.guidedTimeBadgeText,
+                                isWeb && styles.guidedTimeBadgeTextWeb,
+                              ]}
+                            >
+                              Consigliato
+                            </Text>
                           </View>
                           <Text
                             numberOfLines={1}
                             ellipsizeMode="clip"
                             adjustsFontSizeToFit
                             minimumFontScale={0.75}
-                            style={[styles.timeChipText, selected && styles.timeChipTextActive]}
+                            style={[
+                              styles.timeChipText,
+                              styles.guidedTimeChipText,
+                              isWeb && styles.guidedTimeChipTextWeb,
+                              selected && styles.timeChipTextActive,
+                            ]}
                           >
                             {item}
                           </Text>
@@ -5818,11 +5896,16 @@ export default function ClienteFrontendScreen() {
                 </View>
                 {guidedSlotsVisibility === 'recommended_first' ? (
                   <TouchableOpacity
-                    style={styles.guidedTimeToggleButton}
+                    style={[styles.guidedTimeToggleButton, isWeb && styles.guidedTimeToggleButtonWeb]}
                     onPress={() => setShowAllGuidedSlots((current) => !current)}
                     activeOpacity={0.9}
                   >
-                    <Text style={styles.guidedTimeToggleButtonText}>
+                    <Text
+                      style={[
+                        styles.guidedTimeToggleButtonText,
+                        isWeb && styles.guidedTimeToggleButtonTextWeb,
+                      ]}
+                    >
                       {showAllGuidedSlots ? 'Nascondi altri orari' : 'Mostra tutti gli orari'}
                     </Text>
                   </TouchableOpacity>
@@ -7516,8 +7599,8 @@ const styles = StyleSheet.create({
   },
   dayPickerViewportWeb: {
     marginHorizontal: -10,
-    paddingTop: 22,
-    paddingBottom: 18,
+    paddingTop: 12,
+    paddingBottom: 10,
     width: '100%',
     maxWidth: '100%',
     minWidth: 0,
@@ -7841,11 +7924,29 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#DCE7F8',
   },
+  guidedTimePanelWeb: {
+    maxWidth: 620,
+    alignSelf: 'center',
+    paddingHorizontal: 18,
+    paddingTop: 16,
+    paddingBottom: 16,
+    borderRadius: 24,
+    backgroundColor: '#F7FAFF',
+    borderColor: '#D8E3F5',
+    shadowColor: '#9FB4D9',
+    shadowOpacity: 0.12,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+  },
   guidedTimeTitle: {
     fontSize: 14,
     fontWeight: '900',
     color: '#0F172A',
     textAlign: 'center',
+  },
+  guidedTimeTitleWeb: {
+    fontSize: 15,
+    lineHeight: 20,
   },
   guidedTimeHint: {
     marginTop: 4,
@@ -7854,6 +7955,12 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#64748B',
     textAlign: 'center',
+  },
+  guidedTimeHintWeb: {
+    marginTop: 5,
+    marginBottom: 2,
+    fontSize: 12,
+    lineHeight: 17,
   },
   guidedTimeInlineNotice: {
     marginTop: 8,
@@ -7870,10 +7977,44 @@ const styles = StyleSheet.create({
     marginHorizontal: -4,
     marginTop: 12,
   },
+  guidedTimeGridWeb: {
+    justifyContent: 'center',
+    marginHorizontal: -6,
+    marginTop: 14,
+  },
+  guidedTimeSlotCard: {
+    marginBottom: 8,
+  },
+  guidedTimeSlotCardWeb: {
+    width: 120,
+    marginHorizontal: 6,
+    marginBottom: 12,
+  },
   guidedTimeChip: {
     backgroundColor: '#EEF4FF',
     borderWidth: 1,
     borderColor: '#BFD2FF',
+  },
+  guidedTimeChipWeb: {
+    minHeight: 72,
+    borderRadius: 20,
+    paddingTop: 18,
+    paddingBottom: 14,
+    paddingHorizontal: 10,
+    justifyContent: 'center',
+    shadowColor: '#A7BDE1',
+    shadowOpacity: 0.1,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+  },
+  guidedTimeChipText: {
+    color: '#1E3A8A',
+  },
+  guidedTimeChipTextWeb: {
+    fontSize: 19,
+    lineHeight: 22,
+    fontWeight: '900',
+    letterSpacing: 0.2,
   },
   guidedTimeBadge: {
     position: 'absolute',
@@ -7885,12 +8026,31 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
     maxWidth: '74%',
   },
+  guidedTimeBadgeWeb: {
+    top: 8,
+    left: '50%',
+    right: 'auto',
+    marginLeft: -34,
+    minWidth: 68,
+    maxWidth: 68,
+    paddingVertical: 3,
+    paddingHorizontal: 8,
+    backgroundColor: '#DBEAFE',
+    borderWidth: 1,
+    borderColor: '#93C5FD',
+  },
   guidedTimeBadgeText: {
     fontSize: 7.2,
     lineHeight: 8,
     fontWeight: '800',
     color: '#FFFFFF',
     textAlign: 'center',
+  },
+  guidedTimeBadgeTextWeb: {
+    fontSize: 9,
+    lineHeight: 10,
+    color: '#1D4ED8',
+    letterSpacing: 0.2,
   },
   guidedTimeToggleButton: {
     marginTop: 10,
@@ -7900,11 +8060,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 10,
   },
+  guidedTimeToggleButtonWeb: {
+    marginTop: 12,
+    paddingHorizontal: 18,
+    paddingVertical: 11,
+  },
   guidedTimeToggleButtonText: {
     fontSize: 12,
     fontWeight: '900',
     color: '#FFFFFF',
     textAlign: 'center',
+  },
+  guidedTimeToggleButtonTextWeb: {
+    fontSize: 13,
   },
   guidedTimeSubHint: {
     marginTop: 10,
