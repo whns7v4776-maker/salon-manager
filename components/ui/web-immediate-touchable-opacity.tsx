@@ -11,6 +11,7 @@ import {
 
 type WebImmediateTouchableOpacityProps = TouchableOpacityProps & {
   children?: React.ReactNode;
+  webTouchAction?: 'auto' | 'manipulation' | 'pan-x' | 'pan-y' | 'none';
 };
 
 // `pan-x pan-y` claims both axes and can block horizontal scrolling of an ancestor
@@ -29,6 +30,7 @@ export function WebImmediateTouchableOpacity({
   style,
   disabled,
   children,
+  webTouchAction = 'manipulation',
   ...props
 }: WebImmediateTouchableOpacityProps) {
   if (Platform.OS !== 'web') {
@@ -138,7 +140,10 @@ export function WebImmediateTouchableOpacity({
       }}
       style={({ pressed }: { pressed: boolean }) =>
         [
-          WEB_TOUCHABLE_STYLE as unknown as StyleProp<ViewStyle>,
+          {
+            ...(WEB_TOUCHABLE_STYLE as unknown as ViewStyle),
+            touchAction: webTouchAction,
+          } as unknown as StyleProp<ViewStyle>,
           style,
           pressed && !disabled ? ({ opacity: activeOpacity } as ViewStyle) : null,
           disabled ? ({ cursor: 'default' } as unknown as ViewStyle) : null,

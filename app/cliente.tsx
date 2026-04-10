@@ -939,6 +939,7 @@ export default function ClienteFrontendScreen() {
     return (
       <Animated.View key={day.value} style={[styles.dayCardWrap, isWeb && styles.dayCardWrapWeb, animatedCardStyle]}>
         <TouchableOpacity
+          webTouchAction={isWeb ? 'pan-x' : undefined}
           style={[
             styles.dayCard,
             isWeb && styles.dayCardWeb,
@@ -4638,6 +4639,7 @@ export default function ClienteFrontendScreen() {
 
       return (
         <TouchableOpacity
+          webTouchAction={isWeb ? 'pan-x' : undefined}
           key={item.id}
           style={[
             styles.serviceCard,
@@ -5748,6 +5750,11 @@ export default function ClienteFrontendScreen() {
             <Text style={styles.sectionTitle}>{tf('frontend_choose_time')}</Text>
             {!canChooseTime ? (
               <Text style={styles.lockedSectionText}>{tf('frontend_unlock_times')}</Text>
+            ) : null}
+            {guidedSlotsActive ? (
+              <Text style={styles.guidedTimeInlineNotice}>
+                Modalita slot guidati attiva per questo servizio.
+              </Text>
             ) : null}
             {canChooseTime && servizio.trim() && !canAnySlotBeBooked ? (
               <Text style={styles.lockedSectionText}>
@@ -7846,6 +7853,15 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     fontWeight: '700',
     color: '#64748B',
+    textAlign: 'center',
+  },
+  guidedTimeInlineNotice: {
+    marginTop: 8,
+    marginBottom: 10,
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: '800',
+    color: '#335C9E',
     textAlign: 'center',
   },
   guidedTimeGrid: {
