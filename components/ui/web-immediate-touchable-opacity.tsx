@@ -13,9 +13,11 @@ type WebImmediateTouchableOpacityProps = TouchableOpacityProps & {
   children?: React.ReactNode;
 };
 
+// `pan-x pan-y` claims both axes and can block horizontal scrolling of an ancestor
+// ScrollView on web; `manipulation` keeps taps responsive without stealing pan gestures.
 const WEB_TOUCHABLE_STYLE = {
   cursor: 'pointer',
-  touchAction: 'pan-x pan-y',
+  touchAction: 'manipulation',
   userSelect: 'none',
   WebkitUserSelect: 'none',
   WebkitTapHighlightColor: 'transparent',

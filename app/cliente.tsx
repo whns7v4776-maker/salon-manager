@@ -20,6 +20,7 @@ import {
   TextInputSubmitEditingEventData,
   useWindowDimensions,
   View,
+  type ViewStyle,
 } from 'react-native';
 import Animated, {
   useAnimatedStyle,
@@ -74,6 +75,9 @@ import { formatSalonAddress, normalizeSalonCode, SalonWorkspace } from '../src/l
 import { registerPushNotifications } from '../src/lib/push/push-notifications';
 import { resolveServiceAccent } from '../src/lib/service-accents';
 import { supabase } from '../src/lib/supabase';
+
+/** RN-web: prefer horizontal pan on the strip so nested vertical page scroll still works. */
+const webHorizontalScrollTouchStyle = { touchAction: 'pan-x' } as ViewStyle;
 import {
   buildInvalidFieldsMessage,
   isValidEmail,
@@ -5319,7 +5323,7 @@ export default function ClienteFrontendScreen() {
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
-              style={isWeb ? styles.servicesScrollViewWeb : undefined}
+              style={isWeb ? [styles.servicesScrollViewWeb, webHorizontalScrollTouchStyle] : undefined}
               contentContainerStyle={styles.servicesScrollContent}
               onScrollBeginDrag={isWeb ? () => lockSelectionTap(220) : undefined}
               onMomentumScrollBegin={isWeb ? () => lockSelectionTap(220) : undefined}
@@ -5519,7 +5523,7 @@ export default function ClienteFrontendScreen() {
                 scrollEventThrottle={16}
                 showsHorizontalScrollIndicator={false}
                 overScrollMode="never"
-                style={isWeb ? styles.dayPickerScrollWeb : undefined}
+                style={isWeb ? [styles.dayPickerScrollWeb, webHorizontalScrollTouchStyle] : undefined}
                 contentContainerStyle={[
                   styles.dayPickerRow,
                   isWeb && styles.dayPickerRowWeb,
@@ -7172,9 +7176,14 @@ const styles = StyleSheet.create({
     maxWidth: 132,
   },
   servicesScrollViewWeb: {
+    // RN-web ScrollView defaults include flexGrow/flexShrink; with sectionCard's
+    // alignItems:center the strip can size to content width and lose horizontal overflow.
     width: '100%',
     maxWidth: '100%',
+    minWidth: 0,
     alignSelf: 'stretch',
+    flexGrow: 0,
+    flexShrink: 0,
   },
   servicesScrollContent: {
     paddingHorizontal: 0,
@@ -7393,11 +7402,17 @@ const styles = StyleSheet.create({
     paddingBottom: 18,
     width: '100%',
     maxWidth: '100%',
+    minWidth: 0,
     alignSelf: 'stretch',
+    flexGrow: 0,
+    flexShrink: 0,
   },
   dayPickerScrollWeb: {
     width: '100%',
     maxWidth: '100%',
+    minWidth: 0,
+    flexGrow: 0,
+    flexShrink: 0,
   },
   dayPickerCenterHalo: {
     position: 'absolute',
