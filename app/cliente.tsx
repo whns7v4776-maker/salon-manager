@@ -4,13 +4,24 @@ import * as Calendar from 'expo-calendar';
 import * as LocalAuthentication from 'expo-local-authentication';
 import * as Notifications from 'expo-notifications';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import { memo, startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  memo,
+  startTransition,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+  type RefObject,
+} from 'react';
 import {
   Alert,
   AppState,
   Keyboard,
   KeyboardAvoidingView,
   Linking,
+  NativeScrollEvent,
   NativeSyntheticEvent,
   Platform,
   ScrollView,
@@ -75,15 +86,49 @@ import { formatSalonAddress, normalizeSalonCode, SalonWorkspace } from '../src/l
 import { registerPushNotifications } from '../src/lib/push/push-notifications';
 import { resolveServiceAccent } from '../src/lib/service-accents';
 import { supabase } from '../src/lib/supabase';
-
-/** RN-web: prefer horizontal pan on the strip so nested vertical page scroll still works. */
-const webHorizontalScrollTouchStyle = { touchAction: 'pan-x' } as ViewStyle;
 import {
   buildInvalidFieldsMessage,
   isValidEmail,
   isValidPhone10,
   limitPhoneToTenDigits,
 } from '../src/lib/validators';
+
+/** RN-web: prefer horizontal pan on the strip so nested vertical page scroll still works. */
+const webHorizontalScrollTouchStyle = { touchAction: 'pan-x' } as ViewStyle;
+
+/** Map wheel to scrollLeft when the vertical page scroll would otherwise eat the gesture. */
+function applyWebHorizontalStripWheelToHost(hostRef: RefObject<View | null>, event: unknown) {
+  if (Platform.OS !== 'web') return;
+  const el = hostRef.current as unknown as HTMLElement | null;
+  if (!el || typeof el.scrollLeft !== 'number') return;
+  const raw = event as { nativeEvent?: WheelEvent };
+  const ne = (raw.nativeEvent ?? event) as WheelEvent;
+  const deltaX = ne.deltaX ?? 0;
+  const deltaY = ne.deltaY ?? 0;
+  const max = Math.max(0, el.scrollWidth - el.clientWidth);
+  if (max <= 0) return;
+
+  const atStart = el.scrollLeft <= 0.5;
+  const atEnd = el.scrollLeft >= max - 0.5;
+
+  if (Math.abs(deltaX) > Math.abs(deltaY) && deltaX !== 0) {
+    if ((deltaX < 0 && !atStart) || (deltaX > 0 && !atEnd)) {
+      ne.preventDefault?.();
+      (ne as unknown as Event).stopPropagation?.();
+    }
+    return;
+  }
+
+  if (deltaY !== 0) {
+    const next = el.scrollLeft + deltaY;
+    const clamped = Math.max(0, Math.min(max, next));
+    if (Math.abs(clamped - el.scrollLeft) > 0.5) {
+      el.scrollLeft = clamped;
+      ne.preventDefault?.();
+      (ne as unknown as Event).stopPropagation?.();
+    }
+  }
+}
 
 const FRONTEND_PROFILE_KEY = 'salon_manager_frontend_cliente_profile';
 const FRONTEND_LANGUAGE_KEY = 'salon_manager_frontend_language';
@@ -759,7 +804,9 @@ export default function ClienteFrontendScreen() {
     mode?: string | string[];
   }>();
   const scrollRef = useRef<ScrollView | null>(null);
+  const servicesWebStripRef = useRef<View | null>(null);
   const dayPickerRef = useRef<ScrollView | null>(null);
+  const dayPickerWebStripRef = useRef<View | null>(null);
   const dayPickerScrollSettleTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const selectionTapLockUntilRef = useRef(0);
   const lastHapticDayRef = useRef('');
@@ -1739,8 +1786,16 @@ export default function ClienteFrontendScreen() {
       const index = giorniDisponibili.findIndex((item) => item.value === dateValue);
       if (index < 0) return;
 
+      const x = index * activeDayCardStride;
+      if (Platform.OS === 'web') {
+        const el = dayPickerWebStripRef.current as unknown as HTMLElement | null;
+        if (el && typeof el.scrollTo === 'function') {
+          el.scrollTo({ left: x, behavior: animated ? 'smooth' : 'auto' });
+        }
+        return;
+      }
       dayPickerRef.current?.scrollTo({
-        x: index * activeDayCardStride,
+        x,
         animated,
       });
     },
@@ -4562,6 +4617,179 @@ export default function ClienteFrontendScreen() {
     []
   );
 
+  const renderBookingServiceCards = () =>
+    sortedFrontendServizi.map((item) => {
+      const selected = item.nome === servizio;
+      const serviceUsesOperators =
+        getConfiguredOperatorsForFrontendService({
+          serviceName: item.nome,
+          services: effectiveServizi,
+          operators: effectiveOperatori,
+        }).length > 0;
+      const accent = resolveServiceAccent({
+        serviceId: item.id,
+        serviceName: item.nome,
+        roleName: item.mestiereRichiesto,
+        serviceColorOverrides: effectiveServiceCardColorOverrides,
+        roleColorOverrides: effectiveRoleCardColorOverrides,
+      });
+      const showOperatorBadge = serviceUsesOperators;
+      const showSalonBadge = !showOperatorBadge;
+
+      return (
+        <TouchableOpacity
+          key={item.id}
+          style={[
+            styles.serviceCard,
+            isWeb && styles.serviceCardWeb,
+            {
+              backgroundColor: accent.bg,
+              borderColor: selected ? '#1E293B' : accent.border,
+            },
+            selected && styles.serviceCardActive,
+          ]}
+          onPress={() => {
+            if (shouldIgnoreSelectionTap()) return;
+            setServizio(item.nome);
+            if (
+              ora &&
+              hasFrontendSlotSelectionConflict({
+                dateValue: data,
+                startTime: ora,
+                serviceName: item.nome,
+                selectedOperatorId: operatoreId || null,
+                selectedOperatorName: operatoreNome || null,
+                operators: effectiveOperatori,
+                appointments: effectiveBlockingAppointments,
+                services: effectiveServizi,
+                settings: effectiveAvailabilitySettings,
+              })
+            ) {
+              setOra('');
+            }
+          }}
+          activeOpacity={0.9}
+        >
+          <Text
+            style={[
+              styles.serviceCardTitle,
+              isWeb && styles.serviceCardTitleWeb,
+              { color: accent.text },
+            ]}
+            numberOfLines={3}
+            ellipsizeMode="clip"
+            adjustsFontSizeToFit
+            minimumFontScale={0.62}
+          >
+            {item.nome}
+          </Text>
+          <View style={[styles.serviceCardMetaRow, isWeb && styles.serviceCardMetaRowWeb]}>
+            {item.mestiereRichiesto ? (
+              <View
+                style={[
+                  styles.serviceRoleBadge,
+                  isWeb && styles.serviceRoleBadgeWeb,
+                  { borderColor: accent.border },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.serviceRoleBadgeText,
+                    isWeb && styles.serviceRoleBadgeTextWeb,
+                    { color: accent.text },
+                  ]}
+                  numberOfLines={1}
+                  ellipsizeMode="clip"
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.62}
+                >
+                  {item.mestiereRichiesto}
+                </Text>
+              </View>
+            ) : null}
+            {showOperatorBadge ? (
+              <View
+                style={[
+                  styles.serviceOperatorInlineBadge,
+                  isWeb && styles.serviceOperatorInlineBadgeWeb,
+                  { borderColor: accent.border },
+                ]}
+              >
+                <Ionicons name="person" size={12} color={accent.text} />
+              </View>
+            ) : null}
+            {showSalonBadge ? (
+              <View style={[styles.serviceSalonInlineBadge, isWeb && styles.serviceSalonInlineBadgeWeb]}>
+                <Text style={styles.serviceSalonInlineBadgeText}>Salone</Text>
+              </View>
+            ) : null}
+          </View>
+          <Text
+            style={[
+              styles.serviceCardDuration,
+              isWeb && styles.serviceCardDurationWeb,
+              { color: accent.text },
+            ]}
+            numberOfLines={1}
+            ellipsizeMode="clip"
+            adjustsFontSizeToFit
+            minimumFontScale={0.68}
+          >
+            {formatDurationLabel(item.durataMinuti ?? 60)}
+          </Text>
+          <Text
+            style={[
+              styles.serviceCardPrice,
+              isWeb && styles.serviceCardPriceWeb,
+              { color: accent.text },
+            ]}
+            numberOfLines={1}
+            ellipsizeMode="clip"
+            adjustsFontSizeToFit
+            minimumFontScale={0.72}
+          >
+            € {item.prezzo.toFixed(2)}
+          </Text>
+          {selected ? (
+            <View style={styles.serviceSelectedBadge}>
+              <Text style={styles.serviceSelectedBadgeText}>Scelto</Text>
+            </View>
+          ) : null}
+          {item.prezzoOriginale && item.prezzoOriginale > item.prezzo ? (
+            <View style={styles.discountRow}>
+              <View style={styles.discountBadge}>
+                <Text style={styles.discountBadgeText}>Sconto</Text>
+              </View>
+              <Text style={styles.servicePriceOriginal}>
+                € {item.prezzoOriginale.toFixed(2)}
+              </Text>
+            </View>
+          ) : null}
+        </TouchableOpacity>
+      );
+    });
+
+  const renderDayPickerDayCards = () =>
+    giorniDisponibili.map((day) => (
+      <DayCard
+        key={day.value}
+        day={day}
+        selected={day.value === data}
+        closed={getDateAvailabilityInfo(effectiveAvailabilitySettings, day.value).closed}
+        past={day.value < today}
+        canChooseDay={canChooseDay}
+        ora={ora}
+        servizio={servizio}
+        effectiveBlockingAppointments={effectiveBlockingAppointments}
+        effectiveServizi={effectiveServizi}
+        setOra={setOra}
+        onSelectDay={handleDayCardPress}
+        getDateAvailabilityInfo={getDateAvailabilityInfo}
+        effectiveAvailabilitySettings={effectiveAvailabilitySettings}
+        tf={tf}
+      />
+    ));
+
   return (
     <KeyboardAvoidingView
       style={styles.container}
@@ -5320,165 +5548,30 @@ export default function ClienteFrontendScreen() {
           <View style={styles.sectionCard}>
             <Text style={styles.sectionEyebrow}>Step 1</Text>
             <Text style={styles.sectionTitle}>{tf('frontend_choose_service')}</Text>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              style={isWeb ? [styles.servicesScrollViewWeb, webHorizontalScrollTouchStyle] : undefined}
-              contentContainerStyle={styles.servicesScrollContent}
-              onScrollBeginDrag={isWeb ? () => lockSelectionTap(220) : undefined}
-              onMomentumScrollBegin={isWeb ? () => lockSelectionTap(220) : undefined}
-            >
-              {sortedFrontendServizi.map((item) => {
-                const selected = item.nome === servizio;
-                const serviceUsesOperators =
-                  getConfiguredOperatorsForFrontendService({
-                    serviceName: item.nome,
-                    services: effectiveServizi,
-                    operators: effectiveOperatori,
-                  }).length > 0;
-                const accent = resolveServiceAccent({
-                  serviceId: item.id,
-                  serviceName: item.nome,
-                  roleName: item.mestiereRichiesto,
-                  serviceColorOverrides: effectiveServiceCardColorOverrides,
-                  roleColorOverrides: effectiveRoleCardColorOverrides,
-                });
-                const showOperatorBadge = serviceUsesOperators;
-                const showSalonBadge = !showOperatorBadge;
-
-                return (
-                  <TouchableOpacity
-                    key={item.id}
-                    style={[
-                      styles.serviceCard,
-                      isWeb && styles.serviceCardWeb,
-                      {
-                        backgroundColor: accent.bg,
-                        borderColor: selected ? '#1E293B' : accent.border,
-                      },
-                      selected && styles.serviceCardActive,
-                    ]}
-                    onPress={() => {
-                      if (shouldIgnoreSelectionTap()) return;
-                      setServizio(item.nome);
-                      if (
-                        ora &&
-                        hasFrontendSlotSelectionConflict({
-                          dateValue: data,
-                          startTime: ora,
-                          serviceName: item.nome,
-                          selectedOperatorId: operatoreId || null,
-                          selectedOperatorName: operatoreNome || null,
-                          operators: effectiveOperatori,
-                          appointments: effectiveBlockingAppointments,
-                          services: effectiveServizi,
-                          settings: effectiveAvailabilitySettings,
-                        })
-                      ) {
-                        setOra('');
-                      }
-                    }}
-                    activeOpacity={0.9}
-                  >
-                    <Text
-                      style={[
-                        styles.serviceCardTitle,
-                        isWeb && styles.serviceCardTitleWeb,
-                        { color: accent.text },
-                      ]}
-                      numberOfLines={3}
-                      ellipsizeMode="clip"
-                      adjustsFontSizeToFit
-                      minimumFontScale={0.62}
-                    >
-                      {item.nome}
-                    </Text>
-                    <View style={[styles.serviceCardMetaRow, isWeb && styles.serviceCardMetaRowWeb]}>
-                      {item.mestiereRichiesto ? (
-                        <View
-                          style={[
-                            styles.serviceRoleBadge,
-                            isWeb && styles.serviceRoleBadgeWeb,
-                            { borderColor: accent.border },
-                          ]}
-                        >
-                          <Text
-                            style={[
-                              styles.serviceRoleBadgeText,
-                              isWeb && styles.serviceRoleBadgeTextWeb,
-                              { color: accent.text },
-                            ]}
-                            numberOfLines={1}
-                            ellipsizeMode="clip"
-                            adjustsFontSizeToFit
-                            minimumFontScale={0.62}
-                          >
-                            {item.mestiereRichiesto}
-                          </Text>
-                        </View>
-                      ) : null}
-                      {showOperatorBadge ? (
-                        <View
-                          style={[
-                            styles.serviceOperatorInlineBadge,
-                            isWeb && styles.serviceOperatorInlineBadgeWeb,
-                            { borderColor: accent.border },
-                          ]}
-                        >
-                          <Ionicons name="person" size={12} color={accent.text} />
-                        </View>
-                      ) : null}
-                      {showSalonBadge ? (
-                        <View style={[styles.serviceSalonInlineBadge, isWeb && styles.serviceSalonInlineBadgeWeb]}>
-                          <Text style={styles.serviceSalonInlineBadgeText}>Salone</Text>
-                        </View>
-                      ) : null}
-                    </View>
-                    <Text
-                      style={[
-                        styles.serviceCardDuration,
-                        isWeb && styles.serviceCardDurationWeb,
-                        { color: accent.text },
-                      ]}
-                      numberOfLines={1}
-                      ellipsizeMode="clip"
-                      adjustsFontSizeToFit
-                      minimumFontScale={0.68}
-                    >
-                      {formatDurationLabel(item.durataMinuti ?? 60)}
-                    </Text>
-                    <Text
-                      style={[
-                        styles.serviceCardPrice,
-                        isWeb && styles.serviceCardPriceWeb,
-                        { color: accent.text },
-                      ]}
-                      numberOfLines={1}
-                      ellipsizeMode="clip"
-                      adjustsFontSizeToFit
-                      minimumFontScale={0.72}
-                    >
-                      € {item.prezzo.toFixed(2)}
-                    </Text>
-                    {selected ? (
-                      <View style={styles.serviceSelectedBadge}>
-                        <Text style={styles.serviceSelectedBadgeText}>Scelto</Text>
-                      </View>
-                    ) : null}
-                    {item.prezzoOriginale && item.prezzoOriginale > item.prezzo ? (
-                      <View style={styles.discountRow}>
-                        <View style={styles.discountBadge}>
-                          <Text style={styles.discountBadgeText}>Sconto</Text>
-                        </View>
-                        <Text style={styles.servicePriceOriginal}>
-                          € {item.prezzoOriginale.toFixed(2)}
-                        </Text>
-                      </View>
-                    ) : null}
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
+            {isWeb ? (
+              <View
+                ref={servicesWebStripRef}
+                style={[
+                  styles.servicesScrollViewWeb,
+                  webHorizontalScrollTouchStyle,
+                  styles.webNativeHorizontalHost,
+                ]}
+                // @ts-expect-error web-only wheel forwarding
+                onWheel={(e: unknown) => applyWebHorizontalStripWheelToHost(servicesWebStripRef, e)}
+              >
+                <View style={[styles.servicesScrollContent, styles.webNativeHorizontalRow]}>
+                  {renderBookingServiceCards()}
+                </View>
+              </View>
+            ) : (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.servicesScrollContent}
+              >
+                {renderBookingServiceCards()}
+              </ScrollView>
+            )}
           </View>
 
           <View style={[styles.sectionCard, !canChooseDay && styles.sectionCardLocked]}>
@@ -5510,74 +5603,78 @@ export default function ClienteFrontendScreen() {
                 pointerEvents="none"
                 style={[styles.dayPickerCenterHalo, isWeb && styles.dayPickerCenterHaloWeb]}
               />
-              <Animated.ScrollView
-                ref={dayPickerRef as never}
-                horizontal
-                bounces={false}
-                alwaysBounceHorizontal={false}
-                decelerationRate={Platform.OS === 'android' ? 0.92 : 'fast'}
-                snapToInterval={activeDayCardStride}
-                snapToOffsets={dayPickerSnapOffsets}
-                snapToAlignment="start"
-                disableIntervalMomentum
-                scrollEventThrottle={16}
-                showsHorizontalScrollIndicator={false}
-                overScrollMode="never"
-                style={isWeb ? [styles.dayPickerScrollWeb, webHorizontalScrollTouchStyle] : undefined}
-                contentContainerStyle={[
-                  styles.dayPickerRow,
-                  isWeb && styles.dayPickerRowWeb,
-                  { paddingHorizontal: dayPickerSideInset },
-                ]}
-                onContentSizeChange={() => {
-                  centerDayInPicker(data || today, false);
-                }}
-                onScroll={(event) => {
-                  lockSelectionTap(220);
-                  if (!isWeb) return;
-                  const offsetX = event.nativeEvent.contentOffset.x;
-                  if (dayPickerScrollSettleTimeoutRef.current) {
-                    clearTimeout(dayPickerScrollSettleTimeoutRef.current);
+              {isWeb ? (
+                <View
+                  ref={dayPickerWebStripRef}
+                  style={[
+                    styles.dayPickerScrollWeb,
+                    webHorizontalScrollTouchStyle,
+                    styles.webNativeHorizontalHost,
+                  ]}
+                  // @ts-expect-error web-only
+                  onWheel={(e: unknown) =>
+                    applyWebHorizontalStripWheelToHost(dayPickerWebStripRef, e)
                   }
-                  dayPickerScrollSettleTimeoutRef.current = setTimeout(() => {
-                    settleDayPickerAtOffset(offsetX);
-                    dayPickerScrollSettleTimeoutRef.current = null;
-                  }, 90);
-                }}
-                onMomentumScrollEnd={(event) => {
-                  lockSelectionTap(160);
-                  settleDayPickerAtOffset(event.nativeEvent.contentOffset.x);
-                }}
-                onScrollEndDrag={
-                  isWeb
-                    ? (event) => {
-                        lockSelectionTap(160);
-                        settleDayPickerAtOffset(event.nativeEvent.contentOffset.x);
-                      }
-                    : undefined
-                }
-                removeClippedSubviews={false}
-              >
-                {giorniDisponibili.map((day) => (
-                  <DayCard
-                    key={day.value}
-                    day={day}
-                    selected={day.value === data}
-                    closed={getDateAvailabilityInfo(effectiveAvailabilitySettings, day.value).closed}
-                    past={day.value < today}
-                    canChooseDay={canChooseDay}
-                    ora={ora}
-                    servizio={servizio}
-                    effectiveBlockingAppointments={effectiveBlockingAppointments}
-                    effectiveServizi={effectiveServizi}
-                    setOra={setOra}
-                    onSelectDay={handleDayCardPress}
-                    getDateAvailabilityInfo={getDateAvailabilityInfo}
-                    effectiveAvailabilitySettings={effectiveAvailabilitySettings}
-                    tf={tf}
-                  />
-                ))}
-              </Animated.ScrollView>
+                  onScroll={(event: NativeSyntheticEvent<NativeScrollEvent>) => {
+                    lockSelectionTap(220);
+                    const offsetX = event.nativeEvent.contentOffset.x;
+                    if (dayPickerScrollSettleTimeoutRef.current) {
+                      clearTimeout(dayPickerScrollSettleTimeoutRef.current);
+                    }
+                    dayPickerScrollSettleTimeoutRef.current = setTimeout(() => {
+                      settleDayPickerAtOffset(offsetX);
+                      dayPickerScrollSettleTimeoutRef.current = null;
+                    }, 90);
+                  }}
+                >
+                  <View
+                    style={[
+                      styles.dayPickerRow,
+                      styles.dayPickerRowWeb,
+                      styles.webNativeHorizontalRow,
+                      { paddingHorizontal: dayPickerSideInset },
+                    ]}
+                    onLayout={() => {
+                      centerDayInPicker(data || today, false);
+                    }}
+                  >
+                    {renderDayPickerDayCards()}
+                  </View>
+                </View>
+              ) : (
+                <Animated.ScrollView
+                  ref={dayPickerRef as never}
+                  horizontal
+                  bounces={false}
+                  alwaysBounceHorizontal={false}
+                  decelerationRate={Platform.OS === 'android' ? 0.92 : 'fast'}
+                  snapToInterval={activeDayCardStride}
+                  snapToOffsets={dayPickerSnapOffsets}
+                  snapToAlignment="start"
+                  disableIntervalMomentum
+                  scrollEventThrottle={16}
+                  showsHorizontalScrollIndicator={false}
+                  overScrollMode="never"
+                  contentContainerStyle={[
+                    styles.dayPickerRow,
+                    isWeb && styles.dayPickerRowWeb,
+                    { paddingHorizontal: dayPickerSideInset },
+                  ]}
+                  onContentSizeChange={() => {
+                    centerDayInPicker(data || today, false);
+                  }}
+                  onScroll={(event) => {
+                    lockSelectionTap(220);
+                  }}
+                  onMomentumScrollEnd={(event) => {
+                    lockSelectionTap(160);
+                    settleDayPickerAtOffset(event.nativeEvent.contentOffset.x);
+                  }}
+                  removeClippedSubviews={false}
+                >
+                  {renderDayPickerDayCards()}
+                </Animated.ScrollView>
+              )}
             </View>
             <Text style={styles.sectionHint}>{formatDateLong(data)}</Text>
           </View>
@@ -7185,6 +7282,19 @@ const styles = StyleSheet.create({
     flexGrow: 0,
     flexShrink: 0,
   },
+  servicesScrollInnerWeb: {
+    width: '100%',
+  },
+  /** Web: real browser overflow-x on a div (RN ScrollView nested in vertical scroll is unreliable). */
+  webNativeHorizontalHost: {
+    overflowX: 'scroll',
+    overflowY: 'hidden',
+  } as ViewStyle,
+  webNativeHorizontalRow: {
+    flexDirection: 'row',
+    flexWrap: 'nowrap',
+    alignItems: 'stretch',
+  },
   servicesScrollContent: {
     paddingHorizontal: 0,
     justifyContent: 'flex-start',
@@ -7236,6 +7346,7 @@ const styles = StyleSheet.create({
     paddingBottom: 18,
     paddingHorizontal: 14,
     marginRight: 12,
+    flexShrink: 0,
   },
   serviceCardActive: {
     borderWidth: 4,
@@ -7414,6 +7525,9 @@ const styles = StyleSheet.create({
     flexGrow: 0,
     flexShrink: 0,
   },
+  dayPickerScrollInnerWeb: {
+    width: '100%',
+  },
   dayPickerCenterHalo: {
     position: 'absolute',
     top: 6,
@@ -7454,6 +7568,7 @@ const styles = StyleSheet.create({
   },
   dayCardWrapWeb: {
     marginRight: 1,
+    flexShrink: 0,
   },
   dayCard: {
     width: DAY_CARD_WIDTH,
