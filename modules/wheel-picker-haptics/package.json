@@ -1,0 +1,7 @@
+{
+  "name": "expo-wheel-picker-haptics",
+  "version": "1.0.0",
+  "description": "Persistent native iOS selection haptics for wheel-style pickers",
+  "main": "src/index.ts",
+  "private": true
+}

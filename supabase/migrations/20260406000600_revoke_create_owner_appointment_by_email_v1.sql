@@ -1,0 +1,1 @@
+revoke execute on function public.create_owner_appointment_by_email_v1(citext, text, text, text, citext, text, text, text, boolean, text, numeric, integer, date, time, text, text) from anon, authenticated;

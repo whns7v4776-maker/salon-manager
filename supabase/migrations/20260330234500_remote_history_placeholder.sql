@@ -1,0 +1,2 @@
+-- Placeholder migration to align local history with the remote Supabase project.
+-- The corresponding migration was already applied remotely before this workspace snapshot.
