@@ -17,7 +17,12 @@ import {
   OperatorAvailabilityRange,
   timeToMinutes,
 } from '../lib/booking';
-import { fetchClientPortalSnapshot, publishClientPortalSnapshot } from '../lib/client-portal';
+import {
+  fetchClientPortalAvailabilitySettings,
+  fetchClientPortalSnapshot,
+  publishClientPortalSnapshot,
+  updateClientPortalAvailabilitySettings,
+} from '../lib/client-portal';
 import { formatCustomerFullNameValue, formatCustomerNamePart } from '../lib/customer-name';
 import { AppLanguage, resolveStoredAppLanguage } from '../lib/i18n';
 import {
@@ -55,6 +60,7 @@ const STORAGE_KEYS = {
   eventi_template: 'salon_manager_eventi_template',
   richieste_prenotazione: 'salon_manager_richieste_prenotazione',
   recently_deleted_appointments: 'salon_manager_recently_deleted_appointments',
+  recently_deleted_customers: 'salon_manager_recently_deleted_customers',
   availability_settings: 'salon_manager_availability_settings',
   operatori: 'salon_manager_operatori',
   macchinari: 'salon_manager_macchinari',
@@ -68,6 +74,8 @@ let devFallbackClientiAfterRefreshCount = 0;
 const RECENTLY_DELETED_APPOINTMENT_GUARD_MS = 600000;
 const RECENTLY_CREATED_APPOINTMENT_GUARD_MS = 30000;
 const RECENTLY_DELETED_CUSTOMER_GUARD_MS = 600000;
+const EXPO_GO_OWNER_LIVE_REFRESH_INTERVAL_MS = 3000;
+const PORTAL_REMOTE_OVERRIDE_GUARD_MS = 5000;
 const DEADLOCK_ERROR_CODE = '40P01';
 const DEADLOCK_RETRY_DELAYS_MS = [120, 300, 700];
 const DEFAULT_PUBLIC_CLIENT_BASE_URL = 'https://salon-manager-puce.vercel.app';
@@ -77,6 +85,16 @@ const normalizeIdentityText = (value?: string | null) => value?.trim().toLowerCa
 const isUuidValue = (value?: string | null) =>
   !!value &&
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+const isLikelyNetworkRequestFailure = (error: unknown) => {
+  const message =
+    typeof error === 'string'
+      ? error
+      : error && typeof error === 'object' && 'message' in error
+        ? String((error as { message?: unknown }).message ?? '')
+        : '';
+
+  return message.trim().toLowerCase().includes('network request failed');
+};
 const normalizeTimeIdentity = (value?: string | null) => {
   const normalized = normalizeIdentityText(value);
   if (!normalized) return '';
@@ -87,6 +105,124 @@ const normalizeTimeIdentity = (value?: string | null) => {
     return normalized;
   }
 };
+const parseIsoTimestampToMs = (value?: string | null) => {
+  const parsed = Date.parse(value ?? '');
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+const buildNextMonotonicIsoTimestamp = (
+  previousValue?: string | null,
+  requestedValue?: string | null
+) => {
+  const previousMs = parseIsoTimestampToMs(previousValue);
+  const requestedMs = parseIsoTimestampToMs(requestedValue);
+  const nextMs = Math.max(Date.now(), requestedMs, previousMs + 1);
+  return new Date(nextMs).toISOString();
+};
+const resolveLatestBooleanByTimestamp = ({
+  localValue,
+  localUpdatedAt,
+  remoteValue,
+  remoteUpdatedAt,
+}: {
+  localValue: boolean | undefined;
+  localUpdatedAt?: string | null;
+  remoteValue: boolean | undefined;
+  remoteUpdatedAt?: string | null;
+}) => {
+  const localTs = parseIsoTimestampToMs(localUpdatedAt);
+  const remoteTs = parseIsoTimestampToMs(remoteUpdatedAt);
+
+  if (remoteTs > localTs) {
+    return {
+      value: remoteValue ?? localValue,
+      updatedAt: remoteUpdatedAt ?? localUpdatedAt ?? undefined,
+      remoteWins: true,
+    };
+  }
+
+  return {
+    value: localValue ?? remoteValue,
+    updatedAt: localUpdatedAt ?? remoteUpdatedAt ?? undefined,
+    remoteWins: false,
+  };
+};
+const resolveLatestGuidedSettingsByTimestamp = ({
+  localSettings,
+  remoteSettings,
+}: {
+  localSettings: AvailabilitySettings;
+  remoteSettings: AvailabilitySettings;
+}) => {
+  const localTs = parseIsoTimestampToMs(localSettings.guidedSlotsUpdatedAt);
+  const remoteTs = parseIsoTimestampToMs(remoteSettings.guidedSlotsUpdatedAt);
+  const remoteWins = remoteTs > localTs;
+
+  return {
+    guidedSlotsEnabled: remoteWins
+      ? remoteSettings.guidedSlotsEnabled
+      : localSettings.guidedSlotsEnabled,
+    guidedSlotsStrategy: remoteWins
+      ? remoteSettings.guidedSlotsStrategy
+      : localSettings.guidedSlotsStrategy,
+    guidedSlotsVisibility: remoteWins
+      ? remoteSettings.guidedSlotsVisibility
+      : localSettings.guidedSlotsVisibility,
+    guidedSlotsUpdatedAt: remoteWins
+      ? remoteSettings.guidedSlotsUpdatedAt ?? localSettings.guidedSlotsUpdatedAt
+      : localSettings.guidedSlotsUpdatedAt ?? remoteSettings.guidedSlotsUpdatedAt,
+  };
+};
+const mergeAvailabilitySettingsWithCriticalTimestamps = (
+  localSettings: AvailabilitySettings,
+  incomingSettings: Partial<AvailabilitySettings> | null | undefined
+) => {
+  const normalizedIncoming = normalizeAvailabilitySettings(incomingSettings);
+  const guidedMerge = resolveLatestGuidedSettingsByTimestamp({
+    localSettings,
+    remoteSettings: normalizedIncoming,
+  });
+
+  return normalizeAvailabilitySettings({
+    ...normalizedIncoming,
+    guidedSlotsEnabled: guidedMerge.guidedSlotsEnabled,
+    guidedSlotsStrategy: guidedMerge.guidedSlotsStrategy,
+    guidedSlotsVisibility: guidedMerge.guidedSlotsVisibility,
+    guidedSlotsUpdatedAt: guidedMerge.guidedSlotsUpdatedAt,
+  });
+};
+const mergeWorkspaceWithCriticalTimestamps = (
+  localWorkspace: SalonWorkspace,
+  incomingWorkspace: Partial<SalonWorkspace> | null | undefined,
+  ownerEmail: string
+) => {
+  const normalizedIncoming = normalizeWorkspace(incomingWorkspace, ownerEmail);
+  const autoAcceptMerge = resolveLatestBooleanByTimestamp({
+    localValue: localWorkspace.autoAcceptBookingRequests,
+    localUpdatedAt: localWorkspace.autoAcceptBookingRequestsUpdatedAt,
+    remoteValue: normalizedIncoming.autoAcceptBookingRequests,
+    remoteUpdatedAt: normalizedIncoming.autoAcceptBookingRequestsUpdatedAt,
+  });
+
+  return normalizeWorkspace(
+    {
+      ...normalizedIncoming,
+      autoAcceptBookingRequests:
+        autoAcceptMerge.value ?? normalizedIncoming.autoAcceptBookingRequests,
+      autoAcceptBookingRequestsUpdatedAt: autoAcceptMerge.updatedAt,
+    },
+    ownerEmail
+  );
+};
+const areAvailabilitySettingsEquivalent = (
+  first: AvailabilitySettings,
+  second: AvailabilitySettings
+) => JSON.stringify(first) === JSON.stringify(second);
+const buildAvailabilitySettingsSyncSignature = (settings: AvailabilitySettings) =>
+  JSON.stringify(normalizeAvailabilitySettings(settings));
+const buildWorkspaceSyncSignature = (workspace: SalonWorkspace) =>
+  JSON.stringify(normalizeWorkspace(workspace, workspace.ownerEmail));
+const PORTAL_CRITICAL_OWNER_TOGGLE_GUARD_MS = PORTAL_REMOTE_OVERRIDE_GUARD_MS * 3;
+const PORTAL_REMOTE_REHYDRATION_SUPPRESS_PUBLISH_MS = 2000;
 const buildAppointmentIdentityKey = ({
   date,
   time,
@@ -111,8 +247,28 @@ const buildAppointmentIdentityKey = ({
     normalizeIdentityText(operatorName),
   ].join('::');
 
-const normalizePhoneForIdentity = (value?: string | null) =>
-  (value ?? '').replace(/\D+/g, '');
+const normalizePhoneForIdentity = (value?: string | null) => {
+  const digitsOnly = (value ?? '').replace(/\D+/g, '');
+  return digitsOnly.length > 10 ? digitsOnly.slice(-10) : digitsOnly;
+};
+const normalizeOptionalBoolean = (value: unknown): boolean | undefined => {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+
+  if (typeof value === 'number') {
+    if (value === 1) return true;
+    if (value === 0) return false;
+  }
+
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (['true', 't', '1', 'yes'].includes(normalized)) return true;
+    if (['false', 'f', '0', 'no'].includes(normalized)) return false;
+  }
+
+  return undefined;
+};
 const formatPushCustomerName = (value?: string | null) =>
   (value ?? '').trim().toLocaleUpperCase('it-IT');
 const scheduleDelayedPushFlush = (delayMs = 1200) => {
@@ -348,18 +504,53 @@ const getBookingRequestPushStatusLabel = (
       ? 'Rifiutata'
       : 'Annullata';
 
+const normalizeBookingRequestDbStatus = (
+  status:
+    | 'Accettata'
+    | 'Rifiutata'
+    | 'Annullata'
+    | 'accepted'
+    | 'rejected'
+    | 'cancelled'
+    | string
+    | null
+    | undefined
+): 'accepted' | 'rejected' | 'cancelled' | null => {
+  const normalized = String(status ?? '')
+    .trim()
+    .toLowerCase();
+
+  switch (normalized) {
+    case 'accettata':
+    case 'accepted':
+      return 'accepted';
+    case 'rifiutata':
+    case 'rejected':
+      return 'rejected';
+    case 'annullata':
+    case 'cancelled':
+      return 'cancelled';
+    default:
+      return null;
+  }
+};
+
 const buildBookingRequestStatusPushCopy = ({
   status,
   serviceName,
+  roleName,
   appointmentDate,
   appointmentTime,
   operatorName,
+  customerName,
 }: {
   status: 'Accettata' | 'Rifiutata' | 'Annullata' | 'accepted' | 'rejected' | 'cancelled';
   serviceName?: string | null;
+  roleName?: string | null;
   appointmentDate?: string | null;
   appointmentTime?: string | null;
   operatorName?: string | null;
+  customerName?: string | null;
 }) => {
   const statusLabel = getBookingRequestPushStatusLabel(status);
   const title =
@@ -369,7 +560,9 @@ const buildBookingRequestStatusPushCopy = ({
         ? 'Prenotazione Rifiutata'
         : 'Prenotazione Annullata';
   const details = [
+    customerName?.trim() ? `Cliente: ${formatPushCustomerName(customerName)}` : null,
     serviceName?.trim() ? `Servizio: ${serviceName.trim()}` : null,
+    roleName?.trim() ? `Mestiere: ${roleName.trim()}` : null,
     formatPushDateTimeLabel(appointmentDate, appointmentTime)
       ? `Appuntamento: ${formatPushDateTimeLabel(appointmentDate, appointmentTime)}`
       : null,
@@ -433,6 +626,35 @@ type OwnerAccount = {
   createdAt: string;
 };
 
+const buildWorkspaceProfileFromOwnerAccount = (
+  account?: OwnerAccount | null
+): Partial<SalonWorkspace> => {
+  if (!account) {
+    return {};
+  }
+
+  const formattedAddress = formatSalonAddress({
+    streetType: '',
+    streetName: account.streetLine.trim().toUpperCase(),
+    streetNumber: '',
+    city: account.city.trim().toUpperCase(),
+    postalCode: account.postalCode.trim(),
+    salonAddress: '',
+  });
+
+  return {
+    salonName: account.salonName.trim(),
+    businessPhone: account.businessPhone.trim(),
+    activityCategory: account.activityCategory.trim().toUpperCase(),
+    streetType: '',
+    streetName: account.streetLine.trim().toUpperCase(),
+    streetNumber: '',
+    city: account.city.trim().toUpperCase(),
+    postalCode: account.postalCode.trim(),
+    salonAddress: formattedAddress,
+  };
+};
+
 type RemoteWorkspaceRow = {
   id: string;
   slug: string;
@@ -458,6 +680,8 @@ type Cliente = {
   annullamentiCount?: number;
   inibito?: boolean;
   maxFutureAppointments?: number | null;
+  maxFutureAppointmentsMode?: 'total_future' | 'monthly' | null;
+  maxDailyAppointments?: number | null;
 };
 
 const normalizeClienti = (items: Cliente[]) =>
@@ -473,6 +697,14 @@ const normalizeClienti = (items: Cliente[]) =>
     maxFutureAppointments:
       typeof item.maxFutureAppointments === 'number' && item.maxFutureAppointments >= 0
         ? item.maxFutureAppointments
+        : null,
+    maxFutureAppointmentsMode:
+      item.maxFutureAppointmentsMode === 'monthly' || item.maxFutureAppointmentsMode === 'total_future'
+        ? item.maxFutureAppointmentsMode
+        : null,
+    maxDailyAppointments:
+      typeof item.maxDailyAppointments === 'number' && item.maxDailyAppointments >= 0
+        ? item.maxDailyAppointments
         : null,
   }));
 
@@ -659,6 +891,62 @@ const mergeClientiCollections = (localItems: Cliente[], remoteItems: Cliente[]) 
   return Array.from(merged.values());
 };
 
+const doesFrontendRequestMatchCliente = (
+  richiesta: Pick<RichiestaPrenotazione, 'nome' | 'cognome' | 'email' | 'telefono'>,
+  cliente: Pick<Cliente, 'nome' | 'email' | 'telefono'>
+) => {
+  const requestEmail = normalizeAccountEmail(richiesta.email);
+  const customerEmail = normalizeAccountEmail(cliente.email);
+  if (requestEmail && customerEmail && requestEmail === customerEmail) {
+    return true;
+  }
+
+  const requestPhone = normalizePhoneForIdentity(richiesta.telefono);
+  const customerPhone = normalizePhoneForIdentity(cliente.telefono);
+  if (requestPhone && customerPhone && requestPhone === customerPhone) {
+    return true;
+  }
+
+  const requestFullName = `${richiesta.nome} ${richiesta.cognome}`.trim();
+  return matchesCustomerDisplayName(cliente.nome, requestFullName);
+};
+
+const enrichClientiWithFrontendRequestSignals = (
+  clientiItems: Cliente[],
+  richiesteItems: RichiestaPrenotazione[]
+) => {
+  const normalizedRichieste = normalizeRichiestePrenotazione(richiesteItems).filter(
+    (item) => (item.origine ?? 'frontend') === 'frontend'
+  );
+
+  return normalizeClienti(clientiItems).map((cliente) => {
+    const matchedRequests = normalizedRichieste.filter((item) =>
+      doesFrontendRequestMatchCliente(item, cliente)
+    );
+
+    if (matchedRequests.length === 0) {
+      return cliente;
+    }
+
+    const cancelledByClienteCount = matchedRequests.filter(
+      (item) => item.stato === 'Annullata' && item.cancellationSource === 'cliente'
+    ).length;
+    const hasUnreadFrontendSignal = matchedRequests.some(
+      (item) =>
+        item.viewedBySalon !== true &&
+        (item.stato === 'In attesa' ||
+          (item.stato === 'Annullata' && item.cancellationSource === 'cliente'))
+    );
+
+    return {
+      ...cliente,
+      fonte: 'frontend' as const,
+      viewedBySalon: hasUnreadFrontendSignal ? false : cliente.viewedBySalon,
+      annullamentiCount: Math.max(cliente.annullamentiCount ?? 0, cancelledByClienteCount),
+    };
+  });
+};
+
 type Appuntamento = {
   id: string;
   data?: string;
@@ -667,6 +955,7 @@ type Appuntamento = {
   servizio: string;
   prezzo: number;
   durataMinuti?: number;
+  mestiereRichiesto?: string;
   operatoreId?: string;
   operatoreNome?: string;
   macchinarioIds?: string[];
@@ -693,6 +982,7 @@ const normalizeAppuntamenti = (items: Appuntamento[]) =>
   items.map((item) => ({
     ...item,
     data: item.data ?? getTodayDateString(),
+    mestiereRichiesto: item.mestiereRichiesto?.trim() ?? '',
     operatoreId: item.operatoreId ?? '',
     operatoreNome: item.operatoreNome ?? '',
     macchinarioIds: normalizeStringIdArray(item.macchinarioIds),
@@ -817,6 +1107,7 @@ type RichiestaPrenotazione = {
   servizio: string;
   prezzo: number;
   durataMinuti?: number;
+  mestiereRichiesto?: string;
   operatoreId?: string;
   operatoreNome?: string;
   macchinarioIds?: string[];
@@ -838,18 +1129,20 @@ type RichiestaPrenotazione = {
 const normalizeRichiestePrenotazione = (items: RichiestaPrenotazione[]) =>
   items.map((item) => ({
     ...item,
+    mestiereRichiesto: item.mestiereRichiesto?.trim() ?? '',
     operatoreId: item.operatoreId ?? '',
     operatoreNome: item.operatoreNome ?? '',
     macchinarioIds: normalizeStringIdArray(item.macchinarioIds),
     macchinarioNomi: normalizeStringIdArray(item.macchinarioNomi),
     origine: item.origine ?? 'frontend',
-    viewedByCliente: item.viewedByCliente ?? item.stato === 'In attesa',
+    viewedByCliente: normalizeOptionalBoolean(item.viewedByCliente) ?? item.stato === 'In attesa',
     viewedBySalon:
-      item.viewedBySalon ??
+      normalizeOptionalBoolean(item.viewedBySalon) ??
       !(item.stato === 'In attesa' || item.stato === 'Annullata'),
     cancellationSource:
       item.stato === 'Annullata'
-        ? item.cancellationSource ?? (item.viewedByCliente === true ? 'cliente' : 'salone')
+        ? item.cancellationSource ??
+          (item.origine === 'backoffice' ? 'salone' : item.viewedBySalon === false ? 'cliente' : 'salone')
         : undefined,
   }));
 
@@ -895,25 +1188,72 @@ type Servizio = {
   macchinarioIds?: string[];
 };
 
-const normalizeServizi = (items: Servizio[]) =>
-  items.map((item) => ({
-    ...item,
-    prezzoOriginale:
-      typeof item.prezzoOriginale === 'number' && item.prezzoOriginale > item.prezzo
-        ? item.prezzoOriginale
-        : undefined,
-    durataMinuti: item.durataMinuti ?? 60,
-    scontoValidoDal:
-      typeof item.scontoValidoDal === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(item.scontoValidoDal)
-        ? item.scontoValidoDal
-        : undefined,
-    scontoValidoAl:
-      typeof item.scontoValidoAl === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(item.scontoValidoAl)
-        ? item.scontoValidoAl
-        : undefined,
-    mestiereRichiesto: item.mestiereRichiesto?.trim() ?? '',
-    macchinarioIds: normalizeStringIdArray(item.macchinarioIds),
-  }));
+const buildSafeEntityId = (prefix: string) =>
+  `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
+const normalizeServiceIdFragment = (value?: string | null) =>
+  (value ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '-')
+    .replace(/[^a-z0-9-]+/g, '')
+    .replace(/-{2,}/g, '-')
+    .replace(/^-+|-+$/g, '');
+
+const buildUniqueServiceId = (
+  item: Servizio,
+  seenIds: Set<string>,
+  duplicateIndex: number
+) => {
+  const rawId = item.id?.trim() || buildSafeEntityId('servizio');
+
+  if (!seenIds.has(rawId)) {
+    seenIds.add(rawId);
+    return rawId;
+  }
+
+  const nameFragment = normalizeServiceIdFragment(item.nome) || 'dup';
+  let candidate = `${rawId}-${nameFragment}`;
+
+  if (duplicateIndex > 0) {
+    candidate = `${candidate}-${duplicateIndex + 1}`;
+  }
+
+  let attempt = 1;
+  while (seenIds.has(candidate)) {
+    attempt += 1;
+    candidate = `${rawId}-${nameFragment}-${duplicateIndex + attempt}`;
+  }
+
+  seenIds.add(candidate);
+  return candidate;
+};
+
+const normalizeServizi = (items: Servizio[]) => {
+  const seenIds = new Set<string>();
+
+  return items
+    .filter((item) => item.nome.trim() !== '' && (item.mestiereRichiesto?.trim() ?? '') !== '')
+    .map((item, index) => ({
+      ...item,
+      id: buildUniqueServiceId(item, seenIds, index),
+      prezzoOriginale:
+        typeof item.prezzoOriginale === 'number' && item.prezzoOriginale > item.prezzo
+          ? item.prezzoOriginale
+          : undefined,
+      durataMinuti: item.durataMinuti ?? 60,
+      scontoValidoDal:
+        typeof item.scontoValidoDal === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(item.scontoValidoDal)
+          ? item.scontoValidoDal
+          : undefined,
+      scontoValidoAl:
+        typeof item.scontoValidoAl === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(item.scontoValidoAl)
+          ? item.scontoValidoAl
+          : undefined,
+      mestiereRichiesto: item.mestiereRichiesto?.trim() ?? '',
+      macchinarioIds: normalizeStringIdArray(item.macchinarioIds),
+    }));
+};
 
 const mergeServiziCollections = (localItems: Servizio[], remoteItems: Servizio[]) => {
   const merged = new Map<string, Servizio>();
@@ -1059,6 +1399,23 @@ const normalizeOperatori = (items: Operatore[]) =>
     availability: normalizeOperatorAvailability(item.availability),
   }));
 
+const preferNonEmptyOperatoriSnapshot = (
+  localItems: Operatore[],
+  remoteItems: Operatore[]
+) => {
+  const normalizedLocal = normalizeOperatori(localItems);
+  const normalizedRemote = normalizeOperatori(remoteItems);
+
+  // Surgical guard: when the owner has just edited operators, the portal snapshot
+  // can briefly lag behind and return an empty array. In that case we keep the
+  // local operator list instead of wiping it from memory.
+  if (normalizedRemote.length === 0 && normalizedLocal.length > 0) {
+    return normalizedLocal;
+  }
+
+  return normalizedRemote;
+};
+
 type Macchinario = {
   id: string;
   nome: string;
@@ -1127,6 +1484,16 @@ type AppContextType = {
   setSalonWorkspace: React.Dispatch<React.SetStateAction<SalonWorkspace>>;
   updateSalonWorkspacePersisted: (
     updater: SalonWorkspace | ((current: SalonWorkspace) => SalonWorkspace)
+  ) => Promise<void>;
+  updateAvailabilitySettingsPersisted: (
+    updater:
+      | AvailabilitySettings
+      | ((current: AvailabilitySettings) => AvailabilitySettings)
+  ) => Promise<void>;
+  updateGuidedSlotsSettingsPersisted: (
+    updater:
+      | AvailabilitySettings
+      | ((current: AvailabilitySettings) => AvailabilitySettings)
   ) => Promise<void>;
   workspaceAccessAllowed: boolean;
   clienti: Cliente[];
@@ -1237,6 +1604,7 @@ type AppContextType = {
     requestId: string;
     email: string;
     telefono: string;
+    requestSnapshot?: RichiestaPrenotazione;
   }) => Promise<{ ok: boolean; error?: string }>;
   cancelOwnerAppointmentForSalon: (params: {
     salonCode: string;
@@ -1272,6 +1640,7 @@ type AppContextType = {
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export function AppProvider({ children }: { children: ReactNode }) {
+  const isExpoGoRuntime = Constants.executionEnvironment === 'storeClient';
   const [appLanguage, setAppLanguage] = useState<AppLanguage>('it');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [ownerPasswordRecoveryActive, setOwnerPasswordRecoveryActive] = useState(false);
@@ -1313,6 +1682,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [hasInitializedAuth, setHasInitializedAuth] = useState(false);
   const [pendingBiometricUnlock, setPendingBiometricUnlock] = useState(false);
   const pendingBiometricUnlockRef = React.useRef(false);
+  const pendingRegistrationOnboardingRef = React.useRef(false);
   const recentlyDeletedAppointmentKeysRef = React.useRef<Map<string, number>>(new Map());
   const recentlyCreatedAppointmentKeysRef = React.useRef<Map<string, number>>(new Map());
   const recentlyMovedAppointmentIdsRef = React.useRef<Map<string, number>>(new Map());
@@ -1320,8 +1690,29 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const previousCustomerIdentityKeysRef = React.useRef<Set<string>>(new Set());
   const portalPublishQueueRef = React.useRef<Promise<void>>(Promise.resolve());
   const portalPublishDebounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const suppressAutoPortalPublishUntilRef = React.useRef(0);
+  const ownerPortalBootstrapReadyRef = React.useRef(false);
   const legacyOperatorBackfillSignatureRef = React.useRef('');
   const salonCapacityBackfillSignatureRef = React.useRef('');
+  const latestSalonWorkspaceRef = React.useRef<SalonWorkspace>(createDefaultWorkspace(''));
+  const latestAvailabilitySettingsRef = React.useRef<AvailabilitySettings>(
+    normalizeAvailabilitySettings()
+  );
+  const latestGuidedSlotsUpdatedAtRef = React.useRef<string | undefined>(undefined);
+  const lastLocalWorkspaceMutationAtRef = React.useRef(0);
+  const lastLocalAvailabilityMutationAtRef = React.useRef(0);
+  const pendingWorkspaceSyncRef = React.useRef<{ signature: string; at: number } | null>(null);
+  const pendingAvailabilitySyncRef = React.useRef<{ signature: string; at: number } | null>(null);
+  const guidedSettingsPersistQueueRef = React.useRef<Promise<void>>(Promise.resolve());
+
+  useEffect(() => {
+    latestSalonWorkspaceRef.current = salonWorkspace;
+  }, [salonWorkspace]);
+
+  useEffect(() => {
+    latestAvailabilitySettingsRef.current = availabilitySettings;
+    latestGuidedSlotsUpdatedAtRef.current = availabilitySettings.guidedSlotsUpdatedAt;
+  }, [availabilitySettings]);
 
   // Ripristina il guard delle cancellazioni dal disco (sopravvive al Fast Refresh di Expo Go)
   useEffect(() => {
@@ -1332,6 +1723,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const now = Date.now();
         const threshold = now - RECENTLY_DELETED_APPOINTMENT_GUARD_MS;
         const map = recentlyDeletedAppointmentKeysRef.current;
+        parsed.forEach(([key, ts]) => {
+          if (ts > threshold) map.set(key, ts);
+        });
+      })
+      .catch(() => null);
+  }, []);
+
+  useEffect(() => {
+    AsyncStorage.getItem(STORAGE_KEYS.recently_deleted_customers)
+      .then((raw) => {
+        if (!raw) return;
+        const parsed = JSON.parse(raw) as [string, number][];
+        const now = Date.now();
+        const threshold = now - RECENTLY_DELETED_CUSTOMER_GUARD_MS;
+        const map = recentlyDeletedCustomerKeysRef.current;
         parsed.forEach(([key, ts]) => {
           if (ts > threshold) map.set(key, ts);
         });
@@ -1365,21 +1771,141 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const fetchPortalSnapshotWithRetry = React.useCallback(
-    (salonCode: string) =>
-      runWithDeadlockRetry(
-        () => fetchClientPortalSnapshot(salonCode),
-        'Caricamento snapshot portale cliente'
-      ),
+    async (salonCode: string) => {
+      try {
+        return await runWithDeadlockRetry(
+          () => fetchClientPortalSnapshot(salonCode),
+          'Caricamento snapshot portale cliente'
+        );
+      } catch (error) {
+        const errorMessage =
+          error instanceof Error ? error.message.trim().toLowerCase() : String(error).trim().toLowerCase();
+
+        if (errorMessage.includes('client_portal_snapshot_timeout')) {
+          console.log('Snapshot portale cliente in timeout, continuo con fallback locale.');
+          return null;
+        }
+
+        throw error;
+      }
+    },
     [runWithDeadlockRetry]
+  );
+
+  const fetchPortalAvailabilitySettingsWithRetry = React.useCallback(
+    async (salonCode: string) => {
+      try {
+        return await runWithDeadlockRetry(
+          () => fetchClientPortalAvailabilitySettings(salonCode),
+          'Caricamento availability portale cliente'
+        );
+      } catch (error) {
+        const errorMessage =
+          error instanceof Error ? error.message.trim().toLowerCase() : String(error).trim().toLowerCase();
+
+        if (errorMessage.includes('client_portal_availability_timeout')) {
+          console.log('Availability portale cliente in timeout, continuo con fallback locale.');
+          return null;
+        }
+
+        throw error;
+      }
+    },
+    [runWithDeadlockRetry]
+  );
+
+  const applyRemoteAvailabilitySettings = React.useCallback(
+    (incomingSettings: Partial<AvailabilitySettings> | null | undefined) => {
+      const normalizedRemoteAvailabilitySettings =
+        mergeAvailabilitySettingsWithCriticalTimestamps(
+          latestAvailabilitySettingsRef.current,
+          incomingSettings
+        );
+
+      if (
+        areAvailabilitySettingsEquivalent(
+          latestAvailabilitySettingsRef.current,
+          normalizedRemoteAvailabilitySettings
+        )
+      ) {
+        pendingAvailabilitySyncRef.current = null;
+        return normalizedRemoteAvailabilitySettings;
+      }
+
+      suppressAutoPortalPublishUntilRef.current =
+        Date.now() + PORTAL_REMOTE_REHYDRATION_SUPPRESS_PUBLISH_MS;
+      pendingAvailabilitySyncRef.current = null;
+      latestAvailabilitySettingsRef.current = normalizedRemoteAvailabilitySettings;
+      setAvailabilitySettings(normalizedRemoteAvailabilitySettings);
+      return normalizedRemoteAvailabilitySettings;
+    },
+    []
   );
 
   const enqueuePortalPublish = React.useCallback(
     async (snapshot: Parameters<typeof publishClientPortalSnapshot>[0]) => {
-      const runTask = () =>
-        runWithDeadlockRetry(
-          () => publishClientPortalSnapshot(snapshot),
+      const runTask = async () => {
+        let effectiveSnapshot = snapshot;
+        const normalizedSalonCode = normalizeSalonCode(snapshot.workspace.salonCode);
+        const shouldPreserveRemoteWorkspaceToggles =
+          Date.now() - lastLocalWorkspaceMutationAtRef.current >=
+          PORTAL_CRITICAL_OWNER_TOGGLE_GUARD_MS;
+        const shouldPreserveRemoteGuidedSettings =
+          Date.now() - lastLocalAvailabilityMutationAtRef.current >=
+          PORTAL_CRITICAL_OWNER_TOGGLE_GUARD_MS;
+
+        if (
+          normalizedSalonCode &&
+          (shouldPreserveRemoteWorkspaceToggles || shouldPreserveRemoteGuidedSettings)
+        ) {
+          try {
+            const [remoteSnapshot, remoteAvailabilitySnapshot] = await Promise.all([
+              fetchClientPortalSnapshot(normalizedSalonCode).catch(() => null),
+              fetchClientPortalAvailabilitySettings(normalizedSalonCode).catch(() => null),
+            ]);
+
+            if (
+              remoteSnapshot &&
+              normalizeAccountEmail(remoteSnapshot.workspace.ownerEmail) ===
+                normalizeAccountEmail(snapshot.workspace.ownerEmail)
+            ) {
+              const remoteWorkspaceNewer =
+                parseIsoTimestampToMs(remoteSnapshot.workspace.autoAcceptBookingRequestsUpdatedAt) >
+                parseIsoTimestampToMs(snapshot.workspace.autoAcceptBookingRequestsUpdatedAt);
+
+              effectiveSnapshot = {
+                ...snapshot,
+                workspace: shouldPreserveRemoteWorkspaceToggles || remoteWorkspaceNewer
+                  ? normalizeWorkspace(
+                      remoteSnapshot.workspace,
+                      snapshot.workspace.ownerEmail
+                    )
+                  : snapshot.workspace,
+                availabilitySettings: mergeAvailabilitySettingsWithCriticalTimestamps(
+                  snapshot.availabilitySettings,
+                  remoteAvailabilitySnapshot?.availabilitySettings ??
+                    remoteSnapshot.availabilitySettings
+                ),
+              };
+            } else if (remoteAvailabilitySnapshot) {
+              effectiveSnapshot = {
+                ...snapshot,
+                availabilitySettings: mergeAvailabilitySettingsWithCriticalTimestamps(
+                  snapshot.availabilitySettings,
+                  remoteAvailabilitySnapshot.availabilitySettings
+                ),
+              };
+            }
+          } catch (error) {
+            console.log('Errore merge toggle critici prima della pubblicazione portale:', error);
+          }
+        }
+
+        return runWithDeadlockRetry(
+          () => publishClientPortalSnapshot(effectiveSnapshot),
           'Pubblicazione portale cliente'
         );
+      };
 
       const queuedTask = portalPublishQueueRef.current.then(runTask, runTask);
       portalPublishQueueRef.current = queuedTask.then(
@@ -1499,6 +2025,47 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
       void AsyncStorage.setItem(
         STORAGE_KEYS.recently_deleted_appointments,
+        JSON.stringify(Array.from(current.entries()))
+      ).catch(() => null);
+    },
+    []
+  );
+
+  const markRecentlyDeletedCustomer = React.useCallback(
+    (customer: { id?: string | null; nome?: string | null; telefono?: string | null; email?: string | null }) => {
+      const current = recentlyDeletedCustomerKeysRef.current;
+      current.set(
+        buildCustomerIdentityKey({
+          id: customer.id?.trim() ?? '',
+          nome: customer.nome?.trim() ?? '',
+          telefono: customer.telefono?.trim() ?? '',
+          email: customer.email?.trim().toLowerCase() ?? '',
+        }),
+        Date.now()
+      );
+
+      void AsyncStorage.setItem(
+        STORAGE_KEYS.recently_deleted_customers,
+        JSON.stringify(Array.from(current.entries()))
+      ).catch(() => null);
+    },
+    []
+  );
+
+  const unmarkRecentlyDeletedCustomer = React.useCallback(
+    (customer: { id?: string | null; nome?: string | null; telefono?: string | null; email?: string | null }) => {
+      const current = recentlyDeletedCustomerKeysRef.current;
+      current.delete(
+        buildCustomerIdentityKey({
+          id: customer.id?.trim() ?? '',
+          nome: customer.nome?.trim() ?? '',
+          telefono: customer.telefono?.trim() ?? '',
+          email: customer.email?.trim().toLowerCase() ?? '',
+        })
+      );
+
+      void AsyncStorage.setItem(
+        STORAGE_KEYS.recently_deleted_customers,
         JSON.stringify(Array.from(current.entries()))
       ).catch(() => null);
     },
@@ -1649,6 +2216,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
     });
 
+    void AsyncStorage.setItem(
+      STORAGE_KEYS.recently_deleted_customers,
+      JSON.stringify(Array.from(deletedKeys.entries()))
+    ).catch(() => null);
+
     previousCustomerIdentityKeysRef.current = currentKeys;
   }, [clienti]);
 
@@ -1701,7 +2273,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
         console.log('Errore lettura workspace salvato:', error);
       }
 
-      const fallbackWorkspace = normalizeWorkspace(storedWorkspace, normalizedEmail);
+      const ownerAccounts = await loadOwnerAccounts();
+      const matchingOwnerAccount =
+        ownerAccounts.find((item) => normalizeAccountEmail(item.email) === normalizedEmail) ?? null;
+      const ownerAccountWorkspaceFallback = buildWorkspaceProfileFromOwnerAccount(
+        matchingOwnerAccount
+      );
+      const fallbackWorkspace = normalizeWorkspace(
+        {
+          ...ownerAccountWorkspaceFallback,
+          ...storedWorkspace,
+        },
+        normalizedEmail
+      );
 
       try {
         const { data, error } = await supabase
@@ -1709,6 +2293,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
           .select(
             'id, slug, salon_name, owner_email, customer_reminder_hours_before, subscription_plan, subscription_status, created_at, updated_at'
           )
+          .eq('owner_email', normalizedEmail)
+          .order('updated_at', { ascending: false })
           .limit(1)
           .maybeSingle();
 
@@ -1721,6 +2307,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const nextWorkspace = remoteWorkspace
           ? normalizeWorkspace(
               {
+                ...ownerAccountWorkspaceFallback,
                 ...storedWorkspace,
                 id: remoteWorkspace.id,
                 salonCode: remoteWorkspace.slug,
@@ -1758,17 +2345,62 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const completeOnboarding = React.useCallback(() => {
+    pendingRegistrationOnboardingRef.current = false;
     setHasCompletedOnboarding(true);
     setShowOnboarding(false);
-  }, []);
+
+    if (!salonAccountEmail) {
+      return;
+    }
+
+    void AsyncStorage.setItem(
+      buildScopedStorageKey(STORAGE_KEYS.onboarding_completed, salonAccountEmail),
+      'true'
+    ).catch(() => undefined);
+  }, [salonAccountEmail]);
 
   const reopenOnboarding = React.useCallback(() => {
+    pendingRegistrationOnboardingRef.current = false;
     setShowOnboarding(true);
   }, []);
 
   React.useEffect(() => {
     pendingBiometricUnlockRef.current = pendingBiometricUnlock;
   }, [pendingBiometricUnlock]);
+
+  React.useEffect(() => {
+    if (
+      !pendingRegistrationOnboardingRef.current ||
+      !isAuthenticated ||
+      !hasInitializedAuth ||
+      !salonAccountEmail ||
+      hasCompletedOnboarding ||
+      showOnboarding
+    ) {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      if (
+        !pendingRegistrationOnboardingRef.current ||
+        hasCompletedOnboarding ||
+        showOnboarding
+      ) {
+        return;
+      }
+
+      setIsLoaded(true);
+      setShowOnboarding(true);
+    }, 650);
+
+    return () => clearTimeout(timer);
+  }, [
+    hasCompletedOnboarding,
+    hasInitializedAuth,
+    isAuthenticated,
+    salonAccountEmail,
+    showOnboarding,
+  ]);
 
   useEffect(() => {
     if (!isLoaded || !salonAccountEmail) return;
@@ -1892,7 +2524,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setAppLanguage(resolveStoredAppLanguage(linguaSalvata));
 
         if (authSessionEmail) {
-          await syncAuthenticatedWorkspace(authSessionEmail, normalizedAccount === authSessionEmail);
+          void syncAuthenticatedWorkspace(
+            authSessionEmail,
+            normalizedAccount === authSessionEmail
+          );
         }
       } catch (error) {
         console.log('Errore caricamento account:', error);
@@ -2087,11 +2722,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
 
       if (!salonAccountEmail) {
+        ownerPortalBootstrapReadyRef.current = false;
         clearRuntimeDataForAccount('');
         setIsLoaded(true);
         return;
       }
 
+      ownerPortalBootstrapReadyRef.current = false;
       setIsLoaded(false);
 
       try {
@@ -2175,6 +2812,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const nextServiceCardOverrides = serviceCardColorsSalvate ? JSON.parse(serviceCardColorsSalvate) : {};
         const nextRoleCardOverrides = roleCardColorsSalvate ? JSON.parse(roleCardColorsSalvate) : {};
 
+        const hasMeaningfulExistingData =
+          nextClienti.length > 0 ||
+          nextAppuntamenti.length > 0 ||
+          nextServizi.length > 0 ||
+          nextOperatori.length > 0 ||
+          nextRichieste.length > 0 ||
+          nextMovimenti.length > 0 ||
+          !!storedWorkspace.salonCode?.trim() ||
+          !!storedWorkspace.salonName?.trim();
+
+        const shouldForceOnboardingCompletedForExistingAccount =
+          onboardingCompletedSalvato == null && hasMeaningfulExistingData;
+
+        const onboardingCompleted =
+          onboardingCompletedSalvato === 'true' || shouldForceOnboardingCompletedForExistingAccount;
+
         const applyLoadedState = ({
           workspace,
           clientiState,
@@ -2196,6 +2849,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
             return;
           }
 
+          suppressAutoPortalPublishUntilRef.current =
+            Date.now() + PORTAL_REMOTE_REHYDRATION_SUPPRESS_PUBLISH_MS;
+
           setSalonWorkspace(workspace);
           setClienti(clientiState);
           setAppuntamenti(appuntamentiState);
@@ -2208,8 +2864,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
           setRichiestePrenotazione(richiesteState);
           setAvailabilitySettings(availabilityState);
           setBiometricEnabled(biometricEnabledSalvato === 'true');
-          setHasCompletedOnboarding(onboardingCompletedSalvato === 'true');
-          setShowOnboarding(onboardingCompletedSalvato !== 'true');
+          setHasCompletedOnboarding(onboardingCompleted);
+          setShowOnboarding(!onboardingCompleted);
           setMessaggioEventoTemplate(nextTemplateEventi);
           setServiceCardColorOverrides(nextServiceCardOverrides);
           setRoleCardColorOverrides(nextRoleCardOverrides);
@@ -2224,10 +2880,37 @@ export function AppProvider({ children }: { children: ReactNode }) {
           richiesteState: nextRichieste,
           availabilityState: nextAvailabilitySettings,
         });
+
+        if (shouldForceOnboardingCompletedForExistingAccount) {
+          void AsyncStorage.setItem(
+            buildScopedStorageKey(STORAGE_KEYS.onboarding_completed, salonAccountEmail),
+            'true'
+          ).catch(() => undefined);
+        }
         setIsLoaded(true);
 
         if (storedWorkspace.salonCode) {
           try {
+            const lightweightSettings = await fetchPortalAvailabilitySettingsWithRetry(
+              storedWorkspace.salonCode
+            );
+
+            if (lightweightSettings) {
+              nextAvailabilitySettings = mergeAvailabilitySettingsWithCriticalTimestamps(
+                nextAvailabilitySettings,
+                lightweightSettings.availabilitySettings
+              );
+              applyLoadedState({
+                workspace: nextWorkspace,
+                clientiState: nextClienti,
+                appuntamentiState: nextAppuntamenti,
+                serviziState: nextServizi,
+                operatoriState: nextOperatori,
+                richiesteState: nextRichieste,
+                availabilityState: nextAvailabilitySettings,
+              });
+            }
+
             const remoteSnapshot = await fetchPortalSnapshotWithRetry(storedWorkspace.salonCode);
 
             if (
@@ -2235,21 +2918,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
               normalizeAccountEmail(remoteSnapshot.workspace.ownerEmail) ===
                 normalizeAccountEmail(salonAccountEmail)
             ) {
-              nextWorkspace = normalizeWorkspace(
+              nextWorkspace = mergeWorkspaceWithCriticalTimestamps(
                 {
                   ...nextWorkspace,
+                  cashSectionDisabled: nextWorkspace.cashSectionDisabled,
+                },
+                {
                   ...remoteSnapshot.workspace,
                   cashSectionDisabled:
-                    nextWorkspace.cashSectionDisabled ?? remoteSnapshot.workspace.cashSectionDisabled,
-                  autoAcceptBookingRequests:
-                    nextWorkspace.autoAcceptBookingRequests ??
-                    remoteSnapshot.workspace.autoAcceptBookingRequests,
+                    remoteSnapshot.workspace.cashSectionDisabled ?? nextWorkspace.cashSectionDisabled,
                 },
                 salonAccountEmail
               );
+              nextRichieste = normalizeRichiestePrenotazione(
+                remoteSnapshot.richiestePrenotazione as RichiestaPrenotazione[]
+              );
               nextClienti = filterRecentlyDeletedCustomers(
-                normalizeClienti(
-                  mergeClientiCollections(nextClienti, remoteSnapshot.clienti as Cliente[])
+                enrichClientiWithFrontendRequestSignals(
+                  mergeClientiCollections(nextClienti, remoteSnapshot.clienti as Cliente[]),
+                  nextRichieste
                 )
               );
               nextAppuntamenti = normalizeAppuntamenti(
@@ -2260,12 +2947,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
               nextServizi = normalizeServizi(
                 mergeServiziCollections(nextServizi, remoteSnapshot.servizi as Servizio[])
               );
-              nextOperatori = normalizeOperatori(remoteSnapshot.operatori as Operatore[]);
-              nextRichieste = normalizeRichiestePrenotazione(
-                remoteSnapshot.richiestePrenotazione as RichiestaPrenotazione[]
+              nextOperatori = preferNonEmptyOperatoriSnapshot(
+                nextOperatori,
+                remoteSnapshot.operatori as Operatore[]
               );
-              nextAvailabilitySettings = normalizeAvailabilitySettings(
-                remoteSnapshot.availabilitySettings
+              nextAvailabilitySettings = mergeAvailabilitySettingsWithCriticalTimestamps(
+                nextAvailabilitySettings,
+                lightweightSettings?.availabilitySettings ?? remoteSnapshot.availabilitySettings
               );
               const mergedServiceCardOverrides = mergeServiceColorOverrideMaps({
                 remoteOverrides: remoteSnapshot.serviceCardColorOverrides ?? {},
@@ -2325,9 +3013,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
   }, [
     clearRuntimeDataForAccount,
+    fetchPortalAvailabilitySettingsWithRetry,
     fetchPortalSnapshotWithRetry,
     filterRecentlyDeletedCustomers,
     hasInitializedAuth,
+    isExpoGoRuntime,
     salonAccountEmail,
   ]);
 
@@ -2336,7 +3026,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [appLanguage]);
 
   useEffect(() => {
-    if (!isLoaded || !isAuthenticated || !hasInitializedAuth || !salonAccountEmail) return;
+    if (
+      !isLoaded ||
+      !isAuthenticated ||
+      !hasInitializedAuth ||
+      !salonAccountEmail
+    )
+      return;
+
+    if (!ownerPortalBootstrapReadyRef.current) {
+      return;
+    }
 
     const normalizedOwnerEmail = normalizeAccountEmail(
       salonWorkspace.ownerEmail || salonAccountEmail
@@ -2356,6 +3056,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
 
     const publishPortalSnapshot = async () => {
+      if (Date.now() < suppressAutoPortalPublishUntilRef.current) {
+        return;
+      }
+
       try {
         const workspaceId = await enqueuePortalPublish({
           workspace: {
@@ -2420,6 +3124,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     salonWorkspace,
     serviceCardColorOverrides,
     servizi,
+    isExpoGoRuntime,
   ]);
 
   useEffect(() => {
@@ -2765,6 +3470,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const updateSalonWorkspacePersisted = React.useCallback(
     async (updater: SalonWorkspace | ((current: SalonWorkspace) => SalonWorkspace)) => {
+      const mutationTimestamp = Date.now();
+      const mutationUpdatedAt = new Date(mutationTimestamp).toISOString();
       let nextWorkspaceSnapshot: SalonWorkspace | null = null;
 
       setSalonWorkspace((current) => {
@@ -2775,10 +3482,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
           {
             ...resolved,
             ownerEmail: salonAccountEmail || resolved.ownerEmail,
-            updatedAt: new Date().toISOString(),
+            updatedAt: mutationUpdatedAt,
           },
           salonAccountEmail || resolved.ownerEmail
         );
+        lastLocalWorkspaceMutationAtRef.current = mutationTimestamp;
+        latestSalonWorkspaceRef.current = normalized;
+        pendingWorkspaceSyncRef.current = {
+          signature: buildWorkspaceSyncSignature(normalized),
+          at: mutationTimestamp,
+        };
         nextWorkspaceSnapshot = normalized;
         return normalized;
       });
@@ -2793,8 +3506,213 @@ export function AppProvider({ children }: { children: ReactNode }) {
       } catch (error) {
         console.log('Errore persistenza workspace immediata:', error);
       }
+
+      if (!nextWorkspaceSnapshot) return;
+      const workspaceSnapshot: SalonWorkspace = nextWorkspaceSnapshot;
+
+      try {
+        const workspaceId = await enqueuePortalPublish({
+          workspace: workspaceSnapshot,
+          clienti: filterRecentlyDeletedCustomers(clienti),
+          appuntamenti,
+          servizi,
+          operatori,
+          richiestePrenotazione,
+          availabilitySettings,
+          serviceCardColorOverrides,
+          roleCardColorOverrides,
+        });
+
+        if (workspaceId && workspaceSnapshot.id !== workspaceId) {
+          setSalonWorkspace((current) => ({ ...current, id: workspaceId }));
+          await AsyncStorage.setItem(
+            buildScopedStorageKey(STORAGE_KEYS.workspace, salonAccountEmail),
+            JSON.stringify({ ...workspaceSnapshot, id: workspaceId })
+          );
+        }
+      } catch (error) {
+        console.log('Errore pubblicazione workspace aggiornata:', error);
+      }
     },
-    [isLoaded, salonAccountEmail]
+    [
+      appuntamenti,
+      availabilitySettings,
+      clienti,
+      enqueuePortalPublish,
+      filterRecentlyDeletedCustomers,
+      isLoaded,
+      operatori,
+      richiestePrenotazione,
+      roleCardColorOverrides,
+      salonAccountEmail,
+      serviceCardColorOverrides,
+      servizi,
+    ]
+  );
+
+  const updateAvailabilitySettingsPersisted = React.useCallback(
+    async (
+      updater:
+        | AvailabilitySettings
+        | ((current: AvailabilitySettings) => AvailabilitySettings)
+    ) => {
+      const mutationTimestamp = Date.now();
+      const mutationUpdatedAt = new Date(mutationTimestamp).toISOString();
+      let nextAvailabilitySnapshot: AvailabilitySettings | null = null;
+      lastLocalAvailabilityMutationAtRef.current = mutationTimestamp;
+
+      setAvailabilitySettings((current) => {
+        const resolved =
+          typeof updater === 'function'
+            ? (updater as (current: AvailabilitySettings) => AvailabilitySettings)(current)
+            : updater;
+        const normalized = normalizeAvailabilitySettings(resolved);
+        latestAvailabilitySettingsRef.current = normalized;
+        pendingAvailabilitySyncRef.current = {
+          signature: buildAvailabilitySettingsSyncSignature(normalized),
+          at: mutationTimestamp,
+        };
+        nextAvailabilitySnapshot = normalized;
+        return normalized;
+      });
+
+      if (!isLoaded || !salonAccountEmail || !nextAvailabilitySnapshot) return;
+      const availabilitySnapshot: AvailabilitySettings = nextAvailabilitySnapshot;
+      const workspaceSnapshot = normalizeWorkspace(
+        {
+          ...latestSalonWorkspaceRef.current,
+          ownerEmail:
+            salonAccountEmail || latestSalonWorkspaceRef.current.ownerEmail,
+          updatedAt: mutationUpdatedAt,
+        },
+        salonAccountEmail || latestSalonWorkspaceRef.current.ownerEmail
+      );
+
+      latestSalonWorkspaceRef.current = workspaceSnapshot;
+      setSalonWorkspace((current) =>
+        current.updatedAt === workspaceSnapshot.updatedAt &&
+        current.id === workspaceSnapshot.id
+          ? current
+          : workspaceSnapshot
+      );
+
+      try {
+        await AsyncStorage.setItem(
+          buildScopedStorageKey(STORAGE_KEYS.availability_settings, salonAccountEmail),
+          JSON.stringify(availabilitySnapshot)
+        );
+      } catch (error) {
+        console.log('Errore persistenza availability immediata:', error);
+      }
+
+      try {
+        await AsyncStorage.setItem(
+          buildScopedStorageKey(STORAGE_KEYS.workspace, salonAccountEmail),
+          JSON.stringify(workspaceSnapshot)
+        );
+      } catch (error) {
+        console.log('Errore persistenza workspace con availability aggiornata:', error);
+      }
+
+      try {
+        const normalizedSalonCode = normalizeSalonCode(
+          workspaceSnapshot.salonCode || latestSalonWorkspaceRef.current.salonCode
+        );
+
+        if (normalizedSalonCode) {
+          try {
+            const updatedAvailabilitySnapshot = await runWithDeadlockRetry(
+              () =>
+                updateClientPortalAvailabilitySettings({
+                  ownerEmail: salonAccountEmail,
+                  salonCode: normalizedSalonCode,
+                  availabilitySettings: availabilitySnapshot,
+                }),
+              'Aggiornamento availability portale cliente'
+            );
+
+            if (updatedAvailabilitySnapshot?.availabilitySettings) {
+              applyRemoteAvailabilitySettings(updatedAvailabilitySnapshot.availabilitySettings);
+            }
+          } catch (error) {
+            console.log('Errore aggiornamento availability dedicata:', error);
+          }
+        }
+
+        const workspaceId = await enqueuePortalPublish({
+          workspace: workspaceSnapshot,
+          clienti: filterRecentlyDeletedCustomers(clienti),
+          appuntamenti,
+          servizi,
+          operatori,
+          richiestePrenotazione,
+          availabilitySettings: availabilitySnapshot,
+          serviceCardColorOverrides,
+          roleCardColorOverrides,
+        });
+
+        if (workspaceId && workspaceSnapshot.id !== workspaceId) {
+          setSalonWorkspace((current) => {
+            const nextWorkspace = { ...current, id: workspaceId };
+            latestSalonWorkspaceRef.current = nextWorkspace;
+            return nextWorkspace;
+          });
+        }
+      } catch (error) {
+        console.log('Errore pubblicazione availability aggiornata:', error);
+      }
+    },
+    [
+      applyRemoteAvailabilitySettings,
+      appuntamenti,
+      clienti,
+      enqueuePortalPublish,
+      filterRecentlyDeletedCustomers,
+      isLoaded,
+      operatori,
+      richiestePrenotazione,
+      roleCardColorOverrides,
+      runWithDeadlockRetry,
+      salonAccountEmail,
+      salonWorkspace,
+      serviceCardColorOverrides,
+      updateClientPortalAvailabilitySettings,
+      servizi,
+    ]
+  );
+
+  const updateGuidedSlotsSettingsPersisted = React.useCallback(
+    async (
+      updater:
+        | AvailabilitySettings
+        | ((current: AvailabilitySettings) => AvailabilitySettings)
+    ) => {
+      const mutationTimestamp = Date.now();
+      const mutationUpdatedAt = new Date(mutationTimestamp).toISOString();
+      lastLocalAvailabilityMutationAtRef.current = mutationTimestamp;
+      const currentAvailabilitySnapshot = latestAvailabilitySettingsRef.current;
+      const resolved =
+        typeof updater === 'function'
+          ? (updater as (current: AvailabilitySettings) => AvailabilitySettings)(
+              currentAvailabilitySnapshot
+            )
+          : updater;
+      const guidedSlotsUpdatedAt = buildNextMonotonicIsoTimestamp(
+        latestGuidedSlotsUpdatedAtRef.current,
+        resolved.guidedSlotsUpdatedAt ?? mutationUpdatedAt
+      );
+      const availabilitySnapshot = normalizeAvailabilitySettings({
+        ...resolved,
+        guidedSlotsUpdatedAt,
+      });
+
+      latestAvailabilitySettingsRef.current = availabilitySnapshot;
+      latestGuidedSlotsUpdatedAtRef.current = guidedSlotsUpdatedAt;
+      await updateAvailabilitySettingsPersisted(availabilitySnapshot);
+    },
+    [
+      updateAvailabilitySettingsPersisted,
+    ]
   );
 
   const switchSalonAccount = async (email: string) => {
@@ -2930,14 +3848,38 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const localAccount =
       accounts.find((item) => normalizeAccountEmail(item.email) === normalizedEmail) ?? null;
     const storedWorkspace = await loadStoredWorkspaceForOwner(normalizedEmail);
+    let remoteWorkspaceFallback: RemoteWorkspaceRow | null = null;
+
+    if (!storedWorkspace?.salonName?.trim()) {
+      try {
+        const { data, error } = await supabase
+          .from('workspaces')
+          .select(
+            'id, slug, salon_name, owner_email, customer_reminder_hours_before, subscription_plan, subscription_status, created_at, updated_at'
+          )
+          .eq('owner_email', normalizedEmail)
+          .order('updated_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (error) {
+          throw error;
+        }
+
+        remoteWorkspaceFallback = (data ?? null) as RemoteWorkspaceRow | null;
+      } catch (error) {
+        console.log('Errore recupero workspace remoto per bootstrap owner:', error);
+      }
+    }
 
     const salonName =
       localAccount?.salonName.trim() ||
+      remoteWorkspaceFallback?.salon_name?.trim() ||
       storedWorkspace?.salonName.trim() ||
       resolveSalonDisplayName({
-        salonName: storedWorkspace?.salonName,
+        salonName: remoteWorkspaceFallback?.salon_name ?? storedWorkspace?.salonName,
         activityCategory: storedWorkspace?.activityCategory,
-        salonCode: storedWorkspace?.salonCode,
+        salonCode: remoteWorkspaceFallback?.slug ?? storedWorkspace?.salonCode,
         ownerEmail: normalizedEmail,
       }).trim();
 
@@ -2951,10 +3893,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       'Titolare';
     const lastName = localAccount?.lastName.trim() || 'Salon';
     const businessPhone =
-      localAccount?.businessPhone.trim() || storedWorkspace?.businessPhone.trim() || null;
+      localAccount?.businessPhone.trim() ||
+      storedWorkspace?.businessPhone.trim() ||
+      null;
     const ownerPhone = businessPhone;
     const salonCode = normalizeSalonCode(
-      storedWorkspace?.salonCode || buildSalonCode(salonName, normalizedEmail)
+      remoteWorkspaceFallback?.slug ||
+      storedWorkspace?.salonCode ||
+      buildSalonCode(salonName, normalizedEmail)
     );
 
     const { error } = await supabase.rpc('bootstrap_owner_account', {
@@ -3354,10 +4300,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
         await AsyncStorage.setItem(STORAGE_KEYS.owner_session, authenticatedEmail);
         await switchSalonAccount(authenticatedEmail);
-        await syncAuthenticatedWorkspace(authenticatedEmail);
         await storeBiometricCredentials(authenticatedEmail, normalizedPassword);
         setPendingBiometricUnlock(false);
         setIsAuthenticated(true);
+        void syncAuthenticatedWorkspace(authenticatedEmail);
         return { ok: true };
       }
 
@@ -3412,10 +4358,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
       await AsyncStorage.setItem(STORAGE_KEYS.owner_session, authenticatedEmail);
       await switchSalonAccount(authenticatedEmail);
-      await syncAuthenticatedWorkspace(authenticatedEmail);
       await storeBiometricCredentials(authenticatedEmail, normalizedPassword);
       setPendingBiometricUnlock(false);
       setIsAuthenticated(true);
+      void syncAuthenticatedWorkspace(authenticatedEmail);
       return { ok: true };
     }
 
@@ -3461,9 +4407,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (sessionEmail && sessionEmail === normalizedEmail) {
       await AsyncStorage.setItem(STORAGE_KEYS.owner_session, normalizedEmail);
       await switchSalonAccount(normalizedEmail);
-      await syncAuthenticatedWorkspace(normalizedEmail);
       setPendingBiometricUnlock(true);
       setIsAuthenticated(true);
+      void syncAuthenticatedWorkspace(normalizedEmail);
       return { ok: true };
     }
 
@@ -3559,34 +4505,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       accounts.find((item) => item.email === normalizedEmail) ?? null;
 
     if (existingAccount) {
-      const existingPassword = (await getOwnerPassword(normalizedEmail))?.trim() ?? '';
-      if (existingPassword !== normalizedPassword) {
-        return {
-          ok: false,
-          error:
-            'Questo account esiste gia su questo dispositivo. Usa la password gia registrata oppure entra da Accedi.',
-        };
-      }
-
-      const backendConnectionResult = await connectLocalOwnerAccountToBackend(
-        existingAccount,
-        normalizedEmail
-      );
-      if (!backendConnectionResult.ok) {
-        return { ok: false, error: backendConnectionResult.error };
-      }
-
-      const authenticatedEmail = normalizeAccountEmail(
-        backendConnectionResult.email ?? normalizedEmail
-      );
-
-      await AsyncStorage.setItem(STORAGE_KEYS.owner_session, authenticatedEmail);
-      await switchSalonAccount(authenticatedEmail);
-      await syncAuthenticatedWorkspace(authenticatedEmail);
-      await storeBiometricCredentials(authenticatedEmail, normalizedPassword);
-      setPendingBiometricUnlock(false);
-      setIsAuthenticated(true);
-      return { ok: true, email: authenticatedEmail };
+      return {
+        ok: false,
+        error: 'Account mail gia registrato. Inserire una nuova mail.',
+      };
     }
 
     const nextAccount: OwnerAccount = {
@@ -3696,10 +4618,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       let resolvedUser = signUpData.user ?? null;
 
       if (signUpError) {
-        if (
-          isSupabaseAlreadyRegisteredError(signUpError.message) ||
-          isSupabaseAuthRateLimitError(signUpError.message)
-        ) {
+        if (isSupabaseAlreadyRegisteredError(signUpError.message)) {
+          return {
+            ok: false,
+            error: 'Account mail gia registrato. Inserire una nuova mail.',
+          };
+        }
+
+        if (isSupabaseAuthRateLimitError(signUpError.message)) {
           const { data: retryLoginData, error: retryLoginError } =
             await supabase.auth.signInWithPassword({
               email: normalizedEmail,
@@ -3773,7 +4699,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     await persistLocalOwnerRegistrationState(authenticatedEmail);
     await AsyncStorage.setItem(STORAGE_KEYS.owner_session, authenticatedEmail);
     await switchSalonAccount(authenticatedEmail);
-    await syncAuthenticatedWorkspace(authenticatedEmail);
+    pendingRegistrationOnboardingRef.current = true;
+    setHasCompletedOnboarding(false);
+    setShowOnboarding(true);
+    setIsLoaded(true);
     await storeBiometricCredentials(authenticatedEmail, normalizedPassword);
     setPendingBiometricUnlock(false);
     setIsAuthenticated(true);
@@ -3848,7 +4777,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
       if (authenticatedEmail) {
         const accounts = await loadOwnerAccounts();
-      const nextAccounts = accounts.map((item) =>
+        const nextAccounts = accounts.map((item) =>
           normalizeAccountEmail(item.email) === authenticatedEmail
             ? {
                 ...item,
@@ -3868,6 +4797,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
     } catch (storageError) {
       console.log('Errore riallineamento password proprietario locale:', storageError);
+    }
+
+    try {
+      await supabase.auth.signOut();
+    } catch (error) {
+      console.log('Errore chiusura sessione recovery proprietario:', error);
     }
 
     setOwnerLocalRecoveryEmail('');
@@ -4011,12 +4946,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const matchingCurrentCustomers = normalizeClienti(clienti).filter((item) =>
       matchesCustomerIdentity(item, targetIdentity)
     );
-    const deletedCustomerKeys = recentlyDeletedCustomerKeysRef.current;
 
     matchingCurrentCustomers.forEach((item) => {
-      deletedCustomerKeys.set(buildCustomerIdentityKey(item), Date.now());
+      markRecentlyDeletedCustomer(item);
     });
-    deletedCustomerKeys.set(buildCustomerIdentityKey(targetIdentity), Date.now());
+    markRecentlyDeletedCustomer(targetIdentity);
 
     setClienti((current) =>
       current.filter((item) => !matchesCustomerIdentity(item, targetIdentity))
@@ -4037,6 +4971,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     const ownerSessionResult = await ensureRealtimeOwnerSession();
     if (!ownerSessionResult.ok) {
+      matchingCurrentCustomers.forEach((item) => {
+        unmarkRecentlyDeletedCustomer(item);
+      });
+      unmarkRecentlyDeletedCustomer(targetIdentity);
       return {
         ok: false as const,
         error: 'Sessione proprietario scaduta. Rientra nel salone e riprova.',
@@ -4051,6 +4989,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
       if (error) {
         console.log('Errore eliminazione cliente backend:', error);
+        if (isLikelyNetworkRequestFailure(error)) {
+          return { ok: true as const };
+        }
+        matchingCurrentCustomers.forEach((item) => {
+          unmarkRecentlyDeletedCustomer(item);
+        });
+        unmarkRecentlyDeletedCustomer(targetIdentity);
         return {
           ok: false as const,
           error: error.message?.trim() || 'Non sono riuscito a eliminare il cliente.',
@@ -4060,6 +5005,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return { ok: true as const };
     } catch (error) {
       console.log('Errore eliminazione cliente backend:', error);
+      if (isLikelyNetworkRequestFailure(error)) {
+        return { ok: true as const };
+      }
+      matchingCurrentCustomers.forEach((item) => {
+        unmarkRecentlyDeletedCustomer(item);
+      });
+      unmarkRecentlyDeletedCustomer(targetIdentity);
       return {
         ok: false as const,
         error: 'Non sono riuscito a eliminare il cliente.',
@@ -4078,9 +5030,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (remoteSnapshot) {
         const isCurrentWorkspaceSalon =
           normalizedCode === normalizeSalonCode(salonWorkspace.salonCode);
+        const normalizedRemoteRequests = normalizeRichiestePrenotazione(
+          remoteSnapshot.richiestePrenotazione as RichiestaPrenotazione[]
+        );
+        const normalizedRemoteClienti = enrichClientiWithFrontendRequestSignals(
+          remoteSnapshot.clienti as Cliente[],
+          normalizedRemoteRequests
+        );
         const normalizedRemoteAppointments = normalizeAppuntamenti(
           remoteSnapshot.appuntamenti as Appuntamento[]
         );
+
+        const hasFreshLocalAvailabilityMutation =
+          Date.now() - lastLocalAvailabilityMutationAtRef.current <
+          PORTAL_REMOTE_OVERRIDE_GUARD_MS;
 
         return {
           workspace: isCurrentWorkspaceSalon
@@ -4089,17 +5052,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
                   ...salonWorkspace,
                   ...remoteSnapshot.workspace,
                   cashSectionDisabled:
-                    salonWorkspace.cashSectionDisabled ?? remoteSnapshot.workspace.cashSectionDisabled,
+                    remoteSnapshot.workspace.cashSectionDisabled ?? salonWorkspace.cashSectionDisabled,
                   autoAcceptBookingRequests:
-                    salonWorkspace.autoAcceptBookingRequests ??
-                    remoteSnapshot.workspace.autoAcceptBookingRequests,
+                    remoteSnapshot.workspace.autoAcceptBookingRequests ??
+                    salonWorkspace.autoAcceptBookingRequests,
                 },
                 salonWorkspace.ownerEmail
               )
             : remoteSnapshot.workspace,
           clienti: isCurrentWorkspaceSalon
-            ? filterRecentlyDeletedCustomers(normalizeClienti(remoteSnapshot.clienti as Cliente[]))
-            : normalizeClienti(remoteSnapshot.clienti as Cliente[]),
+            ? filterRecentlyDeletedCustomers(normalizedRemoteClienti)
+            : normalizedRemoteClienti,
           appuntamenti: isCurrentWorkspaceSalon
             ? filterRecentlyDeletedAppointments(
                 normalizeAppuntamenti(
@@ -4116,10 +5079,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
             : normalizedRemoteAppointments,
           servizi: normalizeServizi(remoteSnapshot.servizi as Servizio[]),
           operatori: normalizeOperatori(remoteSnapshot.operatori as Operatore[]),
-          richiestePrenotazione: normalizeRichiestePrenotazione(
-            remoteSnapshot.richiestePrenotazione as RichiestaPrenotazione[]
-          ),
-          availabilitySettings: normalizeAvailabilitySettings(remoteSnapshot.availabilitySettings),
+          richiestePrenotazione: normalizedRemoteRequests,
+          availabilitySettings: hasFreshLocalAvailabilityMutation
+            ? mergeAvailabilitySettingsWithCriticalTimestamps(
+                availabilitySettings,
+                remoteSnapshot.availabilitySettings
+              )
+            : normalizeAvailabilitySettings(remoteSnapshot.availabilitySettings),
           serviceCardColorOverrides: remoteSnapshot.serviceCardColorOverrides ?? {},
           roleCardColorOverrides: remoteSnapshot.roleCardColorOverrides ?? {},
         };
@@ -4156,6 +5122,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
 
     const normalizedSalonCode = normalizeSalonCode(salonWorkspace.salonCode);
+    const ownerWorkspaceId = salonWorkspace.id?.trim() ?? '';
     if (!normalizedSalonCode) {
       return;
     }
@@ -4163,30 +5130,130 @@ export function AppProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
 
     const refreshOwnerFromPortal = async () => {
-      const remoteSnapshot = await fetchPortalSnapshotWithRetry(normalizedSalonCode);
-      if (!remoteSnapshot || cancelled) {
+      const lightweightSettings =
+        await fetchPortalAvailabilitySettingsWithRetry(normalizedSalonCode);
+
+      if (cancelled) {
         return;
       }
+
+      if (lightweightSettings) {
+        applyRemoteAvailabilitySettings(lightweightSettings.availabilitySettings);
+      }
+
+      const remoteSnapshot = await fetchPortalSnapshotWithRetry(normalizedSalonCode);
+      if (cancelled) {
+        return;
+      }
+
+      if (!remoteSnapshot) {
+        ownerPortalBootstrapReadyRef.current = true;
+        if (!lightweightSettings || cancelled) {
+          return;
+        }
+        return;
+      }
+
+      const currentWorkspace = latestSalonWorkspaceRef.current;
+      const currentAvailabilitySettings = latestAvailabilitySettingsRef.current;
 
       const normalizedRemoteAppointments = normalizeAppuntamenti(
         remoteSnapshot.appuntamenti as Appuntamento[]
       );
-      const refreshedWorkspace = normalizeWorkspace(
+      const normalizedRemoteRequests = normalizeRichiestePrenotazione(
+        remoteSnapshot.richiestePrenotazione as RichiestaPrenotazione[]
+      );
+      const refreshedWorkspace = mergeWorkspaceWithCriticalTimestamps(
         {
-          ...salonWorkspace,
+          ...currentWorkspace,
+          cashSectionDisabled: currentWorkspace.cashSectionDisabled,
+        },
+        {
           ...remoteSnapshot.workspace,
           cashSectionDisabled:
-            salonWorkspace.cashSectionDisabled ?? remoteSnapshot.workspace.cashSectionDisabled,
-          autoAcceptBookingRequests:
-            salonWorkspace.autoAcceptBookingRequests ??
-            remoteSnapshot.workspace.autoAcceptBookingRequests,
+            remoteSnapshot.workspace.cashSectionDisabled ?? currentWorkspace.cashSectionDisabled,
         },
-        salonWorkspace.ownerEmail
+        currentWorkspace.ownerEmail
       );
-      setSalonWorkspace(refreshedWorkspace);
+      const remoteWorkspaceUpdatedAtMs = parseIsoTimestampToMs(refreshedWorkspace.updatedAt);
+      const localWorkspaceUpdatedAtMs = parseIsoTimestampToMs(currentWorkspace.updatedAt);
+      const hasRecentLocalWorkspaceMutation =
+        Date.now() - lastLocalWorkspaceMutationAtRef.current < PORTAL_REMOTE_OVERRIDE_GUARD_MS;
+      const hasRecentLocalAvailabilityMutation =
+        Date.now() - lastLocalAvailabilityMutationAtRef.current < PORTAL_REMOTE_OVERRIDE_GUARD_MS;
+      const remoteWorkspaceSignature = buildWorkspaceSyncSignature(refreshedWorkspace);
+      const normalizedRemoteAvailabilitySettings = mergeAvailabilitySettingsWithCriticalTimestamps(
+        currentAvailabilitySettings,
+        lightweightSettings?.availabilitySettings ?? remoteSnapshot.availabilitySettings
+      );
+      const remoteAvailabilitySignature = buildAvailabilitySettingsSyncSignature(
+        normalizedRemoteAvailabilitySettings
+      );
+      const pendingWorkspaceSync = pendingWorkspaceSyncRef.current;
+      const pendingAvailabilitySync = pendingAvailabilitySyncRef.current;
+      const pendingWorkspaceStillFresh =
+        !!pendingWorkspaceSync &&
+        Date.now() - pendingWorkspaceSync.at < PORTAL_REMOTE_OVERRIDE_GUARD_MS * 3;
+      const pendingAvailabilityStillFresh =
+        !!pendingAvailabilitySync &&
+        Date.now() - pendingAvailabilitySync.at < PORTAL_REMOTE_OVERRIDE_GUARD_MS * 3;
+      const shouldRespectPendingWorkspace =
+        hasRecentLocalWorkspaceMutation && pendingWorkspaceStillFresh;
+      const shouldRespectPendingAvailability =
+        hasRecentLocalAvailabilityMutation && pendingAvailabilityStillFresh;
+      const remoteWorkspaceMatchesPending =
+        !!pendingWorkspaceSync && pendingWorkspaceSync.signature === remoteWorkspaceSignature;
+      const remoteAvailabilityMatchesPending =
+        !!pendingAvailabilitySync &&
+        pendingAvailabilitySync.signature === remoteAvailabilitySignature;
+      const remoteAutoAcceptTimestampWins =
+        parseIsoTimestampToMs(refreshedWorkspace.autoAcceptBookingRequestsUpdatedAt) >
+        parseIsoTimestampToMs(currentWorkspace.autoAcceptBookingRequestsUpdatedAt);
+      const remoteGuidedTimestampWins =
+        parseIsoTimestampToMs(normalizedRemoteAvailabilitySettings.guidedSlotsUpdatedAt) >
+        parseIsoTimestampToMs(currentAvailabilitySettings.guidedSlotsUpdatedAt);
+      const shouldApplyRemoteWorkspace =
+        (!shouldRespectPendingWorkspace ||
+          remoteWorkspaceMatchesPending ||
+          remoteAutoAcceptTimestampWins) &&
+        (!hasRecentLocalWorkspaceMutation ||
+          remoteAutoAcceptTimestampWins ||
+          !localWorkspaceUpdatedAtMs ||
+          !remoteWorkspaceUpdatedAtMs ||
+          remoteWorkspaceUpdatedAtMs >= localWorkspaceUpdatedAtMs);
+      const shouldApplyRemoteAvailability = !!lightweightSettings || (
+        (!shouldRespectPendingAvailability ||
+          remoteAvailabilityMatchesPending ||
+          remoteGuidedTimestampWins) &&
+        (shouldApplyRemoteWorkspace ||
+          remoteGuidedTimestampWins ||
+          !hasRecentLocalAvailabilityMutation ||
+          (remoteWorkspaceUpdatedAtMs > 0 && remoteWorkspaceUpdatedAtMs >= localWorkspaceUpdatedAtMs))
+      );
+
+      if (remoteWorkspaceMatchesPending || !pendingWorkspaceStillFresh) {
+        pendingWorkspaceSyncRef.current = null;
+      }
+      if (remoteAvailabilityMatchesPending || !pendingAvailabilityStillFresh) {
+        pendingAvailabilitySyncRef.current = null;
+      }
+
+      if (shouldApplyRemoteWorkspace) {
+        suppressAutoPortalPublishUntilRef.current =
+          Date.now() + PORTAL_REMOTE_REHYDRATION_SUPPRESS_PUBLISH_MS;
+        latestSalonWorkspaceRef.current = refreshedWorkspace;
+        setSalonWorkspace((current) =>
+          JSON.stringify(current) === JSON.stringify(refreshedWorkspace)
+            ? current
+            : refreshedWorkspace
+        );
+      }
       setClienti((current) =>
         filterRecentlyDeletedCustomers(
-          mergeClientiCollections(current, remoteSnapshot.clienti as Cliente[])
+          enrichClientiWithFrontendRequestSignals(
+            mergeClientiCollections(current, remoteSnapshot.clienti as Cliente[]),
+            normalizedRemoteRequests
+          )
         )
       );
       setAppuntamenti((current) =>
@@ -4204,13 +5271,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
           mergeServiziCollections(current, remoteSnapshot.servizi as Servizio[])
         )
       );
-      setOperatori(normalizeOperatori(remoteSnapshot.operatori as Operatore[]));
-      setRichiestePrenotazione(
-        normalizeRichiestePrenotazione(
-          remoteSnapshot.richiestePrenotazione as RichiestaPrenotazione[]
+      setOperatori((current) =>
+        preferNonEmptyOperatoriSnapshot(
+          current,
+          remoteSnapshot.operatori as Operatore[]
         )
       );
-      setAvailabilitySettings(normalizeAvailabilitySettings(remoteSnapshot.availabilitySettings));
+      setRichiestePrenotazione(normalizedRemoteRequests);
+      if (shouldApplyRemoteAvailability) {
+        applyRemoteAvailabilitySettings(normalizedRemoteAvailabilitySettings);
+      }
       setServiceCardColorOverrides((current) =>
         mergeServiceColorOverrideMaps({
           remoteOverrides: remoteSnapshot.serviceCardColorOverrides ?? {},
@@ -4226,7 +5296,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
           localOverrides: current,
         })
       );
+      ownerPortalBootstrapReadyRef.current = true;
     };
+
+    void refreshOwnerFromPortal();
 
     const channel = supabase
       .channel(`owner-portal-live:${normalizedSalonCode}`)
@@ -4242,7 +5315,39 @@ export function AppProvider({ children }: { children: ReactNode }) {
           void refreshOwnerFromPortal();
         }
       )
-      .subscribe();
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'booking_requests',
+          filter: isUuidValue(ownerWorkspaceId) ? `workspace_id=eq.${ownerWorkspaceId}` : 'workspace_id=is.null',
+        },
+        () => {
+          void refreshOwnerFromPortal();
+        }
+      )
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          void refreshOwnerFromPortal();
+          return;
+        }
+
+        if (
+          isExpoGoRuntime &&
+          (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED')
+        ) {
+          void refreshOwnerFromPortal();
+        }
+      });
+
+    const expoGoFallbackInterval = isExpoGoRuntime
+      ? setInterval(() => {
+          if (AppState.currentState === 'active') {
+            void refreshOwnerFromPortal();
+          }
+        }, EXPO_GO_OWNER_LIVE_REFRESH_INTERVAL_MS)
+      : null;
 
     const subscription = AppState.addEventListener('change', (nextState) => {
       if (nextState === 'active') {
@@ -4252,20 +5357,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     return () => {
       cancelled = true;
+      if (expoGoFallbackInterval) {
+        clearInterval(expoGoFallbackInterval);
+      }
       subscription.remove();
       void supabase.removeChannel(channel);
     };
-  }, [
+    }, [
+    applyRemoteAvailabilitySettings,
     fetchPortalSnapshotWithRetry,
+    fetchPortalAvailabilitySettingsWithRetry,
     filterRecentlyDeletedAppointments,
     filterRecentlyDeletedCustomers,
     hasInitializedAuth,
     isAuthenticated,
+    isExpoGoRuntime,
     salonAccountEmail,
     salonWorkspace.ownerEmail,
     salonWorkspace.salonCode,
-    salonWorkspace.cashSectionDisabled,
-    salonWorkspace.autoAcceptBookingRequests,
+    salonWorkspace.id,
   ]);
 
   const upsertFrontendCustomerForSalon = async ({
@@ -4376,20 +5486,33 @@ export function AppProvider({ children }: { children: ReactNode }) {
           nota: '',
           fonte: 'frontend' as const,
           viewedBySalon: false,
+          annullamentiCount: 0,
+          inibito: false,
+          maxFutureAppointments: 4,
+          maxFutureAppointmentsMode: 'monthly' as const,
+          maxDailyAppointments: 1,
         },
         ...resolved.clienti,
       ];
 
-      const workspaceId = await enqueuePortalPublish({
-        workspace: resolved.workspace,
-        clienti: nextCustomers as unknown as Array<Record<string, unknown>>,
-        appuntamenti: resolved.appuntamenti as unknown as Array<Record<string, unknown>>,
-        servizi: resolved.servizi as unknown as Array<Record<string, unknown>>,
-        operatori: resolved.operatori as unknown as Array<Record<string, unknown>>,
-        richiestePrenotazione:
-          resolved.richiestePrenotazione as unknown as Array<Record<string, unknown>>,
-        availabilitySettings: resolved.availabilitySettings,
-      });
+      let workspaceId: string | null = null;
+      try {
+        workspaceId = await enqueuePortalPublish({
+          workspace: resolved.workspace,
+          clienti: nextCustomers as unknown as Array<Record<string, unknown>>,
+          appuntamenti: resolved.appuntamenti as unknown as Array<Record<string, unknown>>,
+          servizi: resolved.servizi as unknown as Array<Record<string, unknown>>,
+          operatori: resolved.operatori as unknown as Array<Record<string, unknown>>,
+          richiestePrenotazione:
+            resolved.richiestePrenotazione as unknown as Array<Record<string, unknown>>,
+          availabilitySettings: resolved.availabilitySettings,
+        });
+      } catch (portalPublishError) {
+        console.log(
+          'Pubblicazione portale cliente non riuscita dopo registrazione frontend, ma cliente creato correttamente:',
+          portalPublishError
+        );
+      }
 
       if (normalizedCode === salonWorkspace.salonCode && resolved.workspace.ownerEmail === salonAccountEmail) {
         setClienti(nextCustomers);
@@ -4471,6 +5594,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
         if (errorText.includes('max_future_appointments_reached')) {
           return { ok: false, error: 'max_future_appointments_reached', detail };
+        }
+        if (errorText.includes('max_daily_appointments_reached')) {
+          return { ok: false, error: 'max_daily_appointments_reached', detail };
         }
         if (errorText.includes('service_name_required')) {
           return { ok: false, error: 'service_required', detail };
@@ -4628,6 +5754,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
         const normalizedCustomerName = customerName.trim();
         const normalizedServiceName = serviceName.trim();
+        const persistedServiceRole =
+          resolved.servizi.find(
+            (item) => item.nome.trim().toLowerCase() === normalizedServiceName.toLowerCase()
+          )?.mestiereRichiesto?.trim() ?? '';
         const normalizedOperatorName = operatorName?.trim() ?? '';
         unmarkRecentlyDeletedAppointment({
           date: dateValue,
@@ -4646,6 +5776,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             servizio: normalizedServiceName,
             prezzo: priceValue,
             durataMinuti: durationMinutes,
+            mestiereRichiesto: persistedServiceRole,
             operatoreId: operatorId?.trim() ?? '',
             operatoreNome: normalizedOperatorName,
             macchinarioIds: machineryIds ?? [],
@@ -4687,6 +5818,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
                   servizio: normalizedServiceName,
                   prezzo: priceValue,
                   durataMinuti: durationMinutes,
+                  mestiereRichiesto: persistedServiceRole,
                   operatoreId: operatorId?.trim() ?? '',
                   operatoreNome: normalizedOperatorName,
                   nome: normalizedCustomerName.split(' ')[0] || normalizedCustomerName,
@@ -4736,7 +5868,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             workspaceId: workspaceId ?? resolved.workspace.id,
             eventType: 'custom',
             title: 'Nuovo appuntamento confermato',
-            body: `${normalizedServiceName} il ${dateValue} alle ${timeValue}`,
+            body: `${formatPushCustomerName(normalizedCustomerName)} - ${normalizedServiceName} il ${dateValue} alle ${timeValue}`,
             audience: 'public',
             payload: {
               type: 'appointment_created',
@@ -4849,10 +5981,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
       if (createAppointmentError) {
         console.log('Errore creazione appointment reale owner:', createAppointmentError);
+        const createAppointmentErrorText = toErrorText(createAppointmentError);
         return {
           ok: false,
           error:
-            createAppointmentError.message?.trim() ||
+            createAppointmentErrorText.includes('customer_time_overlap')
+              ? 'Questo cliente ha gia un altro appuntamento che si accavalla nello stesso giorno.'
+              : createAppointmentError.message?.trim() ||
             'Non sono riuscito a salvare l’appuntamento.',
         };
       }
@@ -4897,6 +6032,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
       const normalizedCustomerName = customerName.trim();
       const normalizedServiceName = serviceName.trim();
+      const persistedServiceRole =
+        resolved.servizi.find(
+          (item) => item.nome.trim().toLowerCase() === normalizedServiceName.toLowerCase()
+        )?.mestiereRichiesto?.trim() ?? '';
       const normalizedOperatorName = operatorName?.trim() ?? '';
       const shouldUseLocalStateAsBase = isCurrentSalonWorkspace && isCurrentOwnerWorkspace;
       unmarkRecentlyDeletedAppointment({
@@ -4925,6 +6064,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           servizio: normalizedServiceName,
           prezzo: priceValue,
           durataMinuti: durationMinutes,
+          mestiereRichiesto: persistedServiceRole,
           operatoreId: operatorId ?? '',
           operatoreNome: operatorName ?? '',
           macchinarioIds: normalizeStringIdArray(machineryIds),
@@ -4989,6 +6129,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
                     viewedBySalon: true,
                     annullamentiCount: 0,
                     inibito: false,
+                    maxFutureAppointments: 4,
+                    maxFutureAppointmentsMode: 'monthly' as const,
+                    maxDailyAppointments: 1,
                   },
                   ...baseCustomers,
                 ];
@@ -5006,6 +6149,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
                 servizio: normalizedServiceName,
                 prezzo: priceValue,
                 durataMinuti: durationMinutes,
+                mestiereRichiesto: persistedServiceRole,
                 operatoreId: operatorId ?? '',
                 operatoreNome: operatorName ?? '',
                 nome: normalizedCustomerName.split(' ')[0] ?? normalizedCustomerName,
@@ -5051,7 +6195,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         workspaceId: workspaceId ?? resolved.workspace.id,
         eventType: 'custom',
         title: 'Nuovo appuntamento confermato',
-        body: `Servizio: ${normalizedServiceName}. Data: ${formatPushDateLabel(
+        body: `Cliente: ${formatPushCustomerName(normalizedCustomerName)}. Servizio: ${normalizedServiceName}.${
+          persistedServiceRole?.trim()
+            ? ` Mestiere: ${persistedServiceRole.trim()}.`
+            : ''
+        } Data: ${formatPushDateLabel(
           dateValue
         )}. Ora: ${timeValue}.${
           normalizedOperatorName ? ` Operatore: ${normalizedOperatorName}.` : ''
@@ -5085,14 +6233,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
     telefono: string
   ) => {
     const normalizedCode = normalizeSalonCode(salonCode);
+    const normalizedEmail = email.trim().toLowerCase();
+    const normalizedPhone = normalizePhoneForIdentity(telefono);
 
     try {
       const resolved = await resolveSalonByCode(normalizedCode);
       if (!resolved) return;
 
+      const { error: markViewedError } = await supabase.rpc('mark_public_booking_requests_viewed', {
+        p_salon_code: normalizedCode,
+        p_customer_email: normalizedEmail || null,
+        p_customer_phone: normalizedPhone || null,
+      });
+
+      if (markViewedError) {
+        console.log('Errore aggiornamento booking_requests lette cliente:', markViewedError);
+      }
+
       const nextRequests = resolved.richiestePrenotazione.map((item: RichiestaPrenotazione) =>
-        item.email.trim().toLowerCase() === email.trim().toLowerCase() &&
-        item.telefono.trim() === telefono.trim() &&
+        ((item.email.trim().toLowerCase() === normalizedEmail && normalizedEmail.length > 0) ||
+          (normalizePhoneForIdentity(item.telefono) === normalizedPhone && normalizedPhone.length > 0)) &&
         item.stato !== 'In attesa'
           ? { ...item, viewedByCliente: true }
           : item
@@ -5125,21 +6285,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
     requestId,
     email,
     telefono,
+    requestSnapshot,
   }: {
     salonCode: string;
     requestId: string;
     email: string;
     telefono: string;
+    requestSnapshot?: RichiestaPrenotazione;
   }) => {
     const normalizedCode = normalizeSalonCode(salonCode);
 
     try {
-      const resolved = await resolveSalonByCode(normalizedCode);
-      if (!resolved) {
-        return { ok: false, error: 'Salone non trovato.' };
-      }
-
-      const requestToCancel = resolved.richiestePrenotazione.find((item) => item.id === requestId);
+      const requestToCancel =
+        requestSnapshot ??
+        (await resolveSalonByCode(normalizedCode))?.richiestePrenotazione.find((item) => item.id === requestId);
       if (!requestToCancel) {
         return { ok: false, error: 'Prenotazione non trovata.' };
       }
@@ -5149,48 +6308,108 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
 
       const normalizedEmail = email.trim().toLowerCase();
-      const normalizedPhone = telefono.trim();
-      if (
-        requestToCancel.email.trim().toLowerCase() !== normalizedEmail ||
-        requestToCancel.telefono.trim() !== normalizedPhone
-      ) {
+      const normalizedPhone = normalizePhoneForIdentity(telefono);
+      const requestEmail = requestToCancel.email.trim().toLowerCase();
+      const requestPhone = normalizePhoneForIdentity(requestToCancel.telefono);
+      const matchesEmail =
+        normalizedEmail.length > 0 &&
+        requestEmail.length > 0 &&
+        requestEmail === normalizedEmail;
+      const matchesPhone =
+        normalizedPhone.length > 0 &&
+        requestPhone.length > 0 &&
+        requestPhone === normalizedPhone;
+
+      if (!matchesEmail && !matchesPhone) {
         return { ok: false, error: 'Questa prenotazione non appartiene al profilo cliente attivo.' };
       }
 
       const normalizedFullName = `${requestToCancel.nome} ${requestToCancel.cognome}`.trim().toLowerCase();
       const shouldPersistRealStatus = isUuid(requestId);
+      const cancelRpcTask = shouldPersistRealStatus
+        ? Promise.resolve(
+            supabase.rpc('cancel_public_booking_request', {
+              p_salon_code: normalizedCode,
+              p_request_id: requestId,
+              p_customer_email: normalizedEmail,
+              p_customer_phone: normalizedPhone,
+            })
+          )
+        : Promise.resolve({ error: null });
+      const cancelTimeoutTask = new Promise<{
+        data: null;
+        error: { message: string; details?: string | null; hint?: string | null; code?: string | null };
+      }>((resolve) => {
+        const timer = setTimeout(() => {
+          resolve({
+            data: null,
+            error: {
+              message: 'cancel_public_booking_request_timeout',
+              details: 'timeout',
+              hint: 'optimistic-fallback',
+              code: 'TIMEOUT',
+            },
+          });
+        }, 8000);
+
+        cancelRpcTask.finally(() => clearTimeout(timer)).catch(() => undefined);
+      });
       const { error: cancelError } = shouldPersistRealStatus
-        ? await supabase.rpc('cancel_public_booking_request', {
-            p_salon_code: normalizedCode,
-            p_request_id: requestId,
-            p_customer_email: normalizedEmail,
-            p_customer_phone: normalizedPhone,
-          })
+        ? await Promise.race([cancelRpcTask, cancelTimeoutTask])
         : { error: null };
-      const cancelErrorText = [cancelError?.message, cancelError?.details, cancelError?.hint]
+      const cancelErrorText = [cancelError?.message, cancelError?.details, cancelError?.hint, cancelError?.code]
         .filter(Boolean)
-        .join(' ');
-      const isLegacySnapshotOnlyRequest =
+        .join(' ')
+        .toLowerCase();
+      const isDefinitelyLocalOnlyRequest =
         !shouldPersistRealStatus ||
         /booking_request_not_found/i.test(cancelErrorText);
+      const canContinueOptimistically =
+        isDefinitelyLocalOnlyRequest ||
+        /timeout|timed out|failed to fetch|network|fetch|deadlock|40p01/i.test(cancelErrorText) ||
+        isDeadlockError(cancelError);
 
-      if (cancelError && !isLegacySnapshotOnlyRequest) {
+      if (cancelError && !canContinueOptimistically) {
         console.log('Errore annullamento booking_request reale cliente:', cancelError);
-        return { ok: false, error: 'Non sono riuscito ad annullare la prenotazione.' };
+        return {
+          ok: false,
+          error:
+            cancelErrorText.trim() ||
+            cancelError?.message ||
+            'Non sono riuscito ad annullare la prenotazione.',
+        };
       }
 
+      const optimisticCancelledRequest: RichiestaPrenotazione = {
+        ...requestToCancel,
+        stato: 'Annullata',
+        viewedByCliente: true,
+        viewedBySalon: false,
+        cancellationSource: 'cliente',
+      };
+
+      let resolved: Awaited<ReturnType<typeof resolveSalonByCode>> | null = null;
+      try {
+        resolved = await resolveSalonByCode(normalizedCode);
+      } catch (resolveError) {
+        console.log('Errore risoluzione salone per annullamento cliente, continuo in modalita ottimistica:', resolveError);
+      }
+      const sourceRequests = resolved?.richiestePrenotazione ?? [requestToCancel];
+      const sourceAppointments = resolved?.appuntamenti ?? [];
+      const sourceCustomers = resolved?.clienti ?? [];
+      const sourceWorkspace =
+        resolved?.workspace ??
+        ({
+          ...salonWorkspace,
+          salonCode: normalizedCode,
+        } as SalonWorkspace);
+      const sourceServices = resolved?.servizi ?? servizi;
+      const sourceOperators = resolved?.operatori ?? operatori;
+      const sourceAvailabilitySettings =
+        resolved?.availabilitySettings ?? availabilitySettings;
+
       const legacyNextRequests = normalizeRichiestePrenotazione(
-        resolved.richiestePrenotazione.map((item) =>
-          item.id === requestId
-            ? {
-                ...item,
-                stato: 'Annullata',
-                viewedByCliente: true,
-                viewedBySalon: false,
-                cancellationSource: 'cliente',
-              }
-            : item
-        )
+        sourceRequests.map((item) => (item.id === requestId ? optimisticCancelledRequest : item))
       );
 
       const shouldRemoveAcceptedAppointment = requestToCancel.stato === 'Accettata';
@@ -5209,7 +6428,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         );
       };
       const acceptedAppointmentsToRemove = shouldRemoveAcceptedAppointment
-        ? resolved.appuntamenti.filter((item) => matchesCancelledClientAppointment(item))
+        ? sourceAppointments.filter((item) => matchesCancelledClientAppointment(item))
         : [];
       if (shouldRemoveAcceptedAppointment) {
         if (acceptedAppointmentsToRemove.length > 0) {
@@ -5234,13 +6453,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
           });
         }
       }
-      const legacyNextAppointments = resolved.appuntamenti.filter(
+      const legacyNextAppointments = sourceAppointments.filter(
         (item) => !matchesCancelledClientAppointment(item)
       );
 
       const nextCustomers = normalizeClienti(
-        resolved.clienti.map((item) => {
-          const matchesByPhone = item.telefono.trim() === normalizedPhone;
+        sourceCustomers.map((item) => {
+          const matchesByPhone = normalizePhoneForIdentity(item.telefono) === normalizedPhone;
           const matchesByEmail = (item.email ?? '').trim().toLowerCase() === normalizedEmail;
           if (!matchesByPhone && !matchesByEmail) return item;
 
@@ -5252,85 +6471,121 @@ export function AppProvider({ children }: { children: ReactNode }) {
         })
       );
 
-      const latestResolved = isLegacySnapshotOnlyRequest ? null : await resolveSalonByCode(normalizedCode);
-      const latestNextRequests = latestResolved
-        ? normalizeRichiestePrenotazione(
-            latestResolved.richiestePrenotazione.map((item) =>
-              item.id === requestId
-                ? {
-                    ...item,
-                    stato: 'Annullata',
-                    viewedByCliente: true,
-                    viewedBySalon: false,
-                    cancellationSource: 'cliente',
-                  }
-                : item
-            )
-          )
-        : null;
-      const latestNextAppointments = latestResolved
-        ? normalizeAppuntamenti(
-            latestResolved.appuntamenti.filter((item) => !matchesCancelledClientAppointment(item))
-          )
-        : null;
+      const finalNextRequests: RichiestaPrenotazione[] = legacyNextRequests;
+      const finalNextAppointments: Appuntamento[] = legacyNextAppointments;
+      let workspaceId: string | null = sourceWorkspace.id;
 
-      const workspaceId = await enqueuePortalPublish({
-        workspace: resolved.workspace,
-        clienti: nextCustomers as unknown as Array<Record<string, unknown>>,
-        appuntamenti:
-          (latestNextAppointments ?? legacyNextAppointments) as unknown as Array<Record<string, unknown>>,
-        servizi: (latestResolved?.servizi ?? resolved.servizi) as unknown as Array<Record<string, unknown>>,
-        operatori:
-          (latestResolved?.operatori ?? resolved.operatori) as unknown as Array<Record<string, unknown>>,
-        richiestePrenotazione:
-          (latestNextRequests ?? legacyNextRequests) as unknown as Array<Record<string, unknown>>,
-        availabilitySettings: latestResolved?.availabilitySettings ?? resolved.availabilitySettings,
-      });
-
-      if (normalizedCode === salonWorkspace.salonCode && resolved.workspace.ownerEmail === salonAccountEmail) {
-        setRichiestePrenotazione(latestNextRequests ?? legacyNextRequests);
-        setAppuntamenti(filterRecentlyDeletedAppointments(latestNextAppointments ?? legacyNextAppointments));
+      if (normalizedCode === salonWorkspace.salonCode && sourceWorkspace.ownerEmail === salonAccountEmail) {
+        setRichiestePrenotazione(finalNextRequests);
+        setAppuntamenti(filterRecentlyDeletedAppointments(finalNextAppointments));
         setClienti(nextCustomers);
-        if (workspaceId && workspaceId !== salonWorkspace.id) {
-          setSalonWorkspace((current) => ({ ...current, id: workspaceId }));
-        }
       }
 
-      await queueWorkspacePushNotification({
-        workspaceId: workspaceId ?? resolved.workspace.id,
-        eventType: 'appointment_cancelled',
-        title:
-          requestToCancel.stato === 'In attesa'
-            ? 'Richiesta annullata dal cliente'
-            : 'Prenotazione annullata dal cliente',
-        body: `${formatPushCustomerName(
-          `${requestToCancel.nome} ${requestToCancel.cognome}`
-        )} - ${requestToCancel.servizio} il ${formatAppointmentDateTimeLabel(
-          requestToCancel.data,
-          requestToCancel.ora
-        )}`,
-        audience: 'auth',
-        payload: {
-          type: 'appointment_cancelled',
-          bookingRequestId: requestToCancel.id,
-          appointmentDate: requestToCancel.data,
-          appointmentTime: requestToCancel.ora,
-          customerName: `${requestToCancel.nome} ${requestToCancel.cognome}`.trim(),
-          serviceName: requestToCancel.servizio,
-          previousStatus: requestToCancel.stato,
-        },
-      });
+      void (async () => {
+        try {
+          const latestResolved = cancelError ? null : await resolveSalonByCode(normalizedCode);
+          const latestNextRequests = latestResolved
+            ? normalizeRichiestePrenotazione(
+                latestResolved.richiestePrenotazione.map((item) =>
+                  item.id === requestId
+                    ? {
+                        ...item,
+                        stato: 'Annullata',
+                        viewedByCliente: true,
+                        viewedBySalon: false,
+                        cancellationSource: 'cliente',
+                      }
+                    : item
+                )
+              )
+            : null;
+          const resolvedCancelledRequest =
+            latestNextRequests?.find((item) => item.id === requestId) ?? null;
+          const syncedNextRequests: RichiestaPrenotazione[] =
+            resolvedCancelledRequest &&
+            resolvedCancelledRequest.stato === 'Annullata' &&
+            resolvedCancelledRequest.cancellationSource === 'cliente'
+              ? latestNextRequests ?? finalNextRequests
+              : finalNextRequests;
+          const latestNextAppointments = latestResolved
+            ? normalizeAppuntamenti(
+                latestResolved.appuntamenti.filter((item) => !matchesCancelledClientAppointment(item))
+              )
+            : null;
+          const syncedNextAppointments: Appuntamento[] = latestNextAppointments ?? finalNextAppointments;
 
-      await processPublicSlotWaitlistAndFlush({
-        workspaceId: workspaceId ?? resolved.workspace.id,
-        appointmentDate: requestToCancel.data,
-        appointmentTime: requestToCancel.ora,
-      });
+          workspaceId = await enqueuePortalPublish({
+            workspace: sourceWorkspace,
+            clienti: nextCustomers as unknown as Array<Record<string, unknown>>,
+            appuntamenti:
+              syncedNextAppointments as unknown as Array<Record<string, unknown>>,
+            servizi: (latestResolved?.servizi ?? sourceServices) as unknown as Array<Record<string, unknown>>,
+            operatori:
+              (latestResolved?.operatori ?? sourceOperators) as unknown as Array<Record<string, unknown>>,
+            richiestePrenotazione:
+              syncedNextRequests as unknown as Array<Record<string, unknown>>,
+            availabilitySettings: latestResolved?.availabilitySettings ?? sourceAvailabilitySettings,
+          });
+
+          if (normalizedCode === salonWorkspace.salonCode && sourceWorkspace.ownerEmail === salonAccountEmail) {
+            setRichiestePrenotazione(syncedNextRequests);
+            setAppuntamenti(filterRecentlyDeletedAppointments(syncedNextAppointments));
+            setClienti(nextCustomers);
+            const resolvedWorkspaceId = workspaceId;
+            if (resolvedWorkspaceId && resolvedWorkspaceId !== salonWorkspace.id) {
+              setSalonWorkspace((current) => ({ ...current, id: resolvedWorkspaceId }));
+            }
+          }
+        } catch (error) {
+          console.log('Errore sync post annullamento cliente:', error);
+        }
+      })();
+
+      if (cancelError && canContinueOptimistically) {
+        void (async () => {
+          try {
+            await queueWorkspacePushNotification({
+              workspaceId: workspaceId ?? sourceWorkspace.id,
+              eventType: 'appointment_cancelled',
+              title:
+                requestToCancel.stato === 'In attesa'
+                  ? 'Richiesta annullata dal cliente'
+                  : 'Prenotazione annullata dal cliente',
+            body: `${formatPushCustomerName(
+              `${requestToCancel.nome} ${requestToCancel.cognome}`
+            )}. Servizio: ${requestToCancel.servizio}.${
+              requestToCancel.mestiereRichiesto?.trim()
+                ? ` Mestiere: ${requestToCancel.mestiereRichiesto.trim()}.`
+                : ''
+            } Data: ${formatPushDateTimeLabel(requestToCancel.data, requestToCancel.ora)}.`,
+              audience: 'auth',
+              payload: {
+                type: 'appointment_cancelled',
+                bookingRequestId: requestToCancel.id,
+                appointmentDate: requestToCancel.data,
+                appointmentTime: requestToCancel.ora,
+                customerName: `${requestToCancel.nome} ${requestToCancel.cognome}`.trim(),
+                serviceName: requestToCancel.servizio,
+                previousStatus: requestToCancel.stato,
+              },
+            });
+          } catch (error) {
+            console.log('Errore push annullamento cliente:', error);
+          }
+        })();
+      }
+      // On successful server-side cancellations, the RPC already queues the owner push
+      // and processes related waitlist side effects atomically. Triggering extra flushes
+      // here can race the first sender and duplicate the owner's cancellation push.
 
       return { ok: true };
     } catch (error) {
       console.log('Errore annullamento prenotazione cliente:', error);
-      return { ok: false, error: 'Non sono riuscito ad annullare la prenotazione.' };
+      const message =
+        error instanceof Error && error.message.trim()
+          ? error.message.trim()
+          : 'Non sono riuscito ad annullare la prenotazione.';
+      return { ok: false, error: message };
     }
   };
 
@@ -5451,6 +6706,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
               servizio: serviceName,
               prezzo: cancelledAppointment?.prezzo ?? 0,
               durataMinuti: cancelledAppointment?.durataMinuti,
+              mestiereRichiesto: cancelledAppointment?.mestiereRichiesto ?? '',
               operatoreId: cancelledAppointment?.operatoreId ?? '',
               operatoreNome: cancelledAppointment?.operatoreNome ?? '',
               nome: syntheticNome,
@@ -5474,7 +6730,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
           if (!sameName && !samePhone) return item;
           return {
             ...item,
-            annullamentiCount: (item.annullamentiCount ?? 0) + 1,
             viewedBySalon: false,
           };
         })
@@ -5536,48 +6791,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
       if (isCurrentSalonWorkspace && workspaceId && workspaceId !== salonWorkspace.id) {
         setSalonWorkspace((current) => ({ ...current, id: workspaceId }));
-      }
-
-      const requestForNotification = nextRequests.find(
-        (item) =>
-          item.stato === 'Annullata' &&
-          normalizeIdentityText(item.data) === normalizeIdentityText(appointmentDate) &&
-          normalizeTimeIdentity(item.ora) === normalizeTimeIdentity(appointmentTime) &&
-          normalizeIdentityText(item.servizio) === normalizeIdentityText(serviceName) &&
-          matchesCustomerDisplayName(`${item.nome} ${item.cognome}`, customerName)
-      );
-
-      if (requestForNotification) {
-        const linkedCustomerName = `${requestForNotification.nome} ${requestForNotification.cognome}`.trim();
-        const notificationCopy = buildBookingRequestStatusPushCopy({
-          status: 'Annullata',
-          serviceName: requestForNotification.servizio,
-          appointmentDate: requestForNotification.data,
-          appointmentTime: requestForNotification.ora,
-          operatorName: requestForNotification.operatoreNome,
-        });
-        void queueWorkspacePushNotification({
-          workspaceId: workspaceId ?? salonWorkspace.id,
-          eventType: 'booking_request_status_changed',
-          title: notificationCopy.title,
-          body: notificationCopy.body,
-          audience: 'public',
-          customerEmail: requestForNotification.email?.trim().toLowerCase() ?? '',
-          customerPhone: requestForNotification.telefono?.trim() ?? '',
-          payload: {
-            type: 'booking_request_status_changed',
-            bookingRequestId: requestForNotification.id,
-            status: notificationCopy.statusLabel,
-            statusCode: 'cancelled',
-            appointmentDate: requestForNotification.data,
-            appointmentTime: requestForNotification.ora,
-            customerName: linkedCustomerName,
-            serviceName: requestForNotification.servizio,
-            operatorName: requestForNotification.operatoreNome?.trim() ?? '',
-            source: 'owner',
-          },
-        });
-        void flushQueuedPushNotifications();
       }
 
       await processPublicSlotWaitlistAndFlush({
@@ -5860,7 +7073,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (linkedRequest) {
           return currentRequests.map((item) =>
             item.id !== linkedRequest.id
-              ? item
+                ? item
               : {
                   ...item,
                   data: toDate,
@@ -5868,6 +7081,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
                   servizio: appointment.servizio,
                   prezzo: appointment.prezzo,
                   durataMinuti: appointment.durataMinuti,
+                  mestiereRichiesto: appointment.mestiereRichiesto ?? item.mestiereRichiesto,
                   operatoreId: appointment.operatoreId ?? item.operatoreId,
                   operatoreNome: appointment.operatoreNome ?? item.operatoreNome,
                   viewedByCliente: false,
@@ -5889,6 +7103,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             servizio: appointment.servizio,
             prezzo: appointment.prezzo,
             durataMinuti: appointment.durataMinuti,
+            mestiereRichiesto: appointment.mestiereRichiesto ?? '',
             operatoreId: appointment.operatoreId ?? '',
             operatoreNome: appointment.operatoreNome ?? '',
             nome: customerFirstName,
@@ -5960,7 +7175,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           entry.appointment,
           entry.fromDate,
           entry.fromTime,
-          resolved.richiestePrenotazione
+          nextRequests
         ),
       }));
 
@@ -6022,10 +7237,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
             workspaceId: workspaceId ?? resolved.workspace.id,
             eventType: 'custom',
             title: 'Appuntamento spostato dal salone',
-            body: `Servizio: ${entry.appointment.servizio}. Prima: ${formatPushDateTimeLabel(
+            body: `Cliente: ${formatPushCustomerName(entry.appointment.cliente)}. Servizio: ${entry.appointment.servizio}. Prima: ${formatPushDateTimeLabel(
               entry.fromDate,
               entry.fromTime
-            )}. Nuova data: ${formatPushDateLabel(entry.toDate)}. Nuovo orario: ${entry.toTime}.${
+            )}.${
+              entry.appointment.mestiereRichiesto?.trim()
+                ? ` Mestiere: ${entry.appointment.mestiereRichiesto.trim()}.`
+                : ''
+            } Nuova data: ${formatPushDateLabel(entry.toDate)}. Nuovo orario: ${entry.toTime}.${
               entry.appointment.operatoreNome?.trim()
                 ? ` Operatore: ${entry.appointment.operatoreNome.trim()}.`
                 : ''
@@ -6058,7 +7277,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         await processPublicSlotWaitlistAndFlush({
           workspaceId: workspaceId ?? resolved.workspace.id,
           appointmentDate: currentDate,
-          appointmentTime: currentTime,
+          appointmentTime: null,
         });
       }
 
@@ -6146,24 +7365,48 @@ export function AppProvider({ children }: { children: ReactNode }) {
             return false;
           }
 
-          if (useOperatorSchedulingForRequest) {
-            const existingOperatorId = item.operatoreId?.trim() ?? '';
-            const existingOperatorNameKey = item.operatoreNome?.trim().toLowerCase() ?? '';
-            const existingHasExplicitOperator = !!(existingOperatorId || existingOperatorNameKey);
-            const matchesRequestedOperator =
-              (existingOperatorId && requestedOperatorId && existingOperatorId === requestedOperatorId) ||
-              (existingOperatorNameKey &&
-                requestedOperatorNameKey &&
-                existingOperatorNameKey === requestedOperatorNameKey);
+	          if (useOperatorSchedulingForRequest) {
+	            const existingOperatorId = item.operatoreId?.trim() ?? '';
+	            const existingOperatorNameKey = item.operatoreNome?.trim().toLowerCase() ?? '';
+	            const existingHasExplicitOperator = !!(existingOperatorId || existingOperatorNameKey);
+	            const existingUsesOperatorScheduling =
+	              resolved.operatori.length > 0 &&
+	              doesServiceUseOperators(item.servizio, resolved.servizi);
+	            const matchesRequestedOperator =
+	              (existingOperatorId && requestedOperatorId && existingOperatorId === requestedOperatorId) ||
+	              (existingOperatorNameKey &&
+	                requestedOperatorNameKey &&
+	                existingOperatorNameKey === requestedOperatorNameKey);
 
-            if (existingHasExplicitOperator && !matchesRequestedOperator) {
-              return false;
-            }
-          } else {
+	            if (existingHasExplicitOperator && !matchesRequestedOperator) {
+	              return false;
+	            }
+
+	            if (!existingHasExplicitOperator) {
+	              if (existingUsesOperatorScheduling) {
+	                return false;
+	              }
+
+	              const existingSalonCapacityId =
+	                item.operatoreId?.trim() || buildSalonCapacityOperatorId(item.servizio, resolved.servizi);
+
+	              if (
+	                requestedSalonCapacityId &&
+	                existingSalonCapacityId &&
+	                requestedSalonCapacityId !== existingSalonCapacityId
+	              ) {
+	                return false;
+	              }
+	            }
+	          } else {
             const existingUsesOperatorScheduling =
               resolved.operatori.length > 0 &&
               doesServiceUseOperators(item.servizio, resolved.servizi) &&
               !!((item.operatoreId?.trim() ?? '') || (item.operatoreNome?.trim() ?? ''));
+
+            if (existingUsesOperatorScheduling) {
+              return false;
+            }
 
             if (!existingUsesOperatorScheduling) {
               const existingSalonCapacityId =
@@ -6207,6 +7450,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           services: resolved.servizi,
           operators: resolved.operatori,
           settings: resolved.availabilitySettings,
+          preserveExplicitOperatorAssignments: true,
         });
 
         const legacyAnonymousConflicts = resolved.appuntamenti.filter((item) => {
@@ -6321,12 +7565,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
       }
 
-      const dbStatus =
-        status === 'Accettata'
-          ? 'accepted'
-          : status === 'Rifiutata'
-            ? 'rejected'
-            : 'cancelled';
+      const dbStatus = normalizeBookingRequestDbStatus(status);
+      if (!dbStatus) {
+        return {
+          ok: false,
+          error: 'Stato richiesta non valido. Riapri la richiesta e riprova.',
+        };
+      }
       const shouldPersistRealStatus = isUuid(requestId);
       let updateData: Record<string, unknown> | null = null;
       let updateError: { message?: string; details?: string; hint?: string } | null = null;
@@ -6674,10 +7919,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
                     item.telefono.trim() === requestToUpdate.telefono.trim();
                   const sameName = matchesCustomerDisplayName(item.nome, nomeCompleto);
                   if (!samePhone && !sameName) return item;
-                  return {
-                    ...item,
-                    annullamentiCount: (item.annullamentiCount ?? 0) + 1,
-                  };
+                  return item;
                 })
               )
             : resolved.clienti;
@@ -6759,15 +8001,35 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setSalonWorkspace((current) => ({ ...current, id: workspaceId }));
       }
 
+      const notificationCustomer =
+        nextCustomers.find((item) => {
+          const samePhone =
+            requestToUpdate.telefono?.trim() &&
+            item.telefono.trim() === requestToUpdate.telefono.trim();
+          const sameName = matchesCustomerDisplayName(
+            item.nome,
+            `${requestToUpdate.nome} ${requestToUpdate.cognome}`.trim()
+          );
+          return !!samePhone || sameName;
+        }) ?? null;
+      const notificationCustomerEmail =
+        requestToUpdate.email?.trim().toLowerCase() ??
+        notificationCustomer?.email?.trim().toLowerCase() ??
+        '';
+      const notificationCustomerPhone =
+        requestToUpdate.telefono?.trim() ?? notificationCustomer?.telefono?.trim() ?? '';
+
       const pushPromise =
-        status === 'Annullata' || status === 'Rifiutata'
+        status === 'Rifiutata'
           ? (() => {
             const notificationCopy = buildBookingRequestStatusPushCopy({
               status,
               serviceName: requestToUpdate.servizio,
+              roleName: requestToUpdate.mestiereRichiesto,
               appointmentDate: requestToUpdate.data,
               appointmentTime: requestToUpdate.ora,
               operatorName: requestToUpdate.operatoreNome,
+              customerName: requestCustomerName,
             });
             return queueWorkspacePushNotification({
             workspaceId: workspaceId ?? resolved.workspace.id,
@@ -6775,8 +8037,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
             title: notificationCopy.title,
             body: notificationCopy.body,
             audience: 'public',
-            customerEmail: requestToUpdate.email?.trim().toLowerCase() ?? '',
-            customerPhone: requestToUpdate.telefono?.trim() ?? '',
+            customerEmail: notificationCustomerEmail,
+            customerPhone: notificationCustomerPhone,
             payload: {
               type: 'booking_request_status_changed',
               bookingRequestId: requestId,
@@ -6795,9 +8057,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
             const notificationCopy = buildBookingRequestStatusPushCopy({
               status,
               serviceName: requestToUpdate.servizio,
+              roleName: requestToUpdate.mestiereRichiesto,
               appointmentDate: requestToUpdate.data,
               appointmentTime: requestToUpdate.ora,
               operatorName: requestToUpdate.operatoreNome,
+              customerName: requestCustomerName,
             });
             return queueWorkspacePushNotification({
               workspaceId: workspaceId ?? resolved.workspace.id,
@@ -6805,8 +8069,40 @@ export function AppProvider({ children }: { children: ReactNode }) {
               title: notificationCopy.title,
               body: notificationCopy.body,
               audience: 'public',
-              customerEmail: requestToUpdate.email?.trim().toLowerCase() ?? '',
-              customerPhone: requestToUpdate.telefono?.trim() ?? '',
+              customerEmail: notificationCustomerEmail,
+              customerPhone: notificationCustomerPhone,
+              payload: {
+                type: 'booking_request_status_changed',
+                bookingRequestId: requestId,
+                status: notificationCopy.statusLabel,
+                statusCode: dbStatus,
+                appointmentDate: requestToUpdate.data,
+                appointmentTime: requestToUpdate.ora,
+                customerName: requestCustomerName,
+                serviceName: requestToUpdate.servizio,
+                operatorName: requestToUpdate.operatoreNome?.trim() ?? '',
+              },
+            });
+          })()
+          : status === 'Annullata'
+          ? (() => {
+            const notificationCopy = buildBookingRequestStatusPushCopy({
+              status,
+              serviceName: requestToUpdate.servizio,
+              roleName: requestToUpdate.mestiereRichiesto,
+              appointmentDate: requestToUpdate.data,
+              appointmentTime: requestToUpdate.ora,
+              operatorName: requestToUpdate.operatoreNome,
+              customerName: requestCustomerName,
+            });
+            return queueWorkspacePushNotification({
+              workspaceId: workspaceId ?? resolved.workspace.id,
+              eventType: 'booking_request_status_changed',
+              title: notificationCopy.title,
+              body: notificationCopy.body,
+              audience: 'public',
+              customerEmail: notificationCustomerEmail,
+              customerPhone: notificationCustomerPhone,
               payload: {
                 type: 'booking_request_status_changed',
                 bookingRequestId: requestId,
@@ -6822,7 +8118,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           })()
           : Promise.resolve(false);
 
-      if (status === 'Annullata' || status === 'Rifiutata' || status === 'Accettata') {
+      if (status === 'Rifiutata' || status === 'Accettata' || status === 'Annullata') {
         void pushPromise.then(() => flushQueuedPushNotifications());
       }
 
@@ -6873,6 +8169,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         salonWorkspace,
         setSalonWorkspace,
         updateSalonWorkspacePersisted,
+        updateAvailabilitySettingsPersisted,
+        updateGuidedSlotsSettingsPersisted,
         workspaceAccessAllowed,
         clienti,
         setClienti,

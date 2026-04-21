@@ -73,6 +73,7 @@ export function NumberPickerModal({
   prefix,
   suffix,
   presets = [],
+  selectionHintOverride,
 }: {
   visible: boolean;
   title: string;
@@ -87,6 +88,7 @@ export function NumberPickerModal({
   prefix?: string;
   suffix?: string;
   presets?: number[];
+  selectionHintOverride?: string;
 }) {
   const safeDecimals = Number.isInteger(decimals) && decimals >= 0 ? decimals : 0;
   const safeMin = Math.min(min, max);
@@ -145,22 +147,24 @@ export function NumberPickerModal({
   );
 
   const safeGridStep = Math.max(toFiniteNumber(gridStep ?? safeStep, safeStep), 10 ** -safeDecimals);
-  const selectionHint = `${formatDisplayValue({
-    value: safeMin,
-    decimals: safeDecimals,
-    prefix,
-    suffix,
-  })} - ${formatDisplayValue({
-    value: safeMax,
-    decimals: safeDecimals,
-    prefix,
-    suffix,
-  })} · step ${formatDisplayValue({
-    value: safeStep,
-    decimals: safeDecimals,
-    prefix,
-    suffix,
-  })}`;
+  const selectionHint =
+    selectionHintOverride ??
+    `${formatDisplayValue({
+      value: safeMin,
+      decimals: safeDecimals,
+      prefix,
+      suffix,
+    })} - ${formatDisplayValue({
+      value: safeMax,
+      decimals: safeDecimals,
+      prefix,
+      suffix,
+    })} · step ${formatDisplayValue({
+      value: safeStep,
+      decimals: safeDecimals,
+      prefix,
+      suffix,
+    })}`;
 
   const updateValue = (nextValue: unknown) => {
     const bounded = findClosestWheelValue(sanitize(nextValue, safeDraftValue));

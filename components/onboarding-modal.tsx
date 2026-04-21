@@ -1,8 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import { BlurView } from 'expo-blur';
 import React, { useEffect, useState } from 'react';
 import {
-    Modal,
     Platform,
     ScrollView,
     StyleSheet,
@@ -332,7 +330,7 @@ export function OnboardingModal({ visible, onClose, onComplete }: OnboardingModa
 
   const isCompactHeight = height < 760;
   const cardMaxWidth = Math.min(width - 28, 560);
-  const cardMaxHeight = Math.min(height * 0.88, 760);
+  const cardMaxHeight = Math.min(height * 0.8, 680);
   const currentStep = ONBOARDING_STEPS[currentIndex];
   const progressLabel = `${currentIndex + 1} / ${ONBOARDING_STEPS.length}`;
 
@@ -341,6 +339,10 @@ export function OnboardingModal({ visible, onClose, onComplete }: OnboardingModa
       setCurrentIndex(0);
     }
   }, [visible]);
+
+  if (!visible) {
+    return null;
+  }
 
   const handleNext = () => {
     if (currentIndex >= ONBOARDING_STEPS.length - 1) {
@@ -352,115 +354,96 @@ export function OnboardingModal({ visible, onClose, onComplete }: OnboardingModa
   };
 
   return (
-    <Modal
-      visible={visible}
-      transparent
-      statusBarTranslucent
-      animationType="fade"
-      presentationStyle="overFullScreen"
-      onRequestClose={onClose}
-    >
-      <View style={styles.modalRoot}>
-        <BlurView
-          intensity={28}
-          tint="dark"
-          experimentalBlurMethod="dimezisBlurView"
-          style={StyleSheet.absoluteFillObject}
-        />
-        <View style={styles.scrim} />
+    <View style={styles.modalRoot} pointerEvents="box-none">
+      <View style={styles.scrim} />
 
-        <SafeAreaView style={styles.safeArea} edges={['top', 'bottom', 'left', 'right']}>
-          <View style={styles.overlayHeader}>
-            <View style={styles.overlayBadge}>
-              <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.82} style={styles.overlayBadgeText}>Onboarding</Text>
-            </View>
-            <TouchableOpacity style={styles.skipButton} onPress={onClose} activeOpacity={0.86}>
-              <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.82} style={styles.skipText}>Salta</Text>
-            </TouchableOpacity>
+      <SafeAreaView style={styles.safeArea} edges={['top', 'bottom', 'left', 'right']}>
+        <View style={styles.overlayHeader}>
+          <View style={styles.overlayBadge}>
+            <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.82} style={styles.overlayBadgeText}>Onboarding</Text>
           </View>
+          <TouchableOpacity style={styles.skipButton} onPress={onClose} activeOpacity={0.86}>
+            <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.82} style={styles.skipText}>Salta</Text>
+          </TouchableOpacity>
+        </View>
 
-          <View style={styles.centerLayer}>
-            <View
-              style={[
-                styles.cardShell,
-                {
-                  maxWidth: cardMaxWidth,
-                  maxHeight: cardMaxHeight,
-                },
-              ]}
+        <View style={styles.centerLayer}>
+          <View
+            style={[
+              styles.cardShell,
+              {
+                maxWidth: cardMaxWidth,
+                maxHeight: cardMaxHeight,
+              },
+            ]}
+          >
+            <View style={styles.cardTint} />
+
+            <ScrollView
+              style={styles.cardScroll}
+              contentContainerStyle={styles.cardScrollContent}
+              showsVerticalScrollIndicator={false}
+              bounces={false}
             >
-              <BlurView
-                intensity={36}
-                tint="light"
-                experimentalBlurMethod="dimezisBlurView"
-                style={StyleSheet.absoluteFillObject}
-              />
-              <View style={styles.cardTint} />
-
-              <ScrollView
-                style={styles.cardScroll}
-                contentContainerStyle={styles.cardScrollContent}
-                showsVerticalScrollIndicator={false}
-                bounces={false}
-              >
-                <View style={styles.cardAccent} />
-                <View style={[styles.visualWrap, isCompactHeight && styles.visualWrapCompact]}>
-                  <StepVisual visual={currentStep.visual} compact={isCompactHeight} />
-                </View>
-
-                <View style={styles.copyBlock}>
-                  <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.82} style={styles.progressText}>Step {progressLabel}</Text>
-                  <Text numberOfLines={3} adjustsFontSizeToFit minimumFontScale={0.72} style={[styles.title, isCompactHeight && styles.titleCompact]}>
-                    {currentStep.title}
-                  </Text>
-                  <Text numberOfLines={4} adjustsFontSizeToFit minimumFontScale={0.82} style={[styles.body, isCompactHeight && styles.bodyCompact]}>
-                    {currentStep.body}
-                  </Text>
-                </View>
-              </ScrollView>
-
-              <View style={styles.footer}>
-                <View style={styles.dotsRow}>
-                  {ONBOARDING_STEPS.map((step, index) => (
-                    <TouchableOpacity
-                      key={step.key}
-                      style={styles.dotButton}
-                      onPress={() => setCurrentIndex(index)}
-                      activeOpacity={0.85}
-                    >
-                      <View style={[styles.dot, index === currentIndex && styles.dotActive]} />
-                    </TouchableOpacity>
-                  ))}
-                </View>
-
-                <TouchableOpacity style={styles.primaryButton} onPress={handleNext} activeOpacity={0.92}>
-                  <Text
-                    numberOfLines={1}
-                    ellipsizeMode="clip"
-                    adjustsFontSizeToFit
-                    minimumFontScale={0.78}
-                    style={styles.primaryButtonText}
-                  >
-                    {currentStep.cta}
-                  </Text>
-                </TouchableOpacity>
+              <View style={styles.cardAccent} />
+              <View style={[styles.visualWrap, isCompactHeight && styles.visualWrapCompact]}>
+                <StepVisual visual={currentStep.visual} compact={isCompactHeight} />
               </View>
+
+              <View style={styles.copyBlock}>
+                <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.82} style={styles.progressText}>Step {progressLabel}</Text>
+                <Text numberOfLines={3} adjustsFontSizeToFit minimumFontScale={0.72} style={[styles.title, isCompactHeight && styles.titleCompact]}>
+                  {currentStep.title}
+                </Text>
+                <Text numberOfLines={4} adjustsFontSizeToFit minimumFontScale={0.82} style={[styles.body, isCompactHeight && styles.bodyCompact]}>
+                  {currentStep.body}
+                </Text>
+              </View>
+            </ScrollView>
+
+            <View style={styles.footer}>
+              <View style={styles.dotsRow}>
+                {ONBOARDING_STEPS.map((step, index) => (
+                  <TouchableOpacity
+                    key={step.key}
+                    style={styles.dotButton}
+                    onPress={() => setCurrentIndex(index)}
+                    activeOpacity={0.85}
+                  >
+                    <View style={[styles.dot, index === currentIndex && styles.dotActive]} />
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              <TouchableOpacity style={styles.primaryButton} onPress={handleNext} activeOpacity={0.92}>
+                <Text
+                  numberOfLines={1}
+                  ellipsizeMode="clip"
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.78}
+                  style={styles.primaryButtonText}
+                >
+                  {currentStep.cta}
+                </Text>
+              </TouchableOpacity>
             </View>
           </View>
-        </SafeAreaView>
-      </View>
-    </Modal>
+        </View>
+      </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   modalRoot: {
-    flex: 1,
-    backgroundColor: 'rgba(8, 15, 26, 0.08)',
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'transparent',
+    zIndex: 9999,
+    elevation: 9999,
   },
   scrim: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(8, 15, 26, 0.22)',
+    backgroundColor: 'rgba(8, 15, 26, 0.32)',
   },
   safeArea: {
     flex: 1,
@@ -515,8 +498,8 @@ const styles = StyleSheet.create({
     borderRadius: 30,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.3)',
-    backgroundColor: 'rgba(255, 255, 255, 0.16)',
+    borderColor: 'rgba(255, 255, 255, 0.55)',
+    backgroundColor: 'rgba(255, 255, 255, 0.94)',
     shadowColor: '#020617',
     shadowOpacity: 0.12,
     shadowRadius: 22,
@@ -525,7 +508,7 @@ const styles = StyleSheet.create({
   },
   cardTint: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(244, 248, 252, 0.38)',
+    backgroundColor: 'rgba(244, 248, 252, 0.9)',
   },
   cardScroll: {
     flexGrow: 0,

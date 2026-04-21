@@ -33,6 +33,7 @@ const buildInstagramUrl = (value?: string) => {
 const formatRequestDateKey = (value: string) => value || getTodayDateString();
 const AUTO_ACCEPT_DELAY_MS = 15000;
 const IS_ANDROID = Platform.OS === 'android';
+const IS_WEB = Platform.OS === 'web';
 
 type RequestGroup = {
   date: string;
@@ -42,9 +43,11 @@ type RequestGroup = {
 function AccordionChevron({
   expanded,
   accent,
+  count,
 }: {
   expanded: boolean;
   accent: 'default' | 'danger';
+  count: number;
 }) {
   const progress = useSharedValue(expanded ? 1 : 0);
 
@@ -64,14 +67,26 @@ function AccordionChevron({
       style={[
         styles.accordionChevronWrap,
         accent === 'danger' && styles.accordionChevronWrapDanger,
-        chevronStyle,
       ]}
     >
-      <Ionicons
-        name="chevron-down"
-        size={16}
-        color={accent === 'danger' ? '#b91c1c' : '#475569'}
-      />
+      <Text
+        style={[
+          styles.accordionChevronCountText,
+          accent === 'danger' && styles.accordionChevronCountTextDanger,
+        ]}
+        numberOfLines={1}
+        adjustsFontSizeToFit
+        minimumFontScale={0.78}
+      >
+        {count}
+      </Text>
+      <Animated.View style={chevronStyle}>
+        <Ionicons
+          name="chevron-down"
+          size={16}
+          color={accent === 'danger' ? '#334155' : '#334155'}
+        />
+      </Animated.View>
     </Animated.View>
   );
 }
@@ -100,11 +115,13 @@ export default function PrenotazioniScreen() {
     []
   );
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>(collapsedSections);
+  const [viewedRequestIds, setViewedRequestIds] = useState<string[]>([]);
+  const [hasLoadedViewedRequestIds, setHasLoadedViewedRequestIds] = useState(false);
   const {
     richiestePrenotazione,
     setRichiestePrenotazione,
     availabilitySettings,
-    setAvailabilitySettings,
+    updateGuidedSlotsSettingsPersisted,
     salonWorkspace,
     updateSalonWorkspacePersisted,
     salonAccountEmail,
@@ -121,10 +138,39 @@ export default function PrenotazioniScreen() {
     (
       updater: (current: typeof availabilitySettings) => typeof availabilitySettings
     ) => {
-      setAvailabilitySettings((current) => updater(current));
-      void haptic.light().catch(() => null);
+      void updateGuidedSlotsSettingsPersisted((current) => {
+        const resolvedSettings = updater(current);
+
+        return {
+          ...resolvedSettings,
+          guidedSlotsUpdatedAt: new Date().toISOString(),
+        };
+      });
     },
-    [setAvailabilitySettings]
+    [updateGuidedSlotsSettingsPersisted]
+  );
+
+  const confirmOwnerWebAction = useCallback(
+    (title: string, body: string, onConfirm: () => void | Promise<void>) => {
+      if (IS_WEB && typeof window !== 'undefined') {
+        const confirmed = window.confirm(`${title}\n\n${body}`);
+        if (!confirmed) return;
+        void onConfirm();
+        return;
+      }
+
+      Alert.alert(title, body, [
+        { text: 'Annulla', style: 'cancel' },
+        {
+          text: title.toLowerCase().includes('disattivare') ? 'Disattiva' : 'Attiva',
+          style: title.toLowerCase().includes('disattivare') ? 'destructive' : 'default',
+          onPress: () => {
+            void onConfirm();
+          },
+        },
+      ]);
+    },
+    []
   );
 
   useEffect(() => {
@@ -145,13 +191,8 @@ export default function PrenotazioniScreen() {
         .filter(
           (item) =>
             (item.origine ?? 'frontend') === 'frontend' &&
-            (item.stato === 'In attesa' || (item.stato === 'Annullata' && item.viewedBySalon !== true))
-        )
-        .sort((left, right) => {
-          if (left.stato === 'Annullata' && right.stato !== 'Annullata') return -1;
-          if (left.stato !== 'Annullata' && right.stato === 'Annullata') return 1;
-          return 0;
-        }),
+            item.stato === 'In attesa'
+        ),
     [richiestePrenotazione]
   );
   const richiesteAnnullateCliente = useMemo(
@@ -232,6 +273,7 @@ export default function PrenotazioniScreen() {
           : [];
         const merged = Array.from(new Set([...currentIds, ...ids]));
         await AsyncStorage.setItem(storageKey, JSON.stringify(merged));
+        setViewedRequestIds(merged);
       } catch {
         // Non bloccare UX notifiche in caso di errore storage locale.
       }
@@ -239,20 +281,77 @@ export default function PrenotazioniScreen() {
     [salonAccountEmail]
   );
 
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadViewedRequestIds = async () => {
+      const normalizedEmail = salonAccountEmail.trim().toLowerCase();
+      if (!normalizedEmail) {
+        if (!cancelled) {
+          setViewedRequestIds([]);
+          setHasLoadedViewedRequestIds(true);
+        }
+        return;
+      }
+
+      const storageKey = `salon_manager_viewed_request_ids__${normalizedEmail}`;
+
+      try {
+        const raw = await AsyncStorage.getItem(storageKey);
+        const parsed = raw ? (JSON.parse(raw) as unknown) : [];
+        const nextIds = Array.isArray(parsed)
+          ? parsed.filter((item): item is string => typeof item === 'string')
+          : [];
+
+        if (!cancelled) {
+          setViewedRequestIds(nextIds);
+          setHasLoadedViewedRequestIds(true);
+        }
+      } catch {
+        if (!cancelled) {
+          setViewedRequestIds([]);
+          setHasLoadedViewedRequestIds(true);
+        }
+      }
+    };
+
+    void loadViewedRequestIds();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [salonAccountEmail]);
+
+  const isFrontendRequest = useCallback(
+    (item: (typeof richiestePrenotazione)[number]) => (item.origine ?? 'frontend') === 'frontend',
+    []
+  );
+
+  const isUnreadRequest = useCallback(
+    (item: (typeof richiestePrenotazione)[number]) =>
+      isFrontendRequest(item) &&
+      item.viewedBySalon !== true &&
+      !viewedRequestIds.includes(item.id),
+    [isFrontendRequest, viewedRequestIds]
+  );
+
+  const markRequestsAsViewed = useCallback(
+    (ids: string[]) => {
+      const nextIds = Array.from(new Set(ids.filter(Boolean)));
+      if (nextIds.length === 0) return;
+      setViewedRequestIds((current) => Array.from(new Set([...current, ...nextIds])));
+      void persistViewedRequestIds(nextIds);
+    },
+    [persistViewedRequestIds]
+  );
+
   const markFrontendRequestsAsViewed = useCallback(() => {
     const markedIds = richiestePrenotazione
-      .filter(
-        (item) =>
-          (item.origine ?? 'frontend') === 'frontend' &&
-          (item.stato === 'In attesa' || item.stato === 'Annullata') &&
-          item.viewedBySalon !== true
-      )
+      .filter((item) => isUnreadRequest(item) && item.stato === 'In attesa')
       .map((item) => item.id);
 
-    if (markedIds.length > 0) {
-      void persistViewedRequestIds(markedIds);
-    }
-  }, [persistViewedRequestIds, richiestePrenotazione]);
+    markRequestsAsViewed(markedIds);
+  }, [isUnreadRequest, markRequestsAsViewed, richiestePrenotazione]);
 
   useEffect(() => {
     if (expandedSections.pending) {
@@ -263,23 +362,46 @@ export default function PrenotazioniScreen() {
   const markCancelledRequestsAsViewed = useCallback(() => {
     const markedCancelledIds = richiestePrenotazione
       .filter(
-        (item) =>
-          (item.origine ?? 'frontend') === 'frontend' &&
-          item.stato === 'Annullata' &&
-          item.viewedBySalon !== true
+        (item) => isUnreadRequest(item) && item.stato === 'Annullata' && !isCancelledBySalon(item)
       )
       .map((item) => item.id);
 
-    if (markedCancelledIds.length > 0) {
-      void persistViewedRequestIds(markedCancelledIds);
-    }
-  }, [persistViewedRequestIds, richiestePrenotazione]);
+    markRequestsAsViewed(markedCancelledIds);
+  }, [isCancelledBySalon, isUnreadRequest, markRequestsAsViewed, richiestePrenotazione]);
+
+  const markAcceptedRequestsAsViewed = useCallback(() => {
+    const markedAcceptedIds = richiestePrenotazione
+      .filter((item) => isUnreadRequest(item) && item.stato === 'Accettata')
+      .map((item) => item.id);
+
+    markRequestsAsViewed(markedAcceptedIds);
+  }, [isUnreadRequest, markRequestsAsViewed, richiestePrenotazione]);
+
+  const markSalonDeclinedRequestsAsViewed = useCallback(() => {
+    const markedDeclinedIds = richiestePrenotazione
+      .filter((item) => isUnreadRequest(item) && (item.stato === 'Rifiutata' || isCancelledBySalon(item)))
+      .map((item) => item.id);
+
+    markRequestsAsViewed(markedDeclinedIds);
+  }, [isCancelledBySalon, isUnreadRequest, markRequestsAsViewed, richiestePrenotazione]);
 
   useEffect(() => {
     if (expandedSections.cancelled) {
       markCancelledRequestsAsViewed();
     }
   }, [expandedSections.cancelled, markCancelledRequestsAsViewed]);
+
+  useEffect(() => {
+    if (expandedSections.accepted) {
+      markAcceptedRequestsAsViewed();
+    }
+  }, [expandedSections.accepted, markAcceptedRequestsAsViewed]);
+
+  useEffect(() => {
+    if (expandedSections.salonDeclined) {
+      markSalonDeclinedRequestsAsViewed();
+    }
+  }, [expandedSections.salonDeclined, markSalonDeclinedRequestsAsViewed]);
 
   const toggleSection = useCallback((sectionKey: string) => {
     LayoutAnimation.configureNext({
@@ -303,12 +425,60 @@ export default function PrenotazioniScreen() {
     if (sectionKey === 'cancelled' && !expandedSections.cancelled) {
       markCancelledRequestsAsViewed();
     }
+    if (sectionKey === 'accepted' && !expandedSections.accepted) {
+      markAcceptedRequestsAsViewed();
+    }
+    if (sectionKey === 'salonDeclined' && !expandedSections.salonDeclined) {
+      markSalonDeclinedRequestsAsViewed();
+    }
 
     setExpandedSections((current) => ({
       ...current,
       [sectionKey]: !current[sectionKey],
     }));
-  }, [expandedSections.cancelled, expandedSections.pending, markCancelledRequestsAsViewed, markFrontendRequestsAsViewed]);
+  }, [
+    expandedSections.accepted,
+    expandedSections.cancelled,
+    expandedSections.pending,
+    expandedSections.salonDeclined,
+    markAcceptedRequestsAsViewed,
+    markCancelledRequestsAsViewed,
+    markFrontendRequestsAsViewed,
+    markSalonDeclinedRequestsAsViewed,
+  ]);
+
+  const unreadPendingCount = useMemo(
+    () =>
+      hasLoadedViewedRequestIds
+        ? richiesteInAttesa.filter((item) => isUnreadRequest(item)).length
+        : 0,
+    [hasLoadedViewedRequestIds, isUnreadRequest, richiesteInAttesa]
+  );
+  const unreadAcceptedCount = useMemo(
+    () =>
+      hasLoadedViewedRequestIds
+        ? richiesteAccettate.filter((item) => isUnreadRequest(item)).length
+        : 0,
+    [hasLoadedViewedRequestIds, isUnreadRequest, richiesteAccettate]
+  );
+  const unreadCancelledCount = useMemo(
+    () =>
+      hasLoadedViewedRequestIds
+        ? richiesteAnnullateCliente.filter((item) => isUnreadRequest(item)).length
+        : 0,
+    [hasLoadedViewedRequestIds, isUnreadRequest, richiesteAnnullateCliente]
+  );
+  const unreadSalonDeclinedCount = useMemo(
+    () =>
+      hasLoadedViewedRequestIds
+        ? richiesteCancellateORifiutateDalSalone.filter((item) => isUnreadRequest(item)).length
+        : 0,
+    [
+      hasLoadedViewedRequestIds,
+      isUnreadRequest,
+      richiesteCancellateORifiutateDalSalone,
+    ]
+  );
 
   useFocusEffect(
     useCallback(() => {
@@ -733,6 +903,7 @@ export default function PrenotazioniScreen() {
     sectionKey,
     title,
     count,
+    unreadCount = 0,
     groups,
     variant,
     emptyText,
@@ -743,6 +914,7 @@ export default function PrenotazioniScreen() {
     sectionKey: string;
     title: string;
     count: number;
+    unreadCount?: number;
     groups: RequestGroup[];
     variant: 'pending' | 'history';
     emptyText: string;
@@ -754,6 +926,17 @@ export default function PrenotazioniScreen() {
 
     return (
       <View style={[styles.accordionSection, responsive.isDesktop && styles.wideCard]}>
+        {unreadCount > 0 ? (
+          <Animated.View
+            entering={FadeIn.duration(130).easing(Easing.out(Easing.cubic))}
+            layout={LinearTransition.duration(160).easing(Easing.out(Easing.cubic))}
+            style={styles.accordionUnreadBadgeFloating}
+          >
+            <Text style={styles.accordionUnreadBadgeText}>
+              {unreadCount > 99 ? '99+' : unreadCount}
+            </Text>
+          </Animated.View>
+        ) : null}
         <HapticTouchable
           style={styles.accordionHeader}
           onPress={() => {
@@ -772,21 +955,8 @@ export default function PrenotazioniScreen() {
             >
               {title}
             </Text>
-            <Animated.Text
-              style={[
-                styles.accordionCount,
-                accent === 'danger' && styles.accordionCountDanger,
-              ]}
-              numberOfLines={1}
-              adjustsFontSizeToFit
-              minimumFontScale={0.78}
-              entering={FadeIn.duration(130).easing(Easing.out(Easing.cubic))}
-              layout={LinearTransition.duration(160).easing(Easing.out(Easing.cubic))}
-            >
-              {count}
-            </Animated.Text>
           </View>
-          <AccordionChevron expanded={expanded} accent={accent} />
+          <AccordionChevron expanded={expanded} accent={accent} count={count} />
         </HapticTouchable>
 
         {expanded ? (
@@ -901,23 +1071,17 @@ export default function PrenotazioniScreen() {
                 ? 'Le nuove richieste in attesa verranno accettate automaticamente dopo 15 secondi.'
                 : 'Le richieste torneranno in gestione manuale e non verranno piu accettate in automatico.';
 
-              Alert.alert(title, body, [
-                { text: 'Annulla', style: 'cancel' },
-                {
-                  text: nextValue ? 'Attiva' : 'Disattiva',
-                  style: nextValue ? 'default' : 'destructive',
-                  onPress: () => {
-                    void updateSalonWorkspacePersisted((current) => ({
-                      ...current,
-                      autoAcceptBookingRequests: nextValue,
-                    }));
-                    if (!nextValue) {
-                      clearAllAutoAcceptTimers();
-                    }
-                    haptic.light().catch(() => null);
-                  },
-                },
-              ]);
+              confirmOwnerWebAction(title, body, async () => {
+                await updateSalonWorkspacePersisted((current) => ({
+                  ...current,
+                  autoAcceptBookingRequests: nextValue,
+                  autoAcceptBookingRequestsUpdatedAt: new Date().toISOString(),
+                }));
+                if (!nextValue) {
+                  clearAllAutoAcceptTimers();
+                }
+                haptic.light().catch(() => null);
+              });
             }}
             pressScale={0.975}
             pressOpacity={0.98}
@@ -995,19 +1159,12 @@ export default function PrenotazioniScreen() {
                 ? 'Il cliente vedra prima gli orari consigliati per proteggere meglio i servizi lunghi e usare i buchi per quelli brevi.'
                 : 'Il cliente tornera a vedere il comportamento orari standard senza suggerimenti guidati.';
 
-              Alert.alert(title, body, [
-                { text: 'Annulla', style: 'cancel' },
-                {
-                  text: nextValue ? 'Attiva' : 'Disattiva',
-                  style: nextValue ? 'default' : 'destructive',
-                  onPress: () => {
-                    updateGuidedSlotsSettings((current) => ({
-                      ...current,
-                      guidedSlotsEnabled: nextValue,
-                    }));
-                  },
-                },
-              ]);
+              confirmOwnerWebAction(title, body, async () => {
+                await updateGuidedSlotsSettings((current) => ({
+                  ...current,
+                  guidedSlotsEnabled: nextValue,
+                }));
+              });
             }}
             pressScale={0.975}
             pressOpacity={0.98}
@@ -1027,86 +1184,118 @@ export default function PrenotazioniScreen() {
 
           <View style={styles.guidedSlotOptionGroup}>
             <Text style={styles.guidedSlotOptionLabel}>Strategia</Text>
-            <View style={styles.guidedSlotChipRow}>
-              {[
+            {[
+              [
                 { key: 'balanced', label: 'Equilibrata' },
                 { key: 'protect_long_services', label: 'Proteggi lunghi' },
-                { key: 'fill_gaps', label: 'Riempi buchi' },
-              ].map((option) => {
-                const active = guidedSlotsStrategy === option.key;
-                return (
-                  <HapticTouchable
-                    key={option.key}
-                    style={[
-                      styles.guidedSlotChip,
-                      active && styles.guidedSlotChipActive,
-                      !guidedSlotsEnabled && styles.guidedSlotChipDisabled,
-                    ]}
-                    onPress={() => {
-                      if (!guidedSlotsEnabled) return;
-                      updateGuidedSlotsSettings((current) => ({
-                        ...current,
-                        guidedSlotsStrategy: option.key as typeof guidedSlotsStrategy,
-                      }));
-                    }}
-                    pressScale={0.98}
-                    pressOpacity={0.95}
-                  >
-                    <Text
+              ],
+              [{ key: 'fill_gaps', label: 'Riempi buchi' }],
+            ].map((row, rowIndex) => (
+              <View
+                key={`guided-strategy-row-${rowIndex}`}
+                style={[
+                  styles.guidedSlotExplicitRow,
+                  rowIndex === 0
+                    ? styles.guidedSlotExplicitRowDouble
+                    : styles.guidedSlotExplicitRowSingle,
+                ]}
+              >
+                {row.map((option) => {
+                  const active = guidedSlotsStrategy === option.key;
+                  return (
+                    <HapticTouchable
+                      key={option.key}
                       style={[
-                        styles.guidedSlotChipText,
-                        active && styles.guidedSlotChipTextActive,
-                        !guidedSlotsEnabled && styles.guidedSlotChipTextDisabled,
+                        styles.guidedSlotChip,
+                        rowIndex === 0
+                          ? styles.guidedSlotChipHalf
+                          : styles.guidedSlotChipCenter,
+                        active && styles.guidedSlotChipActive,
+                        !guidedSlotsEnabled && styles.guidedSlotChipDisabled,
                       ]}
+                      disabled={!guidedSlotsEnabled}
+                      onPress={() => {
+                        if (!guidedSlotsEnabled) return;
+                        updateGuidedSlotsSettings((current) => ({
+                          ...current,
+                          guidedSlotsStrategy: option.key as typeof guidedSlotsStrategy,
+                        }));
+                      }}
+                      pressScale={0.98}
+                      pressOpacity={0.95}
                     >
-                      {option.label}
-                    </Text>
-                  </HapticTouchable>
-                );
-              })}
-            </View>
+                      <Text
+                        style={[
+                          styles.guidedSlotChipText,
+                          active && styles.guidedSlotChipTextActive,
+                          !guidedSlotsEnabled && styles.guidedSlotChipTextDisabled,
+                        ]}
+                      >
+                        {option.label}
+                      </Text>
+                    </HapticTouchable>
+                  );
+                })}
+              </View>
+            ))}
           </View>
 
           <View style={[styles.guidedSlotOptionGroup, styles.guidedSlotOptionGroupTight]}>
             <Text style={styles.guidedSlotOptionLabel}>Visibilita orari</Text>
-            <View style={styles.guidedSlotChipRow}>
-              {[
-                { key: 'recommended_first', label: 'Consigliati prima' },
+            {[
+              [
+                { key: 'recommended_first', label: 'Prima consigliati' },
                 { key: 'recommended_only', label: 'Solo consigliati' },
-              ].map((option) => {
-                const active = guidedSlotsVisibility === option.key;
-                return (
-                  <HapticTouchable
-                    key={option.key}
+              ],
+              [{ key: 'recommended_and_all', label: 'Consigliati + tutti' }],
+            ].map((row, rowIndex) => (
+              <View
+                key={`guided-visibility-row-${rowIndex}`}
+                style={[
+                  styles.guidedSlotExplicitRow,
+                  rowIndex === 0
+                    ? styles.guidedSlotExplicitRowDouble
+                    : styles.guidedSlotExplicitRowSingle,
+                ]}
+              >
+                {row.map((option) => {
+                  const active = guidedSlotsVisibility === option.key;
+                  return (
+                    <HapticTouchable
+                      key={option.key}
                     style={[
                       styles.guidedSlotChip,
-                      styles.guidedSlotChipWide,
+                      rowIndex === 0
+                        ? styles.guidedSlotChipHalf
+                        : styles.guidedSlotChipCenter,
                       active && styles.guidedSlotChipActive,
                       !guidedSlotsEnabled && styles.guidedSlotChipDisabled,
                     ]}
-                    onPress={() => {
-                      if (!guidedSlotsEnabled) return;
-                      updateGuidedSlotsSettings((current) => ({
-                        ...current,
-                        guidedSlotsVisibility: option.key as typeof guidedSlotsVisibility,
-                      }));
-                    }}
-                    pressScale={0.98}
-                    pressOpacity={0.95}
-                  >
-                    <Text
-                      style={[
-                        styles.guidedSlotChipText,
-                        active && styles.guidedSlotChipTextActive,
-                        !guidedSlotsEnabled && styles.guidedSlotChipTextDisabled,
-                      ]}
+                      disabled={!guidedSlotsEnabled}
+                      onPress={() => {
+                        if (!guidedSlotsEnabled) return;
+                        updateGuidedSlotsSettings((current) => ({
+                          ...current,
+                          guidedSlotsVisibility: option.key as typeof guidedSlotsVisibility,
+                        }));
+                      }}
+                      pressScale={0.98}
+                      pressOpacity={0.95}
                     >
-                      {option.label}
-                    </Text>
-                  </HapticTouchable>
-                );
-              })}
-            </View>
+                      <Text
+                        style={[
+                          styles.guidedSlotChipText,
+                          active && styles.guidedSlotChipTextActive,
+                          !guidedSlotsEnabled && styles.guidedSlotChipTextDisabled,
+                        ]}
+                      >
+                        {option.label}
+                      </Text>
+                    </HapticTouchable>
+                  );
+                })}
+              </View>
+            ))}
           </View>
         </View>
       </View>
@@ -1122,6 +1311,7 @@ export default function PrenotazioniScreen() {
             sectionKey: 'pending',
             title: 'Richieste in attesa',
             count: richiesteInAttesa.filter((item) => item.stato === 'In attesa').length,
+            unreadCount: unreadPendingCount,
             groups: groupedPending.filter((group) =>
               group.items.some((item) => item.stato === 'In attesa')
             ),
@@ -1133,6 +1323,7 @@ export default function PrenotazioniScreen() {
             sectionKey: 'accepted',
             title: 'Richieste accettate',
             count: richiesteAccettate.length,
+            unreadCount: unreadAcceptedCount,
             groups: groupedAccepted,
             variant: 'history',
             emptyText: 'Nessuna richiesta accettata',
@@ -1142,6 +1333,7 @@ export default function PrenotazioniScreen() {
             sectionKey: 'cancelled',
             title: 'Annullate dal cliente',
             count: richiesteAnnullateCliente.length,
+            unreadCount: unreadCancelledCount,
             groups: groupedCancelled,
             variant: 'pending',
             emptyText: 'Nessun annullamento cliente',
@@ -1155,6 +1347,7 @@ export default function PrenotazioniScreen() {
             sectionKey: 'salonDeclined',
             title: 'Rifiutate/Annullate Salone',
             count: richiesteCancellateORifiutateDalSalone.length,
+            unreadCount: unreadSalonDeclinedCount,
             groups: groupedSalonDeclined,
             variant: 'history',
             emptyText: 'Nessuna cancellazione dal salone',
@@ -1207,6 +1400,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: IS_ANDROID ? 22 : 18,
     paddingVertical: 14,
     marginBottom: 16,
+    position: 'relative',
     borderWidth: 0,
     borderColor: 'transparent',
     shadowColor: '#000',
@@ -1230,7 +1424,13 @@ const styles = StyleSheet.create({
     gap: 8,
     flex: 1,
     minHeight: 34,
-    paddingRight: IS_ANDROID ? 34 : 38,
+    paddingRight: IS_ANDROID ? 98 : 108,
+  },
+  accordionCountWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexShrink: 0,
   },
   accordionTitle: {
     fontSize: 16,
@@ -1266,26 +1466,74 @@ const styles = StyleSheet.create({
     backgroundColor: '#FDECEC',
     color: '#0F172A',
   },
-  accordionChevronWrap: {
-    position: 'absolute',
-    right: 0,
-    width: 34,
-    height: 34,
+  accordionUnreadBadge: {
+    minWidth: 24,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
     borderRadius: 999,
+    backgroundColor: '#FF4D4F',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#F8FAFC',
-    borderWidth: 0,
-    borderColor: 'transparent',
-    shadowColor: '#000',
-    shadowOpacity: 0.05,
-    shadowRadius: 10,
+    shadowColor: '#FF4D4F',
+    shadowOpacity: 0.16,
+    shadowRadius: 8,
     shadowOffset: { width: 0, height: 3 },
     elevation: 2,
   },
+  accordionUnreadBadgeFloating: {
+    position: 'absolute',
+    top: -10,
+    right: IS_ANDROID ? 18 : 16,
+    minWidth: 24,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: '#FF4D4F',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#FF4D4F',
+    shadowOpacity: 0.16,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 2,
+    zIndex: 3,
+  },
+  accordionUnreadBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: '900',
+    textAlign: 'center',
+    includeFontPadding: false,
+  },
+  accordionChevronWrap: {
+    position: 'absolute',
+    right: 0,
+    minWidth: 84,
+    minHeight: 38,
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#D9E2EC',
+  },
   accordionChevronWrapDanger: {
     backgroundColor: '#FDECEC',
-    borderColor: 'transparent',
+    borderColor: '#F3D5D8',
+  },
+  accordionChevronCountText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#334155',
+    textAlign: 'center',
+    includeFontPadding: false,
+  },
+  accordionChevronCountTextDanger: {
+    color: '#334155',
   },
   accordionChevronWrapExpanded: {
     shadowOpacity: 0.18,
@@ -1511,7 +1759,20 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'center',
-    gap: 8,
+    gap: 14,
+  },
+  guidedSlotExplicitRow: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  guidedSlotExplicitRowDouble: {
+    justifyContent: 'space-between',
+    columnGap: 14,
+  },
+  guidedSlotExplicitRowSingle: {
+    justifyContent: 'center',
+    marginTop: 14,
   },
   guidedSlotChip: {
     minHeight: 38,
@@ -1524,8 +1785,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  guidedSlotChipWide: {
-    minWidth: 150,
+  guidedSlotChipHalf: {
+    width: '48%',
+  },
+  guidedSlotChipCenter: {
+    width: '64%',
+    minWidth: 188,
   },
   guidedSlotChipActive: {
     backgroundColor: '#0F172A',

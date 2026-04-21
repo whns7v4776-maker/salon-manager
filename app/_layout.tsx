@@ -3,6 +3,7 @@ import { GreatVibes_400Regular } from '@expo-google-fonts/great-vibes';
 import { Orbitron_700Bold } from '@expo-google-fonts/orbitron';
 import { PlayfairDisplay_700Bold } from '@expo-google-fonts/playfair-display';
 import { Rajdhani_700Bold } from '@expo-google-fonts/rajdhani';
+import Constants from 'expo-constants';
 import { useFonts } from 'expo-font';
 import * as Notifications from 'expo-notifications';
 import { Redirect, Stack, useSegments, type Href } from 'expo-router';
@@ -21,6 +22,7 @@ import { AppProvider, useAppContext } from '../src/context/AppContext';
 import { appFonts } from '../src/lib/fonts';
 import { tApp } from '../src/lib/i18n';
 import {
+    configurePushNotifications,
     registerPushNotifications,
 } from '../src/lib/push/push-notifications';
 
@@ -34,7 +36,7 @@ const PUBLIC_SEGMENTS = new Set([
   'reset-password',
 ]);
 const OWNER_ROUTE = '/proprietario' as Href;
-const NATIVE_LOGGED_OUT_ROUTE = '/' as Href;
+const NATIVE_LOGGED_OUT_ROUTE = '/cliente-scanner' as Href;
 const isUuid = (value?: string | null) =>
   !!value &&
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
@@ -66,6 +68,18 @@ type OwnerAppuntamentoItem = {
   incassato?: boolean;
   completato?: boolean;
   nonEffettuato?: boolean;
+};
+
+type OwnerRichiestaItem = {
+  id: string;
+  nome: string;
+  cognome: string;
+  email?: string;
+  telefono: string;
+  stato: 'In attesa' | 'Accettata' | 'Rifiutata' | 'Annullata';
+  origine?: 'frontend' | 'backoffice';
+  viewedBySalon?: boolean;
+  cancellationSource?: 'cliente' | 'salone';
 };
 
 const buildAppuntamentoSyncKey = (item: OwnerAppuntamentoItem): string =>
@@ -127,6 +141,14 @@ const mergeOwnerClienti = (
             instagram: item.instagram?.trim() ? item.instagram : existing.instagram,
             birthday: item.birthday?.trim() ? item.birthday : existing.birthday,
             nota: item.nota?.trim() ? item.nota : existing.nota,
+            fonte:
+              item.fonte === 'frontend' || existing.fonte === 'frontend' ? 'frontend' : 'salone',
+            viewedBySalon:
+              existing.viewedBySalon === false || item.viewedBySalon === false ? false : true,
+            annullamentiCount: Math.max(
+              existing.annullamentiCount ?? 0,
+              item.annullamentiCount ?? 0
+            ),
           }
         : item
     );
@@ -134,6 +156,66 @@ const mergeOwnerClienti = (
 
   return Array.from(merged.values());
 };
+
+const normalizeOwnerPhoneIdentity = (value?: string | null) => {
+  const digitsOnly = (value ?? '').replace(/\D+/g, '');
+  return digitsOnly.length > 10 ? digitsOnly.slice(-10) : digitsOnly;
+};
+
+const normalizeOwnerTextIdentity = (value?: string | null) => value?.trim().toLowerCase() ?? '';
+
+const matchesOwnerClientRequestIdentity = (
+  cliente: OwnerClienteItem,
+  richiesta: OwnerRichiestaItem
+) => {
+  const clientEmail = normalizeOwnerTextIdentity(cliente.email);
+  const requestEmail = normalizeOwnerTextIdentity(richiesta.email);
+  if (clientEmail && requestEmail && clientEmail === requestEmail) {
+    return true;
+  }
+
+  const clientPhone = normalizeOwnerPhoneIdentity(cliente.telefono);
+  const requestPhone = normalizeOwnerPhoneIdentity(richiesta.telefono);
+  if (clientPhone && requestPhone && clientPhone === requestPhone) {
+    return true;
+  }
+
+  const requestFullName = `${richiesta.nome} ${richiesta.cognome}`.trim();
+  return normalizeOwnerTextIdentity(cliente.nome) === normalizeOwnerTextIdentity(requestFullName);
+};
+
+const enrichOwnerClientiWithRequestSignals = (
+  clientiItems: OwnerClienteItem[],
+  richiesteItems: OwnerRichiestaItem[]
+) =>
+  clientiItems.map((cliente) => {
+    const matchedRequests = richiesteItems.filter(
+      (item) =>
+        (item.origine ?? 'frontend') === 'frontend' &&
+        matchesOwnerClientRequestIdentity(cliente, item)
+    );
+
+    if (matchedRequests.length === 0) {
+      return cliente;
+    }
+
+    const cancelledByClienteCount = matchedRequests.filter(
+      (item) => item.stato === 'Annullata' && item.cancellationSource === 'cliente'
+    ).length;
+    const hasUnreadFrontendSignal = matchedRequests.some(
+      (item) =>
+        item.viewedBySalon !== true &&
+        (item.stato === 'In attesa' ||
+          (item.stato === 'Annullata' && item.cancellationSource === 'cliente'))
+    );
+
+    return {
+      ...cliente,
+      fonte: 'frontend' as const,
+      viewedBySalon: hasUnreadFrontendSignal ? false : cliente.viewedBySalon,
+      annullamentiCount: Math.max(cliente.annullamentiCount ?? 0, cancelledByClienteCount),
+    };
+  });
 
 function AppContent() {
   const {
@@ -156,6 +238,7 @@ function AppContent() {
   const isOwnerProtectedRoute = OWNER_PROTECTED_SEGMENTS.has(firstSegment);
   const isPublicRoute = PUBLIC_SEGMENTS.has(firstSegment) || !isOwnerProtectedRoute;
   const ownerSnapshotRefreshSeqRef = React.useRef(0);
+  const isExpoGoRuntime = Constants.executionEnvironment === 'storeClient';
   React.useEffect(() => {
     if (Platform.OS !== 'android') {
       return;
@@ -182,7 +265,7 @@ function AppContent() {
   }, []);
 
   const syncOwnerPushRegistration = React.useCallback(async () => {
-    if (!isAuthenticated || !workspaceAccessAllowed) return;
+    if (!isAuthenticated || !workspaceAccessAllowed || isExpoGoRuntime) return;
 
     let workspaceId = isUuid(salonWorkspace.id) ? salonWorkspace.id : '';
 
@@ -224,6 +307,7 @@ function AppContent() {
     salonWorkspace.salonCode,
     setSalonWorkspace,
     workspaceAccessAllowed,
+    isExpoGoRuntime,
   ]);
 
   React.useEffect(() => {
@@ -231,7 +315,12 @@ function AppContent() {
   }, [syncOwnerPushRegistration]);
 
   const refreshOwnerWorkspaceSnapshot = React.useCallback(async () => {
-    if (!isAuthenticated || !workspaceAccessAllowed || !salonWorkspace.salonCode) {
+    if (
+      !isAuthenticated ||
+      !workspaceAccessAllowed ||
+      !salonWorkspace.salonCode ||
+      isExpoGoRuntime
+    ) {
       return;
     }
 
@@ -242,11 +331,16 @@ function AppContent() {
       return;
     }
 
+    const enrichedSnapshotClienti = enrichOwnerClientiWithRequestSignals(
+      snapshot.clienti as OwnerClienteItem[],
+      snapshot.richiestePrenotazione as OwnerRichiestaItem[]
+    );
+
     setRichiestePrenotazione(snapshot.richiestePrenotazione);
     setClienti((current) =>
       mergeOwnerClienti(
         current as OwnerClienteItem[],
-        snapshot.clienti as OwnerClienteItem[]
+        enrichedSnapshotClienti
       )
     );
     setAppuntamenti((current) =>
@@ -263,10 +357,11 @@ function AppContent() {
     setClienti,
     setRichiestePrenotazione,
     workspaceAccessAllowed,
+    isExpoGoRuntime,
   ]);
 
   React.useEffect(() => {
-    if (!isAuthenticated || !workspaceAccessAllowed) {
+    if (!isAuthenticated || !workspaceAccessAllowed || isExpoGoRuntime) {
       return;
     }
 
@@ -295,10 +390,16 @@ function AppContent() {
     refreshOwnerWorkspaceSnapshot,
     syncOwnerPushRegistration,
     workspaceAccessAllowed,
+    isExpoGoRuntime,
   ]);
 
   React.useEffect(() => {
-    if (!isAuthenticated || !workspaceAccessAllowed || !salonWorkspace.salonCode) {
+    if (
+      !isAuthenticated ||
+      !workspaceAccessAllowed ||
+      !salonWorkspace.salonCode ||
+      isExpoGoRuntime
+    ) {
       return;
     }
 
@@ -308,7 +409,18 @@ function AppContent() {
     refreshOwnerWorkspaceSnapshot,
     salonWorkspace.salonCode,
     workspaceAccessAllowed,
+    isExpoGoRuntime,
   ]);
+
+  React.useEffect(() => {
+    if (Platform.OS === 'web') {
+      return;
+    }
+
+    if (!isAuthenticated || !workspaceAccessAllowed) {
+      Notifications.setBadgeCountAsync(0).catch(() => null);
+    }
+  }, [isAuthenticated, workspaceAccessAllowed]);
 
   if (isOwnerProtectedRoute && (!hasInitializedAuth || !isLoaded)) {
     return (
@@ -411,6 +523,10 @@ export default function RootLayout() {
     [appFonts.displayEditorial]: PlayfairDisplay_700Bold,
     [appFonts.displayScript]: GreatVibes_400Regular,
   });
+
+  React.useEffect(() => {
+    configurePushNotifications();
+  }, []);
 
   if (!fontsLoaded) {
     return (

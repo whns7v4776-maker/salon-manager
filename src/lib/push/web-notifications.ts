@@ -1,5 +1,7 @@
 const hasWindow = typeof window !== 'undefined';
 const hasDocument = typeof document !== 'undefined';
+const LIGHT_NOTIFICATION_ICON = '/notification-light-v3.png';
+const DARK_NOTIFICATION_ICON = '/notification-dark-v3.png';
 
 type BrowserNotificationConstructor = {
   new (title: string, options?: NotificationOptions): Notification;
@@ -16,6 +18,16 @@ const getBrowserNotification = () => {
 };
 
 export const canUseWebNotifications = () => hasWindow && hasDocument && !!getBrowserNotification();
+
+const getWebNotificationIcon = () => {
+  if (!hasWindow || typeof window.matchMedia !== 'function') {
+    return LIGHT_NOTIFICATION_ICON;
+  }
+
+  return window.matchMedia('(prefers-color-scheme: dark)').matches
+    ? DARK_NOTIFICATION_ICON
+    : LIGHT_NOTIFICATION_ICON;
+};
 
 export const requestWebNotificationPermission = async () => {
   const BrowserNotification = getBrowserNotification();
@@ -56,6 +68,8 @@ export const showWebNotification = ({
     const notification = new BrowserNotification(title, {
       body,
       tag,
+      icon: getWebNotificationIcon(),
+      badge: LIGHT_NOTIFICATION_ICON,
     });
 
     notification.onclick = () => {

@@ -37,8 +37,8 @@ const resolveRequiredEnv = (key: 'EXPO_PUBLIC_SUPABASE_URL' | 'EXPO_PUBLIC_SUPAB
   return fallbackValue;
 };
 
-const supabaseUrl = resolveRequiredEnv('EXPO_PUBLIC_SUPABASE_URL');
-const supabaseAnonKey = resolveRequiredEnv('EXPO_PUBLIC_SUPABASE_ANON_KEY');
+export const supabaseUrl = resolveRequiredEnv('EXPO_PUBLIC_SUPABASE_URL');
+export const supabaseAnonKey = resolveRequiredEnv('EXPO_PUBLIC_SUPABASE_ANON_KEY');
 
 type SupabaseStorage = {
   getItem: (key: string) => Promise<string | null>;

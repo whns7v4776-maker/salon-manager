@@ -8,7 +8,9 @@ import {
     FlatList,
     Keyboard,
     Linking,
+    Modal,
     Platform,
+    ScrollView,
     StyleSheet,
     Text,
     TextInput,
@@ -26,6 +28,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { ModuleHeroHeader } from '../../components/module-hero-header';
+import { NumberPickerModal } from '../../components/ui/number-picker-modal';
 import { ClearableTextInput } from '../../components/ui/clearable-text-input';
 import { HapticTouchable } from '../../components/ui/haptic-touchable';
 import { KeyboardNextToolbar } from '../../components/ui/keyboard-next-toolbar';
@@ -54,8 +57,12 @@ type ClienteItem = {
   viewedBySalon?: boolean;
   annullamentiCount?: number;
   maxFutureAppointments?: number | null;
+  maxFutureAppointmentsMode?: 'total_future' | 'monthly' | null;
+  maxDailyAppointments?: number | null;
   salon_id: string;
 };
+
+type BookingLimitMode = 'total_future' | 'monthly' | 'daily';
 
 type ClienteSection = {
   key: string;
@@ -87,6 +94,29 @@ const formatReminderHoursLabel = (hours: number) => {
   }
 
   return `${hours} ore prima`;
+};
+
+const getPrimaryBookingLimitBadgeLabel = (cliente: {
+  maxFutureAppointments?: number | null;
+  maxFutureAppointmentsMode?: 'total_future' | 'monthly' | null;
+}) => {
+  if (typeof cliente.maxFutureAppointments === 'number') {
+    return cliente.maxFutureAppointmentsMode === 'monthly'
+      ? `Max mese: ${cliente.maxFutureAppointments}`
+      : `Max futuri: ${cliente.maxFutureAppointments}`;
+  }
+
+  return 'Principale: illimitato';
+};
+
+const getDailyBookingLimitBadgeLabel = (cliente: {
+  maxDailyAppointments?: number | null;
+}) => {
+  if (typeof cliente.maxDailyAppointments === 'number') {
+    return `Max giorno: ${cliente.maxDailyAppointments}`;
+  }
+
+  return 'Giorno: illimitato';
 };
 
 const parsePublicClientBaseUrl = (value: string) => {
@@ -193,7 +223,7 @@ export default function ClientiScreen() {
   const responsive = useResponsiveLayout();
   const {
     salonWorkspace,
-    setSalonWorkspace,
+    updateSalonWorkspacePersisted,
     salonAccountEmail,
     clienti: localClienti,
     setClienti: setLocalClienti,
@@ -213,6 +243,9 @@ export default function ClientiScreen() {
   const instagramInputRef = useRef<TextInput | null>(null);
 
   const [clienteInModifica, setClienteInModifica] = useState<ClienteItem | null>(null);
+  const [limitConfigClient, setLimitConfigClient] = useState<ClienteItem | null>(null);
+  const [limitTargetClient, setLimitTargetClient] = useState<ClienteItem | null>(null);
+  const [limitTargetMode, setLimitTargetMode] = useState<BookingLimitMode | null>(null);
 
   const [nome, setNome] = useState('');
   const [telefono, setTelefono] = useState('');
@@ -229,6 +262,9 @@ export default function ClientiScreen() {
     previousIndex: number;
   } | null>(null);
   const [showRubricaExpanded, setShowRubricaExpanded] = useState(true);
+  const [showNewCustomerExpanded, setShowNewCustomerExpanded] = useState(false);
+  const [isUpdatingCustomerReminder, setIsUpdatingCustomerReminder] = useState(false);
+  const [customerReminderDraftHours, setCustomerReminderDraftHours] = useState<number | null>(null);
   const [formErrors, setFormErrors] = useState<{
     nome?: string;
     telefono?: string;
@@ -240,7 +276,8 @@ export default function ClientiScreen() {
   const handleKeyboardNext = useCallback(() => {
     focusNextInput([nameInputRef, phoneInputRef, emailInputRef, instagramInputRef], focusField);
   }, [focusField]);
-  const canSubmitClienteRequired = nome.trim() !== '' && telefono.trim() !== '';
+  const canSubmitClienteRequired =
+    nome.trim() !== '' && telefono.trim() !== '' && email.trim() !== '';
 
   const mapLocalClientsToScreen = useCallback(
     (items: typeof localClienti, fallbackSalonId: string) =>
@@ -257,6 +294,15 @@ export default function ClientiScreen() {
         maxFutureAppointments:
           typeof item.maxFutureAppointments === 'number' && item.maxFutureAppointments >= 0
             ? item.maxFutureAppointments
+            : null,
+        maxFutureAppointmentsMode:
+          item.maxFutureAppointmentsMode === 'monthly' ||
+          item.maxFutureAppointmentsMode === 'total_future'
+            ? item.maxFutureAppointmentsMode
+            : null,
+        maxDailyAppointments:
+          typeof item.maxDailyAppointments === 'number' && item.maxDailyAppointments >= 0
+            ? item.maxDailyAppointments
             : null,
         salon_id: fallbackSalonId,
       })),
@@ -300,21 +346,48 @@ export default function ClientiScreen() {
     () => buildSalonClientLink(parsedPublicClientBaseUrl, salonWorkspace.salonCode),
     [parsedPublicClientBaseUrl, salonWorkspace.salonCode]
   );
-  const customerReminderHoursBefore = Math.max(
+  const persistedCustomerReminderHoursBefore = Math.max(
     0,
     Math.min(168, Math.round(salonWorkspace.customerReminderHoursBefore ?? 24))
   );
+  const customerReminderHoursBefore =
+    customerReminderDraftHours ?? persistedCustomerReminderHoursBefore;
+
+  React.useEffect(() => {
+    if (
+      !isUpdatingCustomerReminder &&
+      customerReminderDraftHours !== null &&
+      persistedCustomerReminderHoursBefore === customerReminderDraftHours
+    ) {
+      setCustomerReminderDraftHours(null);
+    }
+  }, [
+    customerReminderDraftHours,
+    isUpdatingCustomerReminder,
+    persistedCustomerReminderHoursBefore,
+  ]);
 
   const updateCustomerReminderHours = useCallback(
-    (hours: number) => {
+    async (hours: number) => {
       const normalizedHours = Math.max(0, Math.min(168, Math.round(hours)));
-      setSalonWorkspace((current) => ({
-        ...current,
-        customerReminderHoursBefore: normalizedHours,
-        updatedAt: new Date().toISOString(),
-      }));
+      if (normalizedHours === customerReminderHoursBefore || isUpdatingCustomerReminder) {
+        return;
+      }
+
+      setIsUpdatingCustomerReminder(true);
+      setCustomerReminderDraftHours(normalizedHours);
+
+      try {
+        await updateSalonWorkspacePersisted((current) => ({
+          ...current,
+          customerReminderHoursBefore: normalizedHours,
+          updatedAt: new Date().toISOString(),
+        }));
+      } finally {
+        setIsUpdatingCustomerReminder(false);
+      }
     },
-    [setSalonWorkspace]
+    [customerReminderHoursBefore, isUpdatingCustomerReminder, updateSalonWorkspacePersisted]
   );
 
   const unreadFrontendClientIds = useMemo(
@@ -561,6 +634,7 @@ export default function ClientiScreen() {
 
   const apriModificaCliente = useCallback((cliente: ClienteItem) => {
     swipeableRefs.current[cliente.id]?.close();
+    setShowNewCustomerExpanded(true);
     preparaModificaCliente(cliente);
     requestAnimationFrame(() => {
       listRef.current?.scrollToOffset({ offset: 0, animated: true });
@@ -571,29 +645,30 @@ export default function ClientiScreen() {
   const impostaLimiteAppuntamentiCliente = useCallback((cliente: ClienteItem) => {
     swipeableRefs.current[cliente.id]?.close();
 
-    const applyLimit = (nextLimit: number | null) => {
+    const applyLimit = (
+      nextLimit: number | null,
+      nextMode: BookingLimitMode | null
+    ) => {
       setLocalClienti((current) =>
         current.map((item) =>
           item.id === cliente.id
             ? {
                 ...item,
-                maxFutureAppointments: nextLimit,
+                ...(nextMode === 'daily'
+                  ? {
+                      maxDailyAppointments: nextLimit,
+                    }
+                  : {
+                      maxFutureAppointments: nextLimit,
+                      maxFutureAppointmentsMode: nextLimit === null ? null : nextMode,
+                    }),
               }
             : item
         )
       );
     };
 
-    Alert.alert(
-      'Limite appuntamenti futuri',
-      `Imposta quanti appuntamenti futuri online puo avere ${cliente.full_name}.`,
-      [
-        { text: 'Annulla', style: 'cancel' },
-        { text: 'Nessun limite', onPress: () => applyLimit(null) },
-        { text: 'Massimo 1', onPress: () => applyLimit(1) },
-        { text: 'Massimo 3', onPress: () => applyLimit(3) },
-      ]
-    );
+    setLimitConfigClient(cliente);
   }, [setLocalClienti]);
 
   const salvaCliente = async () => {
@@ -617,7 +692,10 @@ export default function ClientiScreen() {
       nextErrors.telefono = 'Numero di telefono errato (deve avere 10 cifre)';
     }
 
-    if (email.trim() && !isValidEmail(email)) {
+    if (!email.trim()) {
+      invalidFields.push('Email obbligatoria');
+      nextErrors.email = 'Email obbligatoria';
+    } else if (!isValidEmail(email)) {
       invalidFields.push('Email non valida');
       nextErrors.email = 'Email non valida';
     }
@@ -680,7 +758,9 @@ export default function ClientiScreen() {
           viewedBySalon: true,
           annullamentiCount: 0,
           inibito: false,
-          maxFutureAppointments: 3,
+          maxFutureAppointments: 4,
+          maxFutureAppointmentsMode: 'monthly',
+          maxDailyAppointments: 1,
         },
         ...current,
       ]);
@@ -957,9 +1037,7 @@ export default function ClientiScreen() {
             adjustsFontSizeToFit
             minimumFontScale={0.68}
           >
-            {typeof item.maxFutureAppointments === 'number'
-              ? `Limite\n${item.maxFutureAppointments} pren.`
-              : 'Limite\nprenotazioni'}
+            Limite{'\n'}prenotazioni
           </Text>
         </HapticTouchable>
         <HapticTouchable
@@ -1026,54 +1104,92 @@ export default function ClientiScreen() {
               <View style={styles.clienteInitialBadge}>
                 <Text style={styles.clienteInitialText}>{buildClientMonogram(item.full_name)}</Text>
               </View>
-              <View style={styles.clienteNomeWrap}>
-                <Text style={styles.clienteNome} numberOfLines={1}>
-                  {item.full_name}
-                </Text>
-              </View>
-              {hasCancellationAlert ? (
-                <Animated.View
-                  style={styles.statusBadgeCancelledFloating}
-                  entering={FadeIn.duration(140).easing(Easing.out(Easing.cubic))}
-                  layout={LinearTransition.duration(160).easing(Easing.out(Easing.cubic))}
-                >
+              <View style={styles.clienteContentColumn}>
+                <View style={styles.clienteNomeWrap}>
+                  <Text style={styles.clienteNome} numberOfLines={1}>
+                    {item.full_name}
+                  </Text>
+                </View>
+                <View style={styles.clienteContactStack}>
                   <Text
-                    style={styles.statusBadgeCancelledText}
+                    style={styles.clienteTelefono}
                     numberOfLines={1}
                     adjustsFontSizeToFit
-                    minimumFontScale={0.74}
+                    minimumFontScale={0.8}
                   >
-                    Annullati: {cancellationCount}
+                    {item.phone}
                   </Text>
-                </Animated.View>
-              ) : null}
-            </View>
-
-            {typeof item.maxFutureAppointments === 'number' ? (
-              <View style={styles.statusBadgeLimit}>
-                <Text style={styles.statusBadgeLimitText}>
-                  Max futuri: {item.maxFutureAppointments}
-                </Text>
+                  <Text
+                    style={styles.clienteEmailCompact}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.72}
+                  >
+                    {item.email || 'Nessuna email'}
+                  </Text>
+                </View>
+                <View style={styles.statusBadgesRow}>
+                  {hasCancellationAlert ? (
+                    <Animated.View
+                      style={styles.statusBadgeCancelledFloating}
+                      entering={FadeIn.duration(140).easing(Easing.out(Easing.cubic))}
+                      layout={LinearTransition.duration(160).easing(Easing.out(Easing.cubic))}
+                    >
+                      <Text
+                        style={styles.statusBadgeCancelledText}
+                        numberOfLines={1}
+                        adjustsFontSizeToFit
+                        minimumFontScale={0.74}
+                      >
+                        Annullati: {cancellationCount}
+                      </Text>
+                    </Animated.View>
+                  ) : null}
+                  {isInibito ? (
+                    <View style={styles.statusBadgeBlockedCentered}>
+                      <Text style={styles.statusBadgeBlockedText}>Inibito</Text>
+                    </View>
+                  ) : null}
+                  <View
+                    style={[
+                      styles.statusBadgeLimit,
+                      typeof item.maxFutureAppointments !== 'number' && styles.statusBadgeUnlimited,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.statusBadgeLimitText,
+                        typeof item.maxFutureAppointments !== 'number' &&
+                          styles.statusBadgeUnlimitedText,
+                      ]}
+                      numberOfLines={1}
+                      adjustsFontSizeToFit
+                      minimumFontScale={0.78}
+                    >
+                      {getPrimaryBookingLimitBadgeLabel(item)}
+                    </Text>
+                  </View>
+                  <View
+                    style={[
+                      styles.statusBadgeLimit,
+                      typeof item.maxDailyAppointments !== 'number' && styles.statusBadgeUnlimited,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.statusBadgeLimitText,
+                        typeof item.maxDailyAppointments !== 'number' &&
+                          styles.statusBadgeUnlimitedText,
+                      ]}
+                      numberOfLines={1}
+                      adjustsFontSizeToFit
+                      minimumFontScale={0.78}
+                    >
+                      {getDailyBookingLimitBadgeLabel(item)}
+                    </Text>
+                  </View>
+                </View>
               </View>
-            ) : null}
-
-            <View style={styles.clienteContactStack}>
-              <Text
-                style={styles.clienteTelefono}
-                numberOfLines={1}
-                adjustsFontSizeToFit
-                minimumFontScale={0.8}
-              >
-                {item.phone}
-              </Text>
-              <Text
-                style={styles.clienteEmailCompact}
-                numberOfLines={1}
-                adjustsFontSizeToFit
-                minimumFontScale={0.72}
-              >
-                {item.email || 'Nessuna email'}
-              </Text>
             </View>
 
             <View style={styles.quickActionsRow}>
@@ -1149,9 +1265,10 @@ export default function ClientiScreen() {
 
             <View style={styles.cardTrailingMeta}>
               <View style={styles.cardTrailingMetaHintRow}>
-                <View style={styles.cardTrailingMetaHintPill}>
-                  <Ionicons name="swap-horizontal" size={16} color="#8f2d2d" />
+                <View style={styles.cardTrailingMetaHintBar}>
+                  <Ionicons name="arrow-back-outline" size={15} color="#a3554c" />
                   <Text style={styles.cardTrailingMetaHint}>Scorri per azioni rapide</Text>
+                  <Ionicons name="arrow-forward-outline" size={15} color="#a3554c" />
                 </View>
               </View>
             </View>
@@ -1198,52 +1315,62 @@ export default function ClientiScreen() {
                 salonName={salonWorkspace.salonName}
                 salonNameDisplayStyle={salonWorkspace.salonNameDisplayStyle}
                 salonNameFontVariant={salonWorkspace.salonNameFontVariant}
-                subtitle="Gestisci i clienti del tuo salone, aggiungili rapidamente e tieni tutto ordinato."
               />
+
+              <View style={styles.clientOverviewRow}>
+                <View style={[styles.clientOverviewCard, styles.clientOverviewCardSuccess]}>
+                  <Text style={styles.clientOverviewCount}>{clienti.length}</Text>
+                  <Text style={styles.clientOverviewLabel}>Clienti</Text>
+                </View>
+                <View style={[styles.clientOverviewCard, styles.clientOverviewCardAlert]}>
+                  <Text style={styles.clientOverviewCount}>{cancellationAlertsCount}</Text>
+                  <Text style={styles.clientOverviewLabel}>Annullati</Text>
+                </View>
+              </View>
+
+              <Text style={styles.heroClientSubtitle}>
+                Gestisci i clienti del tuo salone, aggiungili rapidamente e tieni tutto ordinato.
+              </Text>
             </View>
 
             <View style={styles.bookingCard}>
-              <View style={styles.bookingHeader}>
-                <View style={styles.bookingHeaderLeft}>
-                  <View style={styles.bookingHeadingRow}>
-                    <Text
-                      style={styles.bookingHeading}
-                      numberOfLines={1}
-                      adjustsFontSizeToFit
-                      minimumFontScale={0.86}
-                    >
-                      {clienteInModifica ? 'Modifica cliente' : 'Nuovo cliente'}
-                    </Text>
-                  </View>
-                  <Text style={styles.searchSubtitle}>
-                    {loadingInit
-                      ? 'Caricamento salone...'
-                      : clienteInModifica
-                      ? 'Stai modificando un cliente esistente.'
-                        : 'Aggiungi o aggiorna rapidamente la rubrica del salone.'}
-                  </Text>
-                </View>
-
-                <View style={styles.bookingBadgeRow}>
-                  <Animated.View
-                    style={[styles.bookingBadge, styles.bookingBadgeSuccess]}
-                    entering={FadeIn.duration(130).easing(Easing.out(Easing.cubic))}
-                    layout={LinearTransition.duration(150).easing(Easing.out(Easing.cubic))}
-                  >
-                    <Text style={[styles.bookingBadgeText, styles.bookingBadgeSuccessText]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.76}>{clienti.length} clienti</Text>
-                  </Animated.View>
-                  <Animated.View
-                    style={[styles.bookingBadge, styles.bookingBadgeAlert]}
-                    entering={FadeIn.duration(140).easing(Easing.out(Easing.cubic))}
-                    layout={LinearTransition.duration(160).easing(Easing.out(Easing.cubic))}
-                  >
-                    <Text style={[styles.bookingBadgeText, styles.bookingBadgeAlertText]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.76}>
-                      annullati {cancellationAlertsCount}
-                    </Text>
-                  </Animated.View>
-                </View>
+              <View style={styles.searchHeaderRow}>
+                <Text style={styles.searchTitle}>Aggiungi nuovo cliente</Text>
+                <HapticTouchable
+                  style={[
+                    styles.searchChevronWrap,
+                    showNewCustomerExpanded && styles.searchChevronWrapExpanded,
+                  ]}
+                  onPress={() => {
+                    haptic.light();
+                    setShowNewCustomerExpanded((current) => !current);
+                  }}
+                  pressScale={0.985}
+                  pressOpacity={0.98}
+                  accessibilityRole="button"
+                  accessibilityLabel={
+                    showNewCustomerExpanded
+                      ? 'Chiudi aggiungi nuovo cliente'
+                      : 'Apri aggiungi nuovo cliente'
+                  }
+                >
+                  <AnimatedChevron expanded={showNewCustomerExpanded} />
+                </HapticTouchable>
               </View>
-                <>
+              <Text style={styles.searchSubtitle}>
+                {loadingInit
+                  ? 'Caricamento salone...'
+                  : clienteInModifica
+                  ? 'Modifica attiva: apri il blocco per aggiornare i dati del cliente.'
+                  : 'Apri il blocco solo quando ti serve inserire un nuovo cliente.'}
+              </Text>
+
+              {showNewCustomerExpanded ? (
+                <Animated.View
+                  entering={FadeIn.duration(185).easing(Easing.out(Easing.cubic))}
+                  exiting={FadeOut.duration(130).easing(Easing.out(Easing.cubic))}
+                  layout={LinearTransition.duration(210).easing(Easing.out(Easing.cubic))}
+                >
                   <View style={styles.formFieldsWrap}>
                     <ClearableTextInput
                       ref={nameInputRef}
@@ -1294,7 +1421,7 @@ export default function ClientiScreen() {
 
                     <ClearableTextInput
                       ref={emailInputRef}
-                      placeholder="Email (Opzionale)"
+                      placeholder="Inserisci email"
                       placeholderTextColor="#9a9a9a"
                       value={email}
                       onChangeText={(value) => {
@@ -1376,7 +1503,7 @@ export default function ClientiScreen() {
                   </View>
 
                   <Text style={styles.requiredFieldsHint}>
-                    Obbligatori: nome e cognome, numero di telefono.
+                    Obbligatori: nome e cognome, numero di telefono, email.
                   </Text>
 
                   <View style={styles.actionRow}>
@@ -1412,7 +1539,8 @@ export default function ClientiScreen() {
                       </Text>
                     </HapticTouchable>
                   </View>
-                </>
+                </Animated.View>
+              ) : null}
             </View>
 
             <View style={styles.reminderCard}>
@@ -1423,7 +1551,7 @@ export default function ClientiScreen() {
                     styles.reminderStatusBadge,
                     customerReminderHoursBefore > 0
                       ? styles.reminderStatusBadgeActive
-                      : styles.reminderStatusBadgeMuted,
+                      : styles.reminderStatusBadgeDanger,
                   ]}
                 >
                   <Text
@@ -1431,7 +1559,7 @@ export default function ClientiScreen() {
                       styles.reminderStatusBadgeText,
                       customerReminderHoursBefore > 0
                         ? styles.reminderStatusBadgeTextActive
-                        : styles.reminderStatusBadgeTextMuted,
+                        : styles.reminderStatusBadgeTextDanger,
                     ]}
                   >
                     {formatReminderHoursLabel(customerReminderHoursBefore)}
@@ -1453,10 +1581,12 @@ export default function ClientiScreen() {
                       style={[
                         styles.reminderOptionChip,
                         isActive && styles.reminderOptionChipActive,
+                        isUpdatingCustomerReminder && styles.reminderOptionChipDisabled,
                       ]}
                       onPress={() => updateCustomerReminderHours(hours)}
-                      pressScale={0.98}
-                      pressOpacity={0.96}
+                      disabled={isUpdatingCustomerReminder}
+                      pressScale={1}
+                      pressOpacity={0.92}
                     >
                       <Text
                         style={[
@@ -1476,7 +1606,7 @@ export default function ClientiScreen() {
                   styles.reminderSummaryCard,
                   customerReminderHoursBefore > 0
                     ? styles.reminderSummaryCardActive
-                    : styles.reminderSummaryCardMuted,
+                    : styles.reminderSummaryCardDanger,
                 ]}
               >
                 <Text
@@ -1484,7 +1614,7 @@ export default function ClientiScreen() {
                     styles.reminderSummaryText,
                     customerReminderHoursBefore > 0
                       ? styles.reminderSummaryTextActive
-                      : styles.reminderSummaryTextMuted,
+                      : styles.reminderSummaryTextDanger,
                   ]}
                 >
                   {customerReminderHoursBefore > 0
@@ -1558,15 +1688,17 @@ export default function ClientiScreen() {
                   <View style={styles.clientSectionsWrap}>
                     {item.sections.map((section) => (
                       <View key={section.key} style={styles.clientMonthSection}>
-                        <View style={styles.clientMonthSectionHeader}>
-                          <Animated.Text
-                            style={styles.clientMonthSectionTitle}
-                            entering={FadeIn.duration(130).easing(Easing.out(Easing.cubic))}
-                            layout={LinearTransition.duration(150).easing(Easing.out(Easing.cubic))}
-                          >
-                            {section.title}
-                          </Animated.Text>
-                        </View>
+                        {section.title !== 'Data non disponibile' ? (
+                          <View style={styles.clientMonthSectionHeader}>
+                            <Animated.Text
+                              style={styles.clientMonthSectionTitle}
+                              entering={FadeIn.duration(130).easing(Easing.out(Easing.cubic))}
+                              layout={LinearTransition.duration(150).easing(Easing.out(Easing.cubic))}
+                            >
+                              {section.title}
+                            </Animated.Text>
+                          </View>
+                        ) : null}
                         {section.items.map((clienteItem) => (
                           <Animated.View
                             key={clienteItem.uiKey ?? clienteItem.id}
@@ -1605,6 +1737,196 @@ export default function ClientiScreen() {
         }}
       />
 
+      <NumberPickerModal
+        visible={!!limitTargetClient && !!limitTargetMode}
+        title={
+          limitTargetMode === 'monthly'
+            ? `Limite mensile · ${limitTargetClient?.full_name ?? ''}`
+            : limitTargetMode === 'daily'
+              ? `Limite giornaliero · ${limitTargetClient?.full_name ?? ''}`
+              : `Limite futuri · ${limitTargetClient?.full_name ?? ''}`
+        }
+        initialValue={
+          limitTargetMode === 'daily'
+            ? typeof limitTargetClient?.maxDailyAppointments === 'number'
+              ? limitTargetClient.maxDailyAppointments
+              : 1
+            : typeof limitTargetClient?.maxFutureAppointments === 'number'
+              ? limitTargetClient.maxFutureAppointments
+              : 4
+        }
+        min={1}
+        max={10}
+        step={1}
+        presets={[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]}
+        suffix=" pren."
+        selectionHintOverride={
+          limitTargetMode === 'monthly'
+            ? 'Imposta il limite in numero di prenotazioni mensili.'
+            : limitTargetMode === 'daily'
+              ? 'Imposta il limite in numero di prenotazioni per singolo giorno.'
+              : 'Imposta il limite in numero di prenotazioni future.'
+        }
+        onClose={() => {
+          setLimitTargetClient(null);
+          setLimitTargetMode(null);
+        }}
+        onConfirm={(value) => {
+          const numericValue = Number(value);
+          if (!limitTargetClient || !limitTargetMode || !Number.isFinite(numericValue)) {
+            setLimitTargetClient(null);
+            setLimitTargetMode(null);
+            return;
+          }
+
+          setLocalClienti((current) =>
+            current.map((item) =>
+              item.id === limitTargetClient.id
+                ? {
+                    ...item,
+                    ...(limitTargetMode === 'daily'
+                      ? {
+                          maxDailyAppointments: numericValue,
+                        }
+                      : {
+                          maxFutureAppointments: numericValue,
+                          maxFutureAppointmentsMode: limitTargetMode,
+                        }),
+                  }
+                : item
+            )
+          );
+          setLimitTargetClient(null);
+          setLimitTargetMode(null);
+        }}
+      />
+
+      <Modal
+        visible={!!limitConfigClient}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setLimitConfigClient(null)}
+      >
+        <View style={styles.limitConfigBackdrop}>
+          <HapticTouchable
+            style={styles.limitConfigDismissArea}
+            hapticType="none"
+            activeOpacity={1}
+            onPress={() => setLimitConfigClient(null)}
+          />
+          <View style={styles.limitConfigSheet}>
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={styles.limitConfigScrollContent}
+            >
+              <Text style={styles.limitConfigTitle}>Limite prenotazioni online</Text>
+              <Text style={styles.limitConfigDescription}>
+                Scegli come limitare le prenotazioni di {limitConfigClient?.full_name}.
+              </Text>
+
+              <View style={styles.limitConfigSection}>
+                <Text style={styles.limitConfigSectionTitle}>Regola principale</Text>
+                <Text style={styles.limitConfigSectionHint}>
+                  Qui scegli la regola generale: nessun limite, totale futuri oppure per mese.
+                </Text>
+
+                <HapticTouchable
+                  style={styles.limitConfigOption}
+                  onPress={() => {
+                    if (!limitConfigClient) return;
+                    setLocalClienti((current) =>
+                      current.map((item) =>
+                        item.id === limitConfigClient.id
+                          ? {
+                              ...item,
+                              maxFutureAppointments: null,
+                              maxFutureAppointmentsMode: null,
+                            }
+                          : item
+                      )
+                    );
+                    setLimitConfigClient(null);
+                  }}
+                >
+                  <Text style={styles.limitConfigOptionText}>Nessun limite principale</Text>
+                </HapticTouchable>
+
+                <HapticTouchable
+                  style={styles.limitConfigOption}
+                  onPress={() => {
+                    if (!limitConfigClient) return;
+                    setLimitTargetClient(limitConfigClient);
+                    setLimitTargetMode('total_future');
+                    setLimitConfigClient(null);
+                  }}
+                >
+                  <Text style={styles.limitConfigOptionText}>Totale futuri</Text>
+                </HapticTouchable>
+
+                <HapticTouchable
+                  style={styles.limitConfigOption}
+                  onPress={() => {
+                    if (!limitConfigClient) return;
+                    setLimitTargetClient(limitConfigClient);
+                    setLimitTargetMode('monthly');
+                    setLimitConfigClient(null);
+                  }}
+                >
+                  <Text style={styles.limitConfigOptionText}>Per mese</Text>
+                </HapticTouchable>
+              </View>
+
+              <View style={styles.limitConfigSection}>
+                <Text style={styles.limitConfigSectionTitle}>Limite giornaliero separato</Text>
+                <Text style={styles.limitConfigSectionHint}>
+                  Questa regola viaggia a parte. Conta solo le prenotazioni dello stesso giorno e
+                  dello stesso mestiere/servizio, senza toccare i limiti futuri o mensili.
+                </Text>
+
+                <HapticTouchable
+                  style={styles.limitConfigOption}
+                  onPress={() => {
+                    if (!limitConfigClient) return;
+                    setLimitTargetClient(limitConfigClient);
+                    setLimitTargetMode('daily');
+                    setLimitConfigClient(null);
+                  }}
+                >
+                  <Text style={styles.limitConfigOptionText}>Per giorno</Text>
+                </HapticTouchable>
+
+                <HapticTouchable
+                  style={styles.limitConfigOption}
+                  onPress={() => {
+                    if (!limitConfigClient) return;
+                    setLocalClienti((current) =>
+                      current.map((item) =>
+                        item.id === limitConfigClient.id
+                          ? {
+                              ...item,
+                              maxDailyAppointments: null,
+                            }
+                          : item
+                      )
+                    );
+                    setLimitConfigClient(null);
+                  }}
+                >
+                  <Text style={styles.limitConfigOptionText}>Nessun limite giornaliero</Text>
+                </HapticTouchable>
+              </View>
+
+              <HapticTouchable
+                style={[styles.limitConfigOption, styles.limitConfigCancelOption]}
+                onPress={() => setLimitConfigClient(null)}
+              >
+                <Text style={styles.limitConfigCancelText}>Annulla</Text>
+              </HapticTouchable>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
       {pendingDeletedClient ? (
         <View style={styles.deleteUndoBanner}>
           <Text style={styles.deleteUndoBannerText}>Cliente eliminato definitivamente tra 3s</Text>
@@ -1640,12 +1962,10 @@ const styles = StyleSheet.create({
   heroCard: {
     backgroundColor: '#FFFFFF',
     borderRadius: 28,
-    borderBottomLeftRadius: 0,
-    borderBottomRightRadius: 0,
     paddingHorizontal: IS_ANDROID ? 28 : 22,
     paddingTop: 0,
-    paddingBottom: 4,
-    marginBottom: 0,
+    paddingBottom: 20,
+    marginBottom: 12,
     borderWidth: 0,
     shadowColor: '#000',
     shadowOpacity: 0.15,
@@ -1653,22 +1973,63 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 18 },
     elevation: 11,
   },
+  clientOverviewRow: {
+    flexDirection: 'row',
+    gap: 14,
+    marginTop: 4,
+  },
+  clientOverviewCard: {
+    flex: 1,
+    minHeight: 126,
+    borderRadius: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 18,
+  },
+  clientOverviewCardSuccess: {
+    backgroundColor: '#E9F9EF',
+  },
+  clientOverviewCardAlert: {
+    backgroundColor: '#FCEAEA',
+  },
+  clientOverviewCount: {
+    fontSize: 34,
+    lineHeight: 38,
+    fontWeight: '900',
+    color: '#0F172A',
+    textAlign: 'center',
+  },
+  clientOverviewLabel: {
+    marginTop: 12,
+    fontSize: 17,
+    lineHeight: 22,
+    fontWeight: '800',
+    color: '#64748B',
+    textAlign: 'center',
+  },
+  heroClientSubtitle: {
+    marginTop: 18,
+    fontSize: 15,
+    lineHeight: 23,
+    fontWeight: '600',
+    color: '#64748B',
+    textAlign: 'center',
+    paddingHorizontal: IS_ANDROID ? 10 : 4,
+  },
   bookingCard: {
     backgroundColor: '#FFFFFF',
     borderRadius: 24,
-    borderTopLeftRadius: 0,
-    borderTopRightRadius: 0,
     paddingHorizontal: IS_ANDROID ? 24 : 18,
     paddingTop: 18,
     paddingBottom: 18,
     marginBottom: 12,
     marginTop: 0,
     shadowColor: '#000',
-    shadowOpacity: 0,
-    shadowRadius: 0,
-    shadowOffset: { width: 0, height: 0 },
-    elevation: 0,
-    borderWidth: 0,
+    shadowOpacity: 0.04,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 1,
   },
   reminderCard: {
     backgroundColor: '#FFFFFF',
@@ -1712,8 +2073,8 @@ const styles = StyleSheet.create({
   reminderStatusBadgeActive: {
     backgroundColor: '#DCFCE7',
   },
-  reminderStatusBadgeMuted: {
-    backgroundColor: '#E2E8F0',
+  reminderStatusBadgeDanger: {
+    backgroundColor: '#FDECEC',
   },
   reminderStatusBadgeText: {
     fontSize: 11,
@@ -1722,8 +2083,8 @@ const styles = StyleSheet.create({
   reminderStatusBadgeTextActive: {
     color: '#166534',
   },
-  reminderStatusBadgeTextMuted: {
-    color: '#475569',
+  reminderStatusBadgeTextDanger: {
+    color: '#B91C1C',
   },
   reminderOptionsRow: {
     flexDirection: 'row',
@@ -1746,6 +2107,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#0F172A',
     borderColor: '#0F172A',
   },
+  reminderOptionChipDisabled: {
+    opacity: 0.6,
+  },
   reminderOptionChipText: {
     fontSize: 12,
     fontWeight: '900',
@@ -1766,10 +2130,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#BBF7D0',
   },
-  reminderSummaryCardMuted: {
-    backgroundColor: '#F8FAFC',
+  reminderSummaryCardDanger: {
+    backgroundColor: '#FDECEC',
     borderWidth: 1,
-    borderColor: '#E2E8F0',
+    borderColor: '#FECACA',
   },
   reminderSummaryText: {
     fontSize: 13,
@@ -1780,8 +2144,8 @@ const styles = StyleSheet.create({
   reminderSummaryTextActive: {
     color: '#166534',
   },
-  reminderSummaryTextMuted: {
-    color: '#475569',
+  reminderSummaryTextDanger: {
+    color: '#B91C1C',
   },
   reminderHint: {
     marginTop: 14,
@@ -1796,10 +2160,19 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: 12,
   },
-  bookingHeaderLeft: {
+  bookingHeaderTopRow: {
     width: '100%',
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  bookingHeaderLeft: {
+    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    paddingLeft: 44,
+    paddingRight: 12,
   },
   bookingHeadingRow: {
     alignItems: 'center',
@@ -1835,6 +2208,25 @@ const styles = StyleSheet.create({
     gap: 8,
     marginTop: 8,
     flexWrap: 'wrap',
+  },
+  bookingChevronWrap: {
+    flexShrink: 0,
+    width: 44,
+    height: 44,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: 'rgba(15, 23, 42, 0.06)',
+    shadowColor: '#000',
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 1,
+  },
+  bookingChevronWrapExpanded: {
+    shadowOpacity: 0.18,
   },
   bookingBadgeAlert: {
     backgroundColor: '#FDECEC',
@@ -2133,7 +2525,7 @@ const styles = StyleSheet.create({
   },
   clienteTopRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     width: '100%',
     minWidth: 0,
     gap: 8,
@@ -2167,13 +2559,19 @@ const styles = StyleSheet.create({
     width: '100%',
     minWidth: 0,
   },
+  clienteContentColumn: {
+    flex: 1,
+    minWidth: 0,
+    gap: 5,
+    paddingTop: 2,
+  },
   clienteNomeWrap: {
-    flexGrow: 1,
+    flexGrow: 0,
     flexShrink: 1,
     minWidth: 0,
-    minHeight: 40,
-    justifyContent: 'center',
-    paddingTop: 3,
+    minHeight: 0,
+    justifyContent: 'flex-start',
+    paddingTop: 0,
   },
   clienteNome: {
     fontSize: 15,
@@ -2189,18 +2587,18 @@ const styles = StyleSheet.create({
   },
   clienteContactStack: {
     flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 1,
+    alignItems: 'flex-start',
+    justifyContent: 'flex-start',
+    gap: 0,
     width: '100%',
     minWidth: 0,
-    marginTop: -1,
+    marginTop: 0,
   },
   clienteTelefono: {
     fontSize: IS_ANDROID ? 10.6 : 11.2,
     color: '#0F172A',
     fontWeight: '800',
-    textAlign: 'center',
+    textAlign: 'left',
     width: '100%',
     minWidth: 0,
     paddingRight: 0,
@@ -2219,12 +2617,21 @@ const styles = StyleSheet.create({
     fontSize: IS_ANDROID ? 9.2 : 9.8,
     color: '#0F172A',
     fontWeight: '700',
-    textAlign: 'center',
+    textAlign: 'left',
     flexShrink: 1,
     minWidth: 0,
     flexGrow: 0,
     maxWidth: '100%',
     paddingRight: 0,
+  },
+  statusBadgesRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    flexWrap: 'nowrap',
+    gap: 4,
+    width: '100%',
+    minWidth: 0,
   },
   clienteInstagramCompact: {
     fontSize: IS_ANDROID ? 10 : 11,
@@ -2250,7 +2657,7 @@ const styles = StyleSheet.create({
     flexWrap: 'nowrap',
     justifyContent: 'flex-start',
     gap: 4,
-    marginTop: 0,
+    marginTop: 2,
     width: '100%',
   },
   quickActionsRowCompact: {
@@ -2313,7 +2720,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 0,
-    paddingTop: 3,
+    paddingTop: 2,
     width: '100%',
     borderTopWidth: 1,
     borderTopColor: 'rgba(15, 23, 42, 0.06)',
@@ -2326,38 +2733,38 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   cardTrailingMetaHint: {
-    fontSize: 10,
-    fontWeight: '900',
-    color: '#b91c1c',
+    fontSize: 9.5,
+    fontWeight: '800',
+    color: '#a3554c',
     textAlign: 'center',
     width: 'auto',
     flexShrink: 1,
-    letterSpacing: 0.15,
+    letterSpacing: 0.1,
   },
   cardTrailingMetaHintRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
     width: '100%',
   },
-  cardTrailingMetaHintPill: {
+  cardTrailingMetaHintBar: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 7,
-    minHeight: 34,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 999,
-    backgroundColor: '#FFF7F7',
+    gap: 6,
+    width: '100%',
+    minHeight: 24,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 10,
+    backgroundColor: '#FFF5F2',
     borderWidth: 1,
-    borderColor: 'rgba(185, 28, 28, 0.14)',
-    shadowColor: '#7f1d1d',
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 3 },
-    elevation: 2,
+    borderColor: 'rgba(163, 85, 76, 0.14)',
+    shadowColor: '#9a6b61',
+    shadowOpacity: 0.025,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 0,
   },
   swipeActionsRowLeft: {
     flexDirection: 'row',
@@ -2471,7 +2878,7 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
     marginTop: 0,
     marginBottom: 0,
-    marginLeft: 'auto',
+    marginLeft: 0,
   },
   statusBadgeCancelledText: {
     fontSize: IS_ANDROID ? 7.7 : 8.2,
@@ -2482,21 +2889,31 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   statusBadgeLimit: {
-    alignSelf: 'center',
-    marginTop: 4,
-    marginBottom: 4,
+    alignSelf: 'flex-start',
+    marginTop: 0,
+    marginBottom: 0,
     backgroundColor: '#F3E8FF',
     borderWidth: 1,
     borderColor: 'rgba(109, 40, 217, 0.14)',
     borderRadius: 999,
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
     paddingVertical: 5,
+    flexShrink: 1,
+    minWidth: 0,
   },
   statusBadgeLimitText: {
-    fontSize: 10,
+    fontSize: 9.6,
     fontWeight: '900',
     color: '#6d28d9',
     textAlign: 'center',
+    flexShrink: 1,
+  },
+  statusBadgeUnlimited: {
+    backgroundColor: '#EFF6FF',
+    borderColor: 'rgba(37, 99, 235, 0.14)',
+  },
+  statusBadgeUnlimitedText: {
+    color: '#1D4ED8',
   },
   deleteUndoBanner: {
     position: 'absolute',
@@ -2533,6 +2950,93 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '900',
     color: '#dc2626',
+  },
+  limitConfigBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.36)',
+    justifyContent: 'center',
+    paddingHorizontal: 18,
+    paddingVertical: 28,
+  },
+  limitConfigDismissArea: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  limitConfigSheet: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 30,
+    borderWidth: 1,
+    borderColor: '#D9E3EF',
+    paddingHorizontal: 18,
+    paddingVertical: 18,
+    shadowColor: '#000',
+    shadowOpacity: 0.16,
+    shadowRadius: 26,
+    shadowOffset: { width: 0, height: 14 },
+    elevation: 14,
+    maxHeight: '86%',
+  },
+  limitConfigScrollContent: {
+    gap: 14,
+  },
+  limitConfigTitle: {
+    fontSize: 22,
+    fontWeight: '900',
+    color: '#111111',
+    textAlign: 'center',
+  },
+  limitConfigDescription: {
+    fontSize: 15,
+    lineHeight: 23,
+    fontWeight: '700',
+    color: '#64748B',
+    textAlign: 'center',
+  },
+  limitConfigSection: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: '#D9E3EF',
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    gap: 10,
+  },
+  limitConfigSectionTitle: {
+    fontSize: 15,
+    fontWeight: '900',
+    color: '#0F172A',
+    textAlign: 'center',
+  },
+  limitConfigSectionHint: {
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: '700',
+    color: '#64748B',
+    textAlign: 'center',
+  },
+  limitConfigOption: {
+    backgroundColor: '#EEF2F7',
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    borderWidth: 1,
+    borderColor: '#D2DAE5',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  limitConfigOptionText: {
+    fontSize: 16,
+    fontWeight: '900',
+    color: '#111111',
+    textAlign: 'center',
+  },
+  limitConfigCancelOption: {
+    backgroundColor: '#E5E7EB',
+  },
+  limitConfigCancelText: {
+    fontSize: 16,
+    fontWeight: '900',
+    color: '#111111',
+    textAlign: 'center',
   },
   emptyCard: {
     backgroundColor: '#FFFFFF',

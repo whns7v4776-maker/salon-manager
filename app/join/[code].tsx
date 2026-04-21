@@ -17,8 +17,8 @@ export default function JoinSalonScreen() {
 
   const openWebBooking = () => {
     router.replace({
-      pathname: '/cliente',
-      params: { salon: normalizedCode, mode: 'booking' },
+      pathname: '/cliente-screen',
+      params: { salon: normalizedCode },
     });
   };
 
@@ -147,7 +147,7 @@ export default function JoinSalonScreen() {
         </Text>
         <TouchableOpacity
           style={styles.primaryButton}
-          onPress={() => router.replace('/cliente')}
+          onPress={() => router.replace('/cliente-screen')}
           activeOpacity={0.9}
         >
           <Text style={styles.primaryButtonText}>Torna all&apos;area cliente</Text>

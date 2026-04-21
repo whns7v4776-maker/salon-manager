@@ -100,6 +100,14 @@ const isSameOperatorIdentity = (
   return false;
 };
 
+const normalizeCustomerNameKey = (value?: string) =>
+  (value ?? '').trim().toLocaleLowerCase('it-IT');
+
+const isSameCustomerIdentity = (
+  appointment: { cliente?: string },
+  customer: { nome: string }
+) => normalizeCustomerNameKey(appointment.cliente) === normalizeCustomerNameKey(customer.nome);
+
 const buildClientInviteMessage = ({
   brandName,
   salonClientLink,
@@ -222,6 +230,7 @@ export default function HomeScreen() {
   const router = useRouter();
   const responsive = useResponsiveLayout();
   const scrollRef = useRef<ScrollView | null>(null);
+  const [clientAccessSectionY, setClientAccessSectionY] = useState(0);
   const settingsTapLockRef = useRef(false);
   const salonNameFieldRef = useRef<TextInput | null>(null);
   const activityCategoryFieldRef = useRef<TextInput | null>(null);
@@ -240,6 +249,7 @@ export default function HomeScreen() {
     salonAccountEmail,
     salonWorkspace,
     setSalonWorkspace,
+    updateSalonWorkspacePersisted,
     switchSalonAccount,
     appLanguage,
     showOnboarding,
@@ -251,7 +261,9 @@ export default function HomeScreen() {
 
   const [accountEmailInput, setAccountEmailInput] = useState(salonAccountEmail);
   const [salonNameInput, setSalonNameInput] = useState(salonWorkspace.salonName);
-  const [salonNameDisplayStyleInput] = useState<'corsivo' | 'stampatello' | 'minuscolo'>(
+  const [salonNameDisplayStyleInput, setSalonNameDisplayStyleInput] = useState<
+    'corsivo' | 'stampatello' | 'minuscolo'
+  >(
     salonWorkspace.salonNameDisplayStyle
   );
   const [salonNameFontVariantInput, setSalonNameFontVariantInput] = useState(
@@ -272,6 +284,12 @@ export default function HomeScreen() {
   const [showFontPicker, setShowFontPicker] = useState(false);
   const [showOperatorAgendaModal, setShowOperatorAgendaModal] = useState(false);
   const [selectedOperatorBoardId, setSelectedOperatorBoardId] = useState<string | null>(null);
+  const [showCustomerInsightsModal, setShowCustomerInsightsModal] = useState(false);
+  const [selectedCustomerInsightId, setSelectedCustomerInsightId] = useState<string | null>(null);
+  const [customerInsightSearchQuery, setCustomerInsightSearchQuery] = useState('');
+  const [customerAppointmentFilter, setCustomerAppointmentFilter] = useState<
+    'all' | 'today' | 'future' | 'past'
+  >('all');
   const [profileFieldErrors, setProfileFieldErrors] = useState<{
     businessPhone?: string;
     accountEmail?: string;
@@ -293,6 +311,18 @@ export default function HomeScreen() {
       focusField
     );
   }, [focusField]);
+
+  const scrollToQrSection = useCallback(() => {
+    requestAnimationFrame(() => {
+      scrollRef.current?.scrollTo({
+        y: Math.max(
+          clientAccessSectionY + (responsive.isDesktop ? 980 : 1260),
+          0
+        ),
+        animated: true,
+      });
+    });
+  }, [clientAccessSectionY, responsive.isDesktop]);
 
   const oggi = getTodayDateString();
   const numeroClienti = clienti.length;
@@ -474,6 +504,237 @@ export default function HomeScreen() {
     [operatorDailyBoards, selectedOperatorBoardId]
   );
 
+  const customerInsightBoards = useMemo(() => {
+    return clienti
+      .map((customer) => {
+        const customerAppointments = appuntamenti
+          .filter((item) => isSameCustomerIdentity(item, customer))
+          .sort((first, second) => {
+            const firstDate = first.data ?? oggi;
+            const secondDate = second.data ?? oggi;
+
+            if (firstDate !== secondDate) {
+              return secondDate.localeCompare(firstDate);
+            }
+
+            return second.ora.localeCompare(first.ora);
+          });
+
+        const pastAppointments = customerAppointments.filter((item) => (item.data ?? oggi) < oggi);
+        const todayAppointments = customerAppointments.filter((item) => (item.data ?? oggi) === oggi);
+        const futureAppointments = customerAppointments.filter((item) => (item.data ?? oggi) > oggi);
+        const deliveredAppointments = customerAppointments.filter((item) => !item.nonEffettuato);
+        const completedAppointments = customerAppointments.filter((item) => item.completato);
+        const incassatoAppointments = customerAppointments.filter((item) => item.incassato);
+        const totalSpent = deliveredAppointments.reduce((total, item) => total + item.prezzo, 0);
+        const collectedSpent = incassatoAppointments.reduce((total, item) => total + item.prezzo, 0);
+        const averageTicket =
+          deliveredAppointments.length > 0 ? totalSpent / deliveredAppointments.length : 0;
+        const nextAppointment =
+          [...todayAppointments, ...futureAppointments]
+            .sort((first, second) => {
+              const firstDate = first.data ?? oggi;
+              const secondDate = second.data ?? oggi;
+
+              if (firstDate !== secondDate) {
+                return firstDate.localeCompare(secondDate);
+              }
+
+              return first.ora.localeCompare(second.ora);
+            })[0] ?? null;
+        const latestAppointment = customerAppointments[0] ?? null;
+        const serviceStats = Object.entries(
+          deliveredAppointments.reduce<Record<string, { count: number; total: number }>>(
+            (accumulator, item) => {
+              const current = accumulator[item.servizio] ?? { count: 0, total: 0 };
+              accumulator[item.servizio] = {
+                count: current.count + 1,
+                total: current.total + item.prezzo,
+              };
+              return accumulator;
+            },
+            {}
+          )
+        )
+          .map(([serviceName, stats]) => ({
+            serviceName,
+            count: stats.count,
+            total: stats.total,
+          }))
+          .sort((first, second) => {
+            if (second.count !== first.count) {
+              return second.count - first.count;
+            }
+
+            return second.total - first.total;
+          });
+
+        const timeline = customerAppointments.map((item) => {
+          const appointmentDate = item.data ?? oggi;
+          const dateLabel = formatDateLabel(appointmentDate);
+          const phase =
+            appointmentDate > oggi ? 'Futuro' : appointmentDate < oggi ? 'Passato' : 'Oggi';
+          const badge = item.nonEffettuato
+            ? 'Non effettuato'
+            : item.completato
+            ? 'Completato'
+            : item.incassato
+            ? 'Incassato'
+            : appointmentDate > oggi
+            ? 'Prenotato'
+            : appointmentDate < oggi
+            ? 'Svolto'
+            : 'In corso';
+          const tone =
+            phase === 'Futuro'
+              ? 'future'
+              : phase === 'Oggi'
+              ? 'today'
+              : item.nonEffettuato
+              ? 'muted'
+              : 'past';
+
+          return {
+            id: item.id,
+            dateLabel,
+            ora: item.ora,
+            title: item.servizio,
+            subtitle: `€ ${item.prezzo.toFixed(2)}${item.operatoreNome ? ` · ${item.operatoreNome}` : ''}`,
+            badge,
+            phase,
+            tone,
+          };
+        });
+
+        return {
+          customer,
+          customerAppointments,
+          timeline,
+          totalAppointments: customerAppointments.length,
+          pastAppointments: pastAppointments.length,
+          todayAppointments: todayAppointments.length,
+          futureAppointments: futureAppointments.length,
+          completedAppointments: completedAppointments.length,
+          collectedAppointments: incassatoAppointments.length,
+          totalSpent,
+          collectedSpent,
+          averageTicket,
+          nextAppointment,
+          latestAppointment,
+          serviceStats,
+        };
+      })
+      .filter((item) => item.totalAppointments > 0)
+      .sort((first, second) => {
+        if (second.futureAppointments !== first.futureAppointments) {
+          return second.futureAppointments - first.futureAppointments;
+        }
+
+        if (second.totalSpent !== first.totalSpent) {
+          return second.totalSpent - first.totalSpent;
+        }
+
+        return first.customer.nome.localeCompare(second.customer.nome, 'it');
+      });
+  }, [appuntamenti, clienti, oggi]);
+
+  const customerBoardsWithFuture = customerInsightBoards.filter((item) => item.futureAppointments > 0).length;
+  const totalCustomerDeliveredSpend = customerInsightBoards.reduce(
+    (total, item) => total + item.totalSpent,
+    0
+  );
+  const customerInsightPreview = customerInsightBoards.slice(0, 3);
+  const filteredCustomerInsightBoards = useMemo(() => {
+    const query = customerInsightSearchQuery.trim().toLocaleLowerCase('it-IT');
+
+    if (!query) {
+      return customerInsightBoards;
+    }
+
+    return customerInsightBoards.filter(({ customer, serviceStats }) => {
+      const searchableParts = [
+        customer.nome,
+        customer.telefono,
+        customer.email ?? '',
+        customer.instagram ?? '',
+        ...serviceStats.map((item) => item.serviceName),
+      ]
+        .join(' ')
+        .toLocaleLowerCase('it-IT');
+
+      return searchableParts.includes(query);
+    });
+  }, [customerInsightBoards, customerInsightSearchQuery]);
+
+  const selectedCustomerInsightBoard = useMemo(
+    () =>
+      filteredCustomerInsightBoards.find((item) => item.customer.id === selectedCustomerInsightId) ??
+      customerInsightBoards.find((item) => item.customer.id === selectedCustomerInsightId) ??
+      filteredCustomerInsightBoards[0] ??
+      null,
+    [customerInsightBoards, filteredCustomerInsightBoards, selectedCustomerInsightId]
+  );
+
+  const customerAppointmentFilterOptions = useMemo(
+    () =>
+      selectedCustomerInsightBoard
+        ? [
+            { key: 'all' as const, label: 'Tutti', count: selectedCustomerInsightBoard.totalAppointments },
+            { key: 'today' as const, label: 'Oggi', count: selectedCustomerInsightBoard.todayAppointments },
+            { key: 'future' as const, label: 'Futuri', count: selectedCustomerInsightBoard.futureAppointments },
+            { key: 'past' as const, label: 'Passati', count: selectedCustomerInsightBoard.pastAppointments },
+          ]
+        : [],
+    [selectedCustomerInsightBoard]
+  );
+
+  const visibleCustomerTimeline = useMemo(() => {
+    if (!selectedCustomerInsightBoard) {
+      return [];
+    }
+
+    return selectedCustomerInsightBoard.timeline.filter((entry) => {
+      if (customerAppointmentFilter === 'today') return entry.phase === 'Oggi';
+      if (customerAppointmentFilter === 'future') return entry.phase === 'Futuro';
+      if (customerAppointmentFilter === 'past') return entry.phase === 'Passato';
+      return true;
+    });
+  }, [customerAppointmentFilter, selectedCustomerInsightBoard]);
+
+  useEffect(() => {
+    if (filteredCustomerInsightBoards.length === 0) {
+      if (selectedCustomerInsightId !== null) {
+        setSelectedCustomerInsightId(null);
+      }
+      return;
+    }
+
+    if (
+      !selectedCustomerInsightId ||
+      !filteredCustomerInsightBoards.some((item) => item.customer.id === selectedCustomerInsightId)
+    ) {
+      setSelectedCustomerInsightId(filteredCustomerInsightBoards[0].customer.id);
+    }
+  }, [filteredCustomerInsightBoards, selectedCustomerInsightId]);
+
+  useEffect(() => {
+    setCustomerAppointmentFilter('all');
+  }, [selectedCustomerInsightId]);
+
+  const openCustomerInsightsModalForAll = useCallback(() => {
+    setCustomerInsightSearchQuery('');
+    setCustomerAppointmentFilter('all');
+    setSelectedCustomerInsightId(customerInsightBoards[0]?.customer.id ?? null);
+    setShowCustomerInsightsModal(true);
+  }, [customerInsightBoards]);
+
+  const openCustomerInsightsModalForCustomer = useCallback((customerId: string) => {
+    setCustomerInsightSearchQuery('');
+    setCustomerAppointmentFilter('all');
+    setSelectedCustomerInsightId(customerId);
+    setShowCustomerInsightsModal(true);
+  }, []);
+
   const buildOperatorAgendaPdfHtml = useCallback(() => {
     const boards = visibleOperatorBoards;
     const title = selectedOperatorBoard
@@ -602,6 +863,8 @@ export default function HomeScreen() {
     }
 
     setSalonNameInput(salonWorkspace.salonName);
+    setSalonNameDisplayStyleInput(salonWorkspace.salonNameDisplayStyle);
+    setSalonNameFontVariantInput(salonWorkspace.salonNameFontVariant);
     setBusinessPhoneInput(salonWorkspace.businessPhone);
     setActivityCategoryInput(toUppercaseField(salonWorkspace.activityCategory));
     setStreetLineInput(
@@ -615,6 +878,8 @@ export default function HomeScreen() {
     salonWorkspace.city,
     salonWorkspace.postalCode,
     salonWorkspace.salonName,
+    salonWorkspace.salonNameDisplayStyle,
+    salonWorkspace.salonNameFontVariant,
     salonWorkspace.streetName,
     salonWorkspace.streetType,
     isEditingSalonProfile,
@@ -674,9 +939,7 @@ export default function HomeScreen() {
         salonAddress: '',
       });
 
-      setSavingSalon(false);
-
-      setSalonWorkspace((current) => ({
+      await updateSalonWorkspacePersisted((current) => ({
         ...current,
         salonName: salonNameInput.trim(),
         salonNameDisplayStyle: salonNameDisplayStyleInput,
@@ -692,6 +955,8 @@ export default function HomeScreen() {
         salonAddress: formattedAddress,
         updatedAt: new Date().toISOString(),
       }));
+
+      setSavingSalon(false);
 
       Alert.alert(
         'Profilo salvato',
@@ -741,7 +1006,7 @@ export default function HomeScreen() {
       salonAddress: '',
     });
 
-    setSalonWorkspace((current) => ({
+    void updateSalonWorkspacePersisted((current) => ({
       ...current,
       ownerEmail: accountEmailInput.trim().toLowerCase(),
       businessPhone: businessPhoneInput.trim(),
@@ -1002,7 +1267,7 @@ const openQrPrintPreview = useCallback(() => {
                 pressOpacity={0.98}
               >
                 <Image
-                  source={require('../../assets/header-settings-icon.png')}
+                  source={require('../../assets/header-impostazioni-icon.png')}
                   style={styles.settingsIconImage}
                   resizeMode="contain"
                 />
@@ -1190,6 +1455,19 @@ const openQrPrintPreview = useCallback(() => {
           </View>
         </View>
 
+        <HapticTouchable
+          style={[
+            styles.qrJumpButton,
+            responsive.isDesktop && styles.desktopWideCard,
+          ]}
+          onPress={scrollToQrSection}
+          pressScale={0.985}
+          pressOpacity={0.98}
+        >
+          <Ionicons name="qr-code-outline" size={18} color="#FFFFFF" />
+          <Text style={styles.qrJumpButtonText}>Vai alla sezione condividi QR-code</Text>
+        </HapticTouchable>
+
         <View
           style={[
             styles.sectionCard,
@@ -1216,15 +1494,15 @@ const openQrPrintPreview = useCallback(() => {
           </View>
 
           <View style={styles.operatorAgendaStatsRow}>
-            <View style={styles.operatorAgendaStatPill}>
+            <View style={[styles.operatorAgendaStatPill, styles.operatorAgendaStatPillSky]}>
               <Text style={styles.operatorAgendaStatValue}>{operatorsWithWorkToday}</Text>
               <Text style={styles.operatorAgendaStatLabel}>Operatori attivi</Text>
             </View>
-            <View style={styles.operatorAgendaStatPill}>
+            <View style={[styles.operatorAgendaStatPill, styles.operatorAgendaStatPillMint]}>
               <Text style={styles.operatorAgendaStatValue}>{totalOperatorOpenTasks}</Text>
               <Text style={styles.operatorAgendaStatLabel}>Lavori aperti</Text>
             </View>
-            <View style={styles.operatorAgendaStatPill}>
+            <View style={[styles.operatorAgendaStatPill, styles.operatorAgendaStatPillLavender]}>
               <Text style={styles.operatorAgendaStatValue}>{totalOperatorPendingRequests}</Text>
               <Text style={styles.operatorAgendaStatLabel}>Richieste live</Text>
             </View>
@@ -1280,7 +1558,94 @@ const openQrPrintPreview = useCallback(() => {
           )}
         </View>
 
-        <View style={[styles.sectionCard, responsive.isDesktop && styles.desktopWideCard]}>
+        <View
+          style={[
+            styles.sectionCard,
+            styles.customerInsightsCard,
+            responsive.isDesktop && styles.desktopWideCard,
+          ]}
+        >
+          <View style={styles.operatorAgendaCardHeader}>
+            <View style={styles.operatorAgendaCardTextWrap}>
+              <Text style={styles.operatorAgendaCardTitle}>Appuntamenti per cliente</Text>
+              <Text style={styles.operatorAgendaCardText}>
+                Cerca un cliente e apri il suo storico completo: passati, oggi, futuri e totale servizi.
+              </Text>
+            </View>
+            <HapticTouchable
+              style={styles.operatorAgendaCardAction}
+              onPress={openCustomerInsightsModalForAll}
+              pressScale={0.98}
+              pressOpacity={0.96}
+            >
+              <Text style={styles.operatorAgendaCardActionText}>Apri</Text>
+              <Ionicons name="chevron-forward" size={18} color="#1E293B" />
+            </HapticTouchable>
+          </View>
+
+          <View style={styles.operatorAgendaStatsRow}>
+            <View style={[styles.operatorAgendaStatPill, styles.operatorAgendaStatPillPlum]}>
+              <Text style={styles.operatorAgendaStatValue}>{customerInsightBoards.length}</Text>
+              <Text style={styles.operatorAgendaStatLabel}>Clienti con storico</Text>
+            </View>
+            <View style={[styles.operatorAgendaStatPill, styles.operatorAgendaStatPillSun]}>
+              <Text style={styles.operatorAgendaStatValue}>{customerBoardsWithFuture}</Text>
+              <Text style={styles.operatorAgendaStatLabel}>Clienti con futuro</Text>
+            </View>
+            <View style={[styles.operatorAgendaStatPill, styles.operatorAgendaStatPillRose]}>
+              <Text style={styles.operatorAgendaStatValue}>€ {totalCustomerDeliveredSpend.toFixed(0)}</Text>
+              <Text style={styles.operatorAgendaStatLabel}>Servizi fruiti</Text>
+            </View>
+          </View>
+
+          {customerInsightBoards.length === 0 ? (
+            <View style={styles.operatorAgendaEmptyState}>
+              <Text style={styles.operatorAgendaEmptyTitle}>Nessun cliente con appuntamenti</Text>
+              <Text style={styles.operatorAgendaEmptyText}>
+                Appena registri i primi appuntamenti, qui troverai storico e valore per ogni cliente.
+              </Text>
+            </View>
+          ) : (
+            <View style={styles.operatorAgendaPreviewStack}>
+              {customerInsightPreview.map((item) => (
+                <HapticTouchable
+                  key={item.customer.id}
+                  style={styles.customerInsightPreviewRow}
+                  onPress={() => openCustomerInsightsModalForCustomer(item.customer.id)}
+                  pressScale={0.987}
+                  pressOpacity={0.98}
+                >
+                  <View style={styles.customerInsightPreviewMain}>
+                    <Text style={styles.operatorAgendaPreviewName}>{item.customer.nome}</Text>
+                    <Text style={styles.customerInsightPreviewMeta}>
+                      {item.nextAppointment
+                        ? `${formatDateLabel(item.nextAppointment.data ?? oggi)} · ${item.nextAppointment.ora} prossimo`
+                        : item.latestAppointment
+                        ? `${formatDateLabel(item.latestAppointment.data ?? oggi)} · ${item.latestAppointment.ora} ultimo`
+                        : 'Nessun dettaglio'}
+                    </Text>
+                  </View>
+
+                  <View style={styles.customerInsightPreviewMetrics}>
+                    <Text style={styles.customerInsightPreviewMetric}>
+                      {item.totalAppointments} appunt.
+                    </Text>
+                    <Text style={styles.customerInsightPreviewMetricSoft}>
+                      € {item.totalSpent.toFixed(2)}
+                    </Text>
+                  </View>
+                </HapticTouchable>
+              ))}
+            </View>
+          )}
+        </View>
+
+        <View
+          style={[styles.sectionCard, responsive.isDesktop && styles.desktopWideCard]}
+          onLayout={(event) => {
+            setClientAccessSectionY(event.nativeEvent.layout.y);
+          }}
+        >
           <Text style={[styles.sectionTitle, styles.sectionTitleCentered]}>
             {tApp(appLanguage, 'home_smart_indicators')}
           </Text>
@@ -2153,6 +2518,317 @@ const openQrPrintPreview = useCallback(() => {
         </View>
       </Modal>
 
+      <Modal
+        visible={showCustomerInsightsModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          setShowCustomerInsightsModal(false);
+          setCustomerInsightSearchQuery('');
+        }}
+      >
+        <View style={styles.operatorModalBackdrop}>
+          <View style={styles.customerInsightModalCard}>
+            <View style={styles.operatorModalHeader}>
+              <View style={styles.operatorModalHeaderTextWrap}>
+                <Text style={styles.operatorModalEyebrow}>Focus clienti</Text>
+                <Text style={styles.operatorModalTitle}>Dettagli appuntamenti clienti</Text>
+                <Text style={styles.operatorModalText}>
+                  Cerca il cliente e consulta storico, agenda attiva, spesa totale e servizi più richiesti.
+                </Text>
+              </View>
+
+              <HapticTouchable
+                style={styles.operatorModalCloseButton}
+                onPress={() => {
+                  setShowCustomerInsightsModal(false);
+                  setCustomerInsightSearchQuery('');
+                  setCustomerAppointmentFilter('all');
+                }}
+                pressScale={0.97}
+                pressOpacity={0.96}
+              >
+                <Ionicons name="close" size={22} color="#0F172A" />
+              </HapticTouchable>
+            </View>
+
+            <ClearableTextInput
+              style={styles.customerInsightSearchInput}
+              placeholder="Cerca cliente, telefono, email o servizio"
+              placeholderTextColor="#8A94A6"
+              value={customerInsightSearchQuery}
+              onChangeText={setCustomerInsightSearchQuery}
+              autoCapitalize="words"
+              returnKeyType="search"
+            />
+
+            <ScrollView
+              horizontal
+              style={styles.customerInsightPickerScroll}
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.customerInsightPickerRow}
+            >
+              {filteredCustomerInsightBoards.map((item) => {
+                const selected = item.customer.id === selectedCustomerInsightBoard?.customer.id;
+
+                return (
+                  <HapticTouchable
+                    key={item.customer.id}
+                    style={[
+                      styles.customerInsightPickerChip,
+                      selected && styles.customerInsightPickerChipActive,
+                    ]}
+                    onPress={() => setSelectedCustomerInsightId(item.customer.id)}
+                    pressScale={0.98}
+                    pressOpacity={0.98}
+                  >
+                    <Text
+                      style={[
+                        styles.customerInsightPickerChipTitle,
+                        selected && styles.customerInsightPickerChipTitleActive,
+                      ]}
+                      numberOfLines={1}
+                      adjustsFontSizeToFit
+                      minimumFontScale={0.78}
+                      allowFontScaling={false}
+                    >
+                      {item.customer.nome}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.customerInsightPickerChipMeta,
+                        selected && styles.customerInsightPickerChipMetaActive,
+                      ]}
+                      numberOfLines={1}
+                      allowFontScaling={false}
+                    >
+                      {item.totalAppointments} appunt.
+                    </Text>
+                  </HapticTouchable>
+                );
+              })}
+            </ScrollView>
+
+            <ScrollView
+              style={styles.operatorModalScroll}
+              contentContainerStyle={styles.operatorModalScrollContent}
+              showsVerticalScrollIndicator
+              indicatorStyle="black"
+            >
+              {!selectedCustomerInsightBoard ? (
+                <View style={styles.operatorModalEmptyCard}>
+                  <Text style={styles.operatorModalEmptyTitle}>Nessun cliente trovato</Text>
+                  <Text style={styles.operatorModalEmptyText}>
+                    Prova con nome, telefono, email o uno dei servizi già fatti.
+                  </Text>
+                </View>
+              ) : (
+                <View style={styles.customerInsightBoard}>
+                  <View style={styles.customerInsightBoardHeader}>
+                    <View style={styles.customerInsightBoardIdentity}>
+                      <Text style={styles.customerInsightBoardName}>
+                        {selectedCustomerInsightBoard.customer.nome}
+                      </Text>
+                      <Text style={styles.customerInsightBoardContacts}>
+                        {[
+                          selectedCustomerInsightBoard.customer.telefono,
+                          selectedCustomerInsightBoard.customer.email ?? '',
+                          selectedCustomerInsightBoard.customer.instagram
+                            ? `@${selectedCustomerInsightBoard.customer.instagram}`
+                            : '',
+                        ]
+                          .filter(Boolean)
+                          .join(' · ') || 'Contatti non disponibili'}
+                      </Text>
+                    </View>
+                    <View style={styles.customerInsightSpendBadge}>
+                      <Text style={styles.customerInsightSpendBadgeValue}>
+                        € {selectedCustomerInsightBoard.totalSpent.toFixed(2)}
+                      </Text>
+                      <Text style={styles.customerInsightSpendBadgeLabel}>spesa servizi</Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.customerInsightStatsGrid}>
+                    <View style={styles.customerInsightStatCard}>
+                      <Text style={styles.customerInsightStatValue}>
+                        {selectedCustomerInsightBoard.pastAppointments}
+                      </Text>
+                      <Text style={styles.customerInsightStatLabel}>Passati</Text>
+                    </View>
+                    <View style={styles.customerInsightStatCard}>
+                      <Text style={styles.customerInsightStatValue}>
+                        {selectedCustomerInsightBoard.todayAppointments}
+                      </Text>
+                      <Text style={styles.customerInsightStatLabel}>Oggi</Text>
+                    </View>
+                    <View style={styles.customerInsightStatCard}>
+                      <Text style={styles.customerInsightStatValue}>
+                        {selectedCustomerInsightBoard.futureAppointments}
+                      </Text>
+                      <Text style={styles.customerInsightStatLabel}>Futuri</Text>
+                    </View>
+                    <View style={styles.customerInsightStatCard}>
+                      <Text style={styles.customerInsightStatValue}>
+                        € {selectedCustomerInsightBoard.averageTicket.toFixed(0)}
+                      </Text>
+                      <Text style={styles.customerInsightStatLabel}>Ticket medio</Text>
+                    </View>
+                    <View style={styles.customerInsightStatCard}>
+                      <Text style={styles.customerInsightStatValue}>
+                        {selectedCustomerInsightBoard.completedAppointments}
+                      </Text>
+                      <Text style={styles.customerInsightStatLabel}>Completati</Text>
+                    </View>
+                    <View style={styles.customerInsightStatCard}>
+                      <Text style={styles.customerInsightStatValue}>
+                        € {selectedCustomerInsightBoard.collectedSpent.toFixed(0)}
+                      </Text>
+                      <Text style={styles.customerInsightStatLabel}>Incassato</Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.customerInsightHighlightsRow}>
+                    <View style={styles.customerInsightHighlightCard}>
+                      <Text style={styles.customerInsightHighlightLabel}>Prossimo</Text>
+                      <Text style={styles.customerInsightHighlightValue}>
+                        {selectedCustomerInsightBoard.nextAppointment
+                          ? `${formatDateLabel(
+                              selectedCustomerInsightBoard.nextAppointment.data ?? oggi
+                            )} · ${selectedCustomerInsightBoard.nextAppointment.ora}`
+                          : 'Nessun futuro'}
+                      </Text>
+                      <Text style={styles.customerInsightHighlightSubvalue}>
+                        {selectedCustomerInsightBoard.nextAppointment?.servizio ?? '—'}
+                      </Text>
+                    </View>
+
+                    <View style={styles.customerInsightHighlightCard}>
+                      <Text style={styles.customerInsightHighlightLabel}>Ultimo</Text>
+                      <Text style={styles.customerInsightHighlightValue}>
+                        {selectedCustomerInsightBoard.latestAppointment
+                          ? `${formatDateLabel(
+                              selectedCustomerInsightBoard.latestAppointment.data ?? oggi
+                            )} · ${selectedCustomerInsightBoard.latestAppointment.ora}`
+                          : 'Nessuno storico'}
+                      </Text>
+                      <Text style={styles.customerInsightHighlightSubvalue}>
+                        {selectedCustomerInsightBoard.latestAppointment?.servizio ?? '—'}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.customerInsightServicesCard}>
+                    <Text style={styles.customerInsightSectionTitle}>Servizi fruiti</Text>
+                    {selectedCustomerInsightBoard.serviceStats.length === 0 ? (
+                      <Text style={styles.customerInsightSectionEmpty}>
+                        Nessun servizio completato registrato.
+                      </Text>
+                    ) : (
+                      <View style={styles.customerInsightServiceList}>
+                        {selectedCustomerInsightBoard.serviceStats.slice(0, 6).map((item) => (
+                          <View key={`${selectedCustomerInsightBoard.customer.id}-${item.serviceName}`} style={styles.customerInsightServiceRow}>
+                            <Text style={styles.customerInsightServiceName}>{item.serviceName}</Text>
+                            <Text style={styles.customerInsightServiceMeta}>
+                              {item.count}x · € {item.total.toFixed(2)}
+                            </Text>
+                          </View>
+                        ))}
+                      </View>
+                    )}
+                  </View>
+
+                  <View style={styles.customerInsightTimelineCard}>
+                    <Text style={styles.customerInsightSectionTitle}>Lista appuntamenti</Text>
+                    <View style={styles.customerInsightFilterRow}>
+                      {customerAppointmentFilterOptions.map((option) => {
+                        const active = customerAppointmentFilter === option.key;
+
+                        return (
+                          <HapticTouchable
+                            key={`${selectedCustomerInsightBoard.customer.id}-${option.key}`}
+                            style={[
+                              styles.customerInsightFilterChip,
+                              active && styles.customerInsightFilterChipActive,
+                            ]}
+                            onPress={() => setCustomerAppointmentFilter(option.key)}
+                            pressScale={0.98}
+                            pressOpacity={0.98}
+                          >
+                            <Text
+                              style={[
+                                styles.customerInsightFilterChipText,
+                                active && styles.customerInsightFilterChipTextActive,
+                              ]}
+                            >
+                              {option.label}
+                            </Text>
+                            <Text
+                              style={[
+                                styles.customerInsightFilterChipCount,
+                                active && styles.customerInsightFilterChipCountActive,
+                              ]}
+                            >
+                              {option.count}
+                            </Text>
+                          </HapticTouchable>
+                        );
+                      })}
+                    </View>
+
+                    {visibleCustomerTimeline.length === 0 ? (
+                      <Text style={styles.customerInsightSectionEmpty}>
+                        Nessun appuntamento in questo filtro.
+                      </Text>
+                    ) : (
+                    <View style={styles.customerInsightTimeline}>
+                      {visibleCustomerTimeline.map((entry) => (
+                        <View key={`${selectedCustomerInsightBoard.customer.id}-${entry.id}`} style={styles.customerInsightTimelineRow}>
+                          <View style={styles.customerInsightDateBadge}>
+                            <Text style={styles.customerInsightDateBadgeDay}>{entry.dateLabel}</Text>
+                            <Text style={styles.customerInsightDateBadgeTime}>{entry.ora}</Text>
+                          </View>
+
+                          <View style={styles.customerInsightTimelineContent}>
+                            <View style={styles.customerInsightTimelineTopRow}>
+                              <Text style={styles.customerInsightTimelineTitle}>{entry.title}</Text>
+                              <View
+                                style={[
+                                  styles.customerInsightPhasePill,
+                                  entry.tone === 'future' && styles.customerInsightPhasePillFuture,
+                                  entry.tone === 'today' && styles.customerInsightPhasePillToday,
+                                  entry.tone === 'past' && styles.customerInsightPhasePillPast,
+                                  entry.tone === 'muted' && styles.customerInsightPhasePillMuted,
+                                ]}
+                              >
+                                <Text
+                                  style={[
+                                    styles.customerInsightPhasePillText,
+                                    entry.tone === 'future' && styles.customerInsightPhasePillTextFuture,
+                                    entry.tone === 'today' && styles.customerInsightPhasePillTextToday,
+                                    entry.tone === 'past' && styles.customerInsightPhasePillTextPast,
+                                    entry.tone === 'muted' && styles.customerInsightPhasePillTextMuted,
+                                  ]}
+                                >
+                                  {entry.phase}
+                                </Text>
+                              </View>
+                            </View>
+                            <Text style={styles.customerInsightTimelineSubtitle}>{entry.subtitle}</Text>
+                            <Text style={styles.customerInsightTimelineStatus}>{entry.badge}</Text>
+                          </View>
+                        </View>
+                      ))}
+                    </View>
+                    )}
+                  </View>
+                </View>
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
       <OnboardingModal
         visible={showOnboarding}
         onClose={completeOnboarding}
@@ -2232,27 +2908,27 @@ const styles = StyleSheet.create({
   },
   heroMetaCard: {
     flex: 1,
-    backgroundColor: '#F7F1E8',
+    backgroundColor: '#F6F3EE',
     borderRadius: 22,
     paddingHorizontal: 16,
     paddingVertical: 14,
     borderWidth: 1,
-    borderColor: '#E8D8C5',
+    borderColor: '#E6DDD0',
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#A78B6D',
+    shadowColor: '#8A7963',
     shadowOpacity: 0.08,
     shadowRadius: 14,
     shadowOffset: { width: 0, height: 7 },
     elevation: 3,
   },
   heroMetaCardToday: {
-    backgroundColor: '#F7E9A8',
-    borderColor: '#E3C861',
+    backgroundColor: '#FFF1BF',
+    borderColor: '#E6C86A',
   },
   heroStatusCard: {
-    backgroundColor: '#DCC2A5',
-    borderColor: '#B48A5F',
+    backgroundColor: '#E4F0FF',
+    borderColor: '#BBD5FF',
   },
   heroDateLabelToday: {
     color: '#8A6B12',
@@ -2289,9 +2965,9 @@ const styles = StyleSheet.create({
     borderTopColor: 'transparent',
   },
   statusCalm: {
-    backgroundColor: '#EEF2FF',
-    borderColor: 'transparent',
-    borderTopColor: 'transparent',
+    backgroundColor: '#DDEBFF',
+    borderColor: '#BBD5FF',
+    borderTopColor: '#BBD5FF',
   },
   statusHotText: {
     color: '#b42318',
@@ -2300,7 +2976,7 @@ const styles = StyleSheet.create({
     color: '#166534',
   },
   statusCalmText: {
-    color: '#0f766e',
+    color: '#1E5FCF',
   },
   heroMetricsRow: {
     flexDirection: 'row',
@@ -2309,14 +2985,14 @@ const styles = StyleSheet.create({
   },
   heroMetricCardBlue: {
     flex: 1,
-    backgroundColor: '#E4ECF8',
+    backgroundColor: '#F9E1F2',
     borderRadius: 20,
     paddingVertical: 14,
     paddingHorizontal: IS_ANDROID ? 20 : 10,
     borderWidth: 1,
-    borderColor: '#C7D5EA',
+    borderColor: '#EDB9DD',
     alignItems: 'center',
-    shadowColor: '#5F7DA8',
+    shadowColor: '#B45095',
     shadowOpacity: 0.09,
     shadowRadius: 16,
     shadowOffset: { width: 0, height: 8 },
@@ -2324,14 +3000,14 @@ const styles = StyleSheet.create({
   },
   heroMetricCardRose: {
     flex: 1,
-    backgroundColor: '#F7E8DA',
+    backgroundColor: '#F4E4D7',
     borderRadius: 20,
     paddingVertical: 14,
     paddingHorizontal: IS_ANDROID ? 20 : 10,
     borderWidth: 1,
-    borderColor: '#E8CCB2',
+    borderColor: '#DFC2AA',
     alignItems: 'center',
-    shadowColor: '#B68158',
+    shadowColor: '#9D7655',
     shadowOpacity: 0.09,
     shadowRadius: 16,
     shadowOffset: { width: 0, height: 8 },
@@ -2348,10 +3024,10 @@ const styles = StyleSheet.create({
     alignSelf: IS_ANDROID ? 'stretch' : undefined,
   },
   heroMetricNumberBlue: {
-    color: '#27466F',
+    color: '#B01F7C',
   },
   heroMetricNumberRose: {
-    color: '#8A3B12',
+    color: '#5E3B20',
   },
   heroMetricLabel: {
     fontSize: 13,
@@ -2363,10 +3039,10 @@ const styles = StyleSheet.create({
     alignSelf: IS_ANDROID ? 'stretch' : undefined,
   },
   heroMetricLabelBlue: {
-    color: '#5A7597',
+    color: '#B05C93',
   },
   heroMetricLabelRose: {
-    color: '#9A6A45',
+    color: '#6F4A2C',
   },
   subtitle: {
     fontSize: 14,
@@ -2385,14 +3061,14 @@ const styles = StyleSheet.create({
   insightCard: {
     flex: 1,
     minWidth: '47%',
-    backgroundColor: '#F6D8D8',
+    backgroundColor: '#EEE7FF',
     borderRadius: 20,
     paddingHorizontal: IS_ANDROID ? 24 : 14,
     paddingVertical: 14,
     borderWidth: 1,
-    borderColor: '#E3B2B2',
+    borderColor: '#D7C8F5',
     alignItems: 'center',
-    shadowColor: '#A25D5D',
+    shadowColor: '#9C8BCF',
     shadowOpacity: 0.1,
     shadowRadius: 14,
     shadowOffset: { width: 0, height: 8 },
@@ -2401,14 +3077,14 @@ const styles = StyleSheet.create({
   insightCardMint: {
     flex: 1,
     minWidth: '47%',
-    backgroundColor: '#EEF5DD',
+    backgroundColor: '#EDF5DB',
     borderRadius: 20,
     paddingHorizontal: IS_ANDROID ? 24 : 14,
     paddingVertical: 14,
     borderWidth: 1,
-    borderColor: '#D6E3B2',
+    borderColor: '#D6E2B2',
     alignItems: 'center',
-    shadowColor: '#73834B',
+    shadowColor: '#738247',
     shadowOpacity: 0.1,
     shadowRadius: 14,
     shadowOffset: { width: 0, height: 8 },
@@ -2431,10 +3107,10 @@ const styles = StyleSheet.create({
     alignSelf: IS_ANDROID ? 'stretch' : undefined,
   },
   insightTitlePlum: {
-    color: '#8A3E3E',
+    color: '#6F58A8',
   },
   insightTitleMint: {
-    color: '#667A34',
+    color: '#667B31',
   },
   insightNumber: {
     fontSize: IS_ANDROID ? 30 : 28,
@@ -2447,10 +3123,10 @@ const styles = StyleSheet.create({
     alignSelf: IS_ANDROID ? 'stretch' : undefined,
   },
   insightNumberPlum: {
-    color: '#5C1919',
+    color: '#5B3FA2',
   },
   insightNumberMint: {
-    color: '#2D3E13',
+    color: '#304415',
   },
   insightHint: {
     fontSize: 13,
@@ -2463,10 +3139,10 @@ const styles = StyleSheet.create({
     alignSelf: IS_ANDROID ? 'stretch' : undefined,
   },
   insightHintPlum: {
-    color: '#8D5555',
+    color: '#7B68AA',
   },
   insightHintMint: {
-    color: '#667A34',
+    color: '#6D7F38',
   },
   priorityCard: {
     backgroundColor: '#243245',
@@ -2526,14 +3202,14 @@ const styles = StyleSheet.create({
   infoCardSun: {
     flex: 1,
     minWidth: '30%',
-    backgroundColor: '#EEF5D5',
+    backgroundColor: '#EEF4D3',
     borderRadius: 22,
     paddingHorizontal: IS_ANDROID ? 24 : 14,
     paddingVertical: 14,
     borderWidth: 1,
-    borderColor: '#D4E0AD',
+    borderColor: '#D5E0A8',
     alignItems: 'center',
-    shadowColor: '#6F8442',
+    shadowColor: '#6C8042',
     shadowOpacity: 0.1,
     shadowRadius: 14,
     shadowOffset: { width: 0, height: 8 },
@@ -2542,14 +3218,14 @@ const styles = StyleSheet.create({
   infoCardLavender: {
     flex: 1,
     minWidth: '30%',
-    backgroundColor: '#F8E3D4',
+    backgroundColor: '#FFE7D6',
     borderRadius: 22,
     paddingHorizontal: IS_ANDROID ? 24 : 14,
     paddingVertical: 14,
     borderWidth: 1,
-    borderColor: '#E8C7B1',
+    borderColor: '#F0C4A0',
     alignItems: 'center',
-    shadowColor: '#B47955',
+    shadowColor: '#C07A3C',
     shadowOpacity: 0.1,
     shadowRadius: 14,
     shadowOffset: { width: 0, height: 8 },
@@ -2558,14 +3234,14 @@ const styles = StyleSheet.create({
   infoCardPeach: {
     flex: 1,
     minWidth: '30%',
-    backgroundColor: '#EEE4F8',
+    backgroundColor: '#FBE1E1',
     borderRadius: 22,
     paddingHorizontal: IS_ANDROID ? 24 : 14,
     paddingVertical: 14,
     borderWidth: 1,
-    borderColor: '#D8C8EB',
+    borderColor: '#F0BDBD',
     alignItems: 'center',
-    shadowColor: '#8A6AA8',
+    shadowColor: '#B85F5F',
     shadowOpacity: 0.1,
     shadowRadius: 14,
     shadowOffset: { width: 0, height: 8 },
@@ -2585,13 +3261,13 @@ const styles = StyleSheet.create({
     alignSelf: IS_ANDROID ? 'stretch' : undefined,
   },
   infoLabelSun: {
-    color: '#667A34',
+    color: '#66792E',
   },
   infoLabelLavender: {
-    color: '#996042',
+    color: '#C26A22',
   },
   infoLabelPeach: {
-    color: '#6D5588',
+    color: '#B94A4A',
   },
   infoValue: {
     fontSize: IS_ANDROID ? 26 : 24,
@@ -2603,21 +3279,35 @@ const styles = StyleSheet.create({
     alignSelf: IS_ANDROID ? 'stretch' : undefined,
   },
   infoValueSun: {
-    color: '#2D3E13',
+    color: '#334615',
   },
   infoValueLavender: {
-    color: '#6D2E11',
+    color: '#A84D14',
   },
   infoValuePeach: {
-    color: '#3F2A57',
+    color: '#A53232',
   },
   operatorAgendaCard: {
     marginTop: 0,
     paddingHorizontal: 18,
     paddingVertical: 18,
-    backgroundColor: '#E6ECF4',
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: '#C7D4E2',
+    borderColor: '#E5E7EB',
+    shadowColor: '#0F172A',
+    shadowOpacity: 0.11,
+    shadowRadius: 22,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 7,
+  },
+  customerInsightsCard: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#E5E7EB',
+    shadowColor: '#0F172A',
+    shadowOpacity: 0.11,
+    shadowRadius: 22,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 7,
   },
   operatorAgendaCardHeader: {
     flexDirection: 'row',
@@ -2630,30 +3320,36 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   operatorAgendaCardTitle: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: '900',
     color: '#0F172A',
-    marginBottom: 4,
+    marginBottom: 5,
+    letterSpacing: -0.3,
   },
   operatorAgendaCardText: {
     fontSize: 13,
-    lineHeight: 19,
-    color: '#334155',
+    lineHeight: 20,
+    color: '#4E5A68',
     fontWeight: '700',
   },
   operatorAgendaCardAction: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 3,
-    backgroundColor: 'rgba(255, 255, 255, 0.7)',
+    gap: 4,
+    backgroundColor: 'rgba(255, 255, 255, 0.96)',
     borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 9,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
     borderWidth: 1,
-    borderColor: '#D5DEE9',
+    borderColor: '#D8D7D1',
+    shadowColor: '#A8A096',
+    shadowOpacity: 0.12,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 3,
   },
   operatorAgendaCardActionText: {
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '900',
     color: '#0F172A',
   },
@@ -2661,21 +3357,50 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 10,
-    marginBottom: 14,
+    marginBottom: 16,
   },
   operatorAgendaStatPill: {
     flex: 1,
     minWidth: '30%',
-    backgroundColor: 'rgba(255, 255, 255, 0.78)',
-    borderRadius: 18,
+    backgroundColor: 'rgba(255, 255, 255, 0.98)',
+    borderRadius: 20,
     paddingHorizontal: 12,
-    paddingVertical: 12,
+    paddingVertical: 14,
     borderWidth: 1,
-    borderColor: '#D5DEE9',
+    borderColor: '#DDDAD2',
     alignItems: 'center',
+    shadowColor: '#C2B9AD',
+    shadowOpacity: 0.12,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 3,
+  },
+  operatorAgendaStatPillSky: {
+    backgroundColor: '#ECFEFF',
+    borderColor: '#A5F3FC',
+  },
+  operatorAgendaStatPillMint: {
+    backgroundColor: '#ECFDF5',
+    borderColor: '#BBF7D0',
+  },
+  operatorAgendaStatPillLavender: {
+    backgroundColor: '#EEF2FF',
+    borderColor: '#C7D2FE',
+  },
+  operatorAgendaStatPillPlum: {
+    backgroundColor: '#F5F3FF',
+    borderColor: '#DDD6FE',
+  },
+  operatorAgendaStatPillSun: {
+    backgroundColor: '#FEFCE8',
+    borderColor: '#FDE68A',
+  },
+  operatorAgendaStatPillRose: {
+    backgroundColor: '#FFF1F2',
+    borderColor: '#FECDD3',
   },
   operatorAgendaStatValue: {
-    fontSize: 22,
+    fontSize: 24,
     fontWeight: '900',
     color: '#0F172A',
     marginBottom: 4,
@@ -2683,7 +3408,7 @@ const styles = StyleSheet.create({
   operatorAgendaStatLabel: {
     fontSize: 11,
     fontWeight: '800',
-    color: '#475569',
+    color: '#5E6876',
     textAlign: 'center',
   },
   operatorAgendaPreviewStack: {
@@ -2694,13 +3419,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 12,
-    backgroundColor: 'rgba(255, 255, 255, 0.76)',
-    borderRadius: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.98)',
+    borderRadius: 18,
     borderWidth: 1,
-    borderColor: '#D5DEE9',
+    borderColor: '#DFD8CE',
     paddingLeft: 14,
     paddingRight: 12,
-    paddingVertical: 10,
+    paddingVertical: 12,
+    shadowColor: '#C6BCB0',
+    shadowOpacity: 0.12,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 5 },
+    elevation: 2,
   },
   operatorAgendaPreviewIdentity: {
     flex: 1,
@@ -2708,8 +3438,10 @@ const styles = StyleSheet.create({
   operatorAgendaPreviewAvatar: {
     width: 52,
     height: 52,
-    borderRadius: 16,
-    backgroundColor: '#F8FDFF',
+    borderRadius: 18,
+    backgroundColor: '#FBF8F2',
+    borderWidth: 1,
+    borderColor: '#E7DFD2',
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
@@ -2722,7 +3454,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   operatorAgendaPreviewName: {
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: '900',
     color: '#0F172A',
     marginBottom: 2,
@@ -2730,11 +3462,75 @@ const styles = StyleSheet.create({
   operatorAgendaPreviewRole: {
     fontSize: 11,
     fontWeight: '800',
-    color: '#475569',
+    color: '#6C6F78',
   },
   operatorAgendaPreviewMetrics: {
     alignItems: 'flex-end',
     marginRight: 2,
+  },
+  customerInsightPreviewRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.98)',
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: '#E1D7C8',
+    paddingLeft: 14,
+    paddingRight: 12,
+    paddingVertical: 12,
+    shadowColor: '#CBBEAA',
+    shadowOpacity: 0.12,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 5 },
+    elevation: 2,
+  },
+  qrJumpButton: {
+    marginTop: 6,
+    marginBottom: 14,
+    borderRadius: 22,
+    backgroundColor: '#0F172A',
+    paddingHorizontal: 18,
+    paddingVertical: 18,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    shadowColor: '#0F172A',
+    shadowOpacity: 0.18,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 7,
+  },
+  qrJumpButtonText: {
+    fontSize: 16,
+    fontWeight: '900',
+    color: '#FFFFFF',
+    textAlign: 'center',
+  },
+  customerInsightPreviewMain: {
+    flex: 1,
+  },
+  customerInsightPreviewMeta: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#696960',
+    marginTop: 3,
+  },
+  customerInsightPreviewMetrics: {
+    alignItems: 'flex-end',
+  },
+  customerInsightPreviewMetric: {
+    fontSize: 13,
+    fontWeight: '900',
+    color: '#6D5338',
+    marginBottom: 2,
+  },
+  customerInsightPreviewMetricSoft: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#756858',
   },
   operatorAgendaPreviewMetric: {
     fontSize: 13,
@@ -2748,13 +3544,18 @@ const styles = StyleSheet.create({
     color: '#475569',
   },
   operatorAgendaEmptyState: {
-    borderRadius: 18,
-    backgroundColor: 'rgba(255, 255, 255, 0.76)',
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.98)',
     borderWidth: 1,
-    borderColor: '#D5DEE9',
+    borderColor: '#DFD8CE',
     paddingHorizontal: 16,
-    paddingVertical: 16,
+    paddingVertical: 18,
     alignItems: 'center',
+    shadowColor: '#C4B8AA',
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 5 },
+    elevation: 2,
   },
   operatorAgendaEmptyTitle: {
     fontSize: 15,
@@ -2894,6 +3695,393 @@ const styles = StyleSheet.create({
     shadowRadius: 28,
     shadowOffset: { width: 0, height: 16 },
     elevation: 14,
+  },
+  customerInsightModalCard: {
+    width: '100%',
+    maxWidth: 640,
+    maxHeight: '90%',
+    minHeight: 520,
+    backgroundColor: '#F8FAFC',
+    borderRadius: 28,
+    paddingHorizontal: 18,
+    paddingTop: 18,
+    paddingBottom: 12,
+    borderWidth: 1,
+    borderColor: '#DDE6F0',
+    shadowColor: '#000000',
+    shadowOpacity: 0.22,
+    shadowRadius: 28,
+    shadowOffset: { width: 0, height: 16 },
+    elevation: 14,
+  },
+  customerInsightSearchInput: {
+    minHeight: 50,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#DDE6F0',
+    paddingHorizontal: 16,
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#0F172A',
+    marginBottom: 12,
+  },
+  customerInsightPickerScroll: {
+    flexGrow: 0,
+    minHeight: 82,
+    marginBottom: 4,
+  },
+  customerInsightPickerRow: {
+    gap: 10,
+    alignItems: 'stretch',
+    paddingBottom: 12,
+    paddingRight: 8,
+  },
+  customerInsightPickerChip: {
+    minWidth: 138,
+    minHeight: 70,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#DDE6F0',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    justifyContent: 'center',
+  },
+  customerInsightPickerChipActive: {
+    backgroundColor: '#EAF4EA',
+    borderColor: '#BFD2C0',
+  },
+  customerInsightPickerChipTitle: {
+    fontSize: 13,
+    lineHeight: 16,
+    fontWeight: '900',
+    color: '#0F172A',
+    marginBottom: 3,
+  },
+  customerInsightPickerChipTitleActive: {
+    color: '#163624',
+  },
+  customerInsightPickerChipMeta: {
+    fontSize: 11,
+    lineHeight: 13,
+    fontWeight: '800',
+    color: '#64748B',
+  },
+  customerInsightPickerChipMetaActive: {
+    color: '#335b41',
+  },
+  customerInsightBoard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+  },
+  customerInsightBoardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: 12,
+    marginBottom: 14,
+  },
+  customerInsightBoardIdentity: {
+    flex: 1,
+  },
+  customerInsightBoardName: {
+    fontSize: 18,
+    fontWeight: '900',
+    color: '#0F172A',
+    marginBottom: 4,
+  },
+  customerInsightBoardContacts: {
+    fontSize: 12,
+    lineHeight: 18,
+    color: '#64748B',
+    fontWeight: '700',
+  },
+  customerInsightSpendBadge: {
+    minWidth: 108,
+    backgroundColor: '#ECFDF3',
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: '#CDEAD7',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  customerInsightSpendBadgeValue: {
+    fontSize: 18,
+    fontWeight: '900',
+    color: '#166534',
+    marginBottom: 2,
+  },
+  customerInsightSpendBadgeLabel: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#3F6B4B',
+    textAlign: 'center',
+  },
+  customerInsightStatsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginBottom: 14,
+  },
+  customerInsightStatCard: {
+    width: '31%',
+    minWidth: 92,
+    flexGrow: 1,
+    backgroundColor: '#F8FAFC',
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    paddingHorizontal: 10,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  customerInsightStatValue: {
+    fontSize: 18,
+    fontWeight: '900',
+    color: '#0F172A',
+    marginBottom: 3,
+  },
+  customerInsightStatLabel: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#64748B',
+    textAlign: 'center',
+  },
+  customerInsightHighlightsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginBottom: 14,
+  },
+  customerInsightHighlightCard: {
+    flex: 1,
+    minWidth: '47%',
+    backgroundColor: '#F8FAFC',
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+  },
+  customerInsightHighlightLabel: {
+    fontSize: 10,
+    fontWeight: '900',
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+    color: '#64748B',
+    marginBottom: 5,
+  },
+  customerInsightHighlightValue: {
+    fontSize: 13,
+    fontWeight: '900',
+    color: '#0F172A',
+    marginBottom: 3,
+  },
+  customerInsightHighlightSubvalue: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#64748B',
+  },
+  customerInsightServicesCard: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    marginBottom: 14,
+  },
+  customerInsightSectionTitle: {
+    fontSize: 14,
+    fontWeight: '900',
+    color: '#0F172A',
+    marginBottom: 10,
+  },
+  customerInsightSectionEmpty: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#64748B',
+  },
+  customerInsightServiceList: {
+    gap: 8,
+  },
+  customerInsightServiceRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 10,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#E5EBF2',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  customerInsightServiceName: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#0F172A',
+  },
+  customerInsightServiceMeta: {
+    fontSize: 11,
+    fontWeight: '900',
+    color: '#33577D',
+  },
+  customerInsightTimelineCard: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+  },
+  customerInsightFilterRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 12,
+  },
+  customerInsightFilterChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  customerInsightFilterChipActive: {
+    backgroundColor: '#0F172A',
+    borderColor: '#0F172A',
+  },
+  customerInsightFilterChipText: {
+    fontSize: 11,
+    fontWeight: '900',
+    color: '#334155',
+  },
+  customerInsightFilterChipTextActive: {
+    color: '#FFFFFF',
+  },
+  customerInsightFilterChipCount: {
+    minWidth: 20,
+    fontSize: 10,
+    fontWeight: '900',
+    color: '#475569',
+    textAlign: 'center',
+    backgroundColor: '#EEF2F7',
+    borderRadius: 999,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+  },
+  customerInsightFilterChipCountActive: {
+    color: '#0F172A',
+    backgroundColor: '#FFFFFF',
+  },
+  customerInsightTimeline: {
+    gap: 10,
+  },
+  customerInsightTimelineRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  customerInsightDateBadge: {
+    width: 78,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    paddingHorizontal: 8,
+    paddingVertical: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  customerInsightDateBadgeDay: {
+    fontSize: 11,
+    fontWeight: '900',
+    color: '#0F172A',
+    marginBottom: 2,
+    textAlign: 'center',
+  },
+  customerInsightDateBadgeTime: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#64748B',
+    textAlign: 'center',
+  },
+  customerInsightTimelineContent: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  customerInsightTimelineTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    marginBottom: 4,
+  },
+  customerInsightTimelineTitle: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '900',
+    color: '#0F172A',
+  },
+  customerInsightTimelineSubtitle: {
+    fontSize: 11,
+    lineHeight: 16,
+    color: '#64748B',
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  customerInsightTimelineStatus: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#33577D',
+  },
+  customerInsightPhasePill: {
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+  },
+  customerInsightPhasePillFuture: {
+    backgroundColor: '#E0F2FE',
+  },
+  customerInsightPhasePillToday: {
+    backgroundColor: '#FEF3C7',
+  },
+  customerInsightPhasePillPast: {
+    backgroundColor: '#ECFDF3',
+  },
+  customerInsightPhasePillMuted: {
+    backgroundColor: '#F1F5F9',
+  },
+  customerInsightPhasePillText: {
+    fontSize: 10,
+    fontWeight: '900',
+  },
+  customerInsightPhasePillTextFuture: {
+    color: '#0C4A6E',
+  },
+  customerInsightPhasePillTextToday: {
+    color: '#92400E',
+  },
+  customerInsightPhasePillTextPast: {
+    color: '#166534',
+  },
+  customerInsightPhasePillTextMuted: {
+    color: '#64748B',
   },
   operatorModalHeader: {
     flexDirection: 'row',

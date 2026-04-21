@@ -7,6 +7,7 @@ import { supabase } from '../supabase';
 
 const PUSH_TOKEN_STORAGE_KEY = 'salon_manager_expo_push_token';
 const PUSH_FLUSH_LIMIT = 50;
+const runtimeLocalNotificationDedupeMap = new Map<string, number>();
 
 type RegisterPushParams = {
   workspaceId: string;
@@ -62,6 +63,8 @@ const getProjectId = () => {
 
 const isExpoGoRuntime = () => Constants.executionEnvironment === 'storeClient';
 
+export const isExpoGoPushRuntime = () => isExpoGoRuntime();
+
 const resolveRpcName = async ({
   authName,
   publicName,
@@ -94,6 +97,140 @@ export const configurePushNotifications = () => {
   });
 };
 
+const ensureNotificationPermissions = async () => {
+  const { status: existingStatus } = await Notifications.getPermissionsAsync();
+  let finalStatus = existingStatus;
+
+  if (existingStatus !== 'granted') {
+    const { status } = await Notifications.requestPermissionsAsync();
+    finalStatus = status;
+  }
+
+  return finalStatus;
+};
+
+export const getNotificationPermissionStatus = async () => {
+  const { status } = await Notifications.getPermissionsAsync();
+  return status;
+};
+
+export const requestNotificationPermissionsOnly = async () => {
+  const status = await ensureNotificationPermissions();
+  await ensureAndroidNotificationChannel();
+  return status;
+};
+
+const ensureAndroidNotificationChannel = async () => {
+  if (Platform.OS !== 'android') {
+    return;
+  }
+
+  await Notifications.setNotificationChannelAsync('default', {
+    name: 'Default',
+    importance: Notifications.AndroidImportance.MAX,
+    vibrationPattern: [0, 250, 250, 250],
+    lightColor: '#d4af37',
+  });
+};
+
+export const scheduleLocalTestNotification = async ({
+  title = 'SalonPro',
+  body = 'Notifica locale di test inviata correttamente.',
+}: {
+  title?: string;
+  body?: string;
+} = {}) => {
+  const permissionStatus = await ensureNotificationPermissions();
+  if (permissionStatus !== 'granted') {
+    return { ok: false as const, reason: 'permission_denied' };
+  }
+
+  await ensureAndroidNotificationChannel();
+
+  await Notifications.scheduleNotificationAsync({
+    content: {
+      title,
+      body,
+      sound: true,
+      data: {
+        source: 'local_test',
+        sentAt: new Date().toISOString(),
+      },
+    },
+    trigger:
+      Platform.OS === 'android'
+        ? { channelId: 'default', type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL, seconds: 2 }
+        : { type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL, seconds: 2 },
+  });
+
+  return { ok: true as const };
+};
+
+export const scheduleLocalRuntimeNotification = async ({
+  title,
+  body,
+  data = {},
+  delaySeconds = 1,
+  dedupeKey,
+}: {
+  title: string;
+  body: string;
+  data?: Record<string, unknown>;
+  delaySeconds?: number;
+  dedupeKey?: string;
+}) => {
+  const permissionStatus = await ensureNotificationPermissions();
+  if (permissionStatus !== 'granted') {
+    return { ok: false as const, reason: 'permission_denied' };
+  }
+
+  await ensureAndroidNotificationChannel();
+
+  if (dedupeKey) {
+    const now = Date.now();
+    const lastSentAt = runtimeLocalNotificationDedupeMap.get(dedupeKey) ?? 0;
+    if (now - lastSentAt < 15000) {
+      return { ok: true as const, deduped: true as const };
+    }
+
+    const scheduled = await Notifications.getAllScheduledNotificationsAsync();
+    const duplicates = scheduled.filter((item) => {
+      const payload = item.content.data as Record<string, unknown> | undefined;
+      return payload?.dedupeKey === dedupeKey;
+    });
+
+    await Promise.all(
+      duplicates.map((item) => Notifications.cancelScheduledNotificationAsync(item.identifier))
+    );
+    runtimeLocalNotificationDedupeMap.set(dedupeKey, now);
+  }
+
+  await Notifications.scheduleNotificationAsync({
+    content: {
+      title,
+      body,
+      sound: true,
+      data: {
+        ...data,
+        dedupeKey: dedupeKey ?? null,
+      },
+    },
+    trigger:
+      Platform.OS === 'android'
+        ? {
+            channelId: 'default',
+            type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+            seconds: Math.max(1, delaySeconds),
+          }
+        : {
+            type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+            seconds: Math.max(1, delaySeconds),
+          },
+  });
+
+  return { ok: true as const };
+};
+
 const getExpoPushToken = async (): Promise<string | null> => {
   if (!Device.isDevice) {
     return null;
@@ -103,26 +240,12 @@ const getExpoPushToken = async (): Promise<string | null> => {
     throw new Error('expo_go_push_unsupported');
   }
 
-  const { status: existingStatus } = await Notifications.getPermissionsAsync();
-  let finalStatus = existingStatus;
-
-  if (existingStatus !== 'granted') {
-    const { status } = await Notifications.requestPermissionsAsync();
-    finalStatus = status;
-  }
-
+  const finalStatus = await ensureNotificationPermissions();
   if (finalStatus !== 'granted') {
     return null;
   }
 
-  if (Platform.OS === 'android') {
-    await Notifications.setNotificationChannelAsync('default', {
-      name: 'Default',
-      importance: Notifications.AndroidImportance.MAX,
-      vibrationPattern: [0, 250, 250, 250],
-      lightColor: '#d4af37',
-    });
-  }
+  await ensureAndroidNotificationChannel();
 
   const projectId = getProjectId();
   if (!projectId) {
@@ -193,12 +316,24 @@ export const registerPushNotifications = async ({
   customerPhone,
 }: RegisterPushParams): Promise<RegisterPushResult> => {
   try {
-    const token = await getExpoPushToken();
+    const storedToken = await AsyncStorage.getItem(PUSH_TOKEN_STORAGE_KEY);
+    const token = await getExpoPushToken().catch((error) => {
+      console.log('Push token refresh fallback:', error);
+      return storedToken;
+    });
+
     if (!token) {
-      return { token: null, backendSynced: false, reason: 'permission_or_project_id_missing' };
+      return {
+        token: null,
+        backendSynced: false,
+        reason: storedToken ? 'backend_sync_fallback_failed' : 'permission_or_project_id_missing',
+      };
     }
 
-    await AsyncStorage.setItem(PUSH_TOKEN_STORAGE_KEY, token);
+    if (token !== storedToken) {
+      await AsyncStorage.setItem(PUSH_TOKEN_STORAGE_KEY, token);
+    }
+
     const backendSynced = await upsertPushTokenBackend({
       workspaceId,
       ownerEmail,

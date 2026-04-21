@@ -489,10 +489,10 @@ const translations = {
     frontend_subtitle:
       'Registrati una volta, poi invia la richiesta. Il salone la vedra nella sezione prenotazioni del back office e decidera se accettarla.',
     frontend_salon_code_title: 'Codice salone',
-    frontend_salon_code_placeholder: 'Inserisci il codice del parrucchiere',
+    frontend_salon_code_placeholder: 'Inserisci il codice del salone',
     frontend_open_salon: 'Apri salone',
     frontend_active_salon: 'Salone attivo: {salonName}',
-    frontend_open_hint: 'Apri il link del parrucchiere o inserisci il codice qui sopra.',
+    frontend_open_hint: 'Apri il link del salone o inserisci il codice qui sopra.',
     frontend_loading: 'Caricamento...',
     frontend_business_phone: 'Cellulare salone',
     frontend_bookable_services: 'Servizi prenotabili',

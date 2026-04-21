@@ -129,8 +129,14 @@ export const resolveServiceAccent = ({
     return getCustomAccent(serviceColorOverrides[normalizedServiceName]);
   }
   const normalizedRole = roleName?.trim().toLowerCase().replace(/\s+/g, ' ') ?? '';
+  if (normalizedRole && serviceColorOverrides?.[normalizedRole]) {
+    return getCustomAccent(serviceColorOverrides[normalizedRole]);
+  }
   if (normalizedRole && roleColorOverrides?.[normalizedRole]) {
     return getCustomAccent(roleColorOverrides[normalizedRole]);
+  }
+  if (normalizedServiceName && roleColorOverrides?.[normalizedServiceName]) {
+    return getCustomAccent(roleColorOverrides[normalizedServiceName]);
   }
   return getServiceAccentByMeta({ serviceName, roleName });
 };

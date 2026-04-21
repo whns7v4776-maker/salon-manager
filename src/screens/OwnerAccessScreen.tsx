@@ -1,3 +1,5 @@
+import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
     Alert,
@@ -24,7 +26,28 @@ import {
     limitPhoneToTenDigits,
 } from '../lib/validators';
 
+const REGISTRATION_CATEGORY_PRESETS = [
+  'Barber',
+  'Hair Stylist',
+  'Colorista',
+  'Nails',
+  'Estetica',
+  'Skincare',
+  'Epilazione',
+  'Brows',
+  'Lashes',
+  'Make-up',
+  'Massaggi',
+  'Spa',
+  'Tattoo',
+  'Piercing',
+  'PMU',
+  'Tricologia',
+  'Wellness',
+];
+
 export function OwnerAccessScreen() {
+  const router = useRouter();
   const { width } = useWindowDimensions();
   const {
     appLanguage,
@@ -66,7 +89,9 @@ export function OwnerAccessScreen() {
   const [registerStreetLine, setRegisterStreetLine] = useState('');
   const [registerCity, setRegisterCity] = useState('');
   const [registerPostalCode, setRegisterPostalCode] = useState('');
-  const [registerActivityCategory, setRegisterActivityCategory] = useState('');
+  const [registerSelectedCategories, setRegisterSelectedCategories] = useState<string[]>([]);
+  const [registerCustomCategoryInput, setRegisterCustomCategoryInput] = useState('');
+  const [registerCustomCategoryOpen, setRegisterCustomCategoryOpen] = useState(false);
   const [registerEmail, setRegisterEmail] = useState('');
   const [registerPassword, setRegisterPassword] = useState('');
   const [resetEmail, setResetEmail] = useState('');
@@ -74,6 +99,7 @@ export function OwnerAccessScreen() {
   const [recoveryPasswordConfirm, setRecoveryPasswordConfirm] = useState('');
   const [loadingAction, setLoadingAction] = useState<'login' | 'register' | 'reset' | null>(null);
   const [biometricLoading, setBiometricLoading] = useState(false);
+  const [loginFeedback, setLoginFeedback] = useState('');
   const biometricAutoTriggered = useRef(false);
 
   const [formErrors, setFormErrors] = useState<{
@@ -85,6 +111,25 @@ export function OwnerAccessScreen() {
   const { focusField, scrollToField } = useKeyboardAwareScroll(scrollRef, {
     topOffset: 36,
   });
+  const registerActivityCategory = useMemo(() => {
+    const seen = new Set<string>();
+    const combined = [
+      ...registerSelectedCategories,
+      ...registerCustomCategoryInput
+        .split(/[,\n]/)
+        .map((item) => item.trim())
+        .filter(Boolean),
+    ].filter((item) => {
+      const normalized = item.trim().toLowerCase();
+      if (!normalized || seen.has(normalized)) {
+        return false;
+      }
+      seen.add(normalized);
+      return true;
+    });
+
+    return combined.join(', ');
+  }, [registerCustomCategoryInput, registerSelectedCategories]);
 
   // Auto-trigger biometrica al mount se abilitata e disponibile
   useEffect(() => {
@@ -165,18 +210,31 @@ export function OwnerAccessScreen() {
   );
   const isCompactWidth = width < 390;
   const loginModeLabel = isCompactWidth ? 'Accedi' : tApp(appLanguage, 'auth_mode_login');
-  const registerModeLabel = isCompactWidth ? 'Crea' : tApp(appLanguage, 'auth_mode_register');
+  const registerModeLabel = isCompactWidth ? 'Crea' : 'Crea salone';
   const loginTitleLabel = isCompactWidth ? 'Accedi' : tApp(appLanguage, 'auth_login_title');
   const loginButtonLabel = isCompactWidth ? 'Accedi' : tApp(appLanguage, 'auth_login_button');
-  const registerTitleLabel = isCompactWidth ? 'Crea account' : tApp(appLanguage, 'auth_register_title');
+  const registerTitleLabel = isCompactWidth ? 'Crea salone' : 'Crea il tuo salone';
   const registerOpenLabel = isCompactWidth
     ? showRegister
       ? 'Chiudi'
       : 'Apri'
     : showRegister
-      ? tApp(appLanguage, 'auth_register_close')
-      : tApp(appLanguage, 'auth_register_open');
-  const registerButtonLabel = isCompactWidth ? 'Crea' : tApp(appLanguage, 'auth_register_button');
+      ? 'Chiudi registrazione'
+      : 'Apri registrazione';
+  const registerButtonLabel = isCompactWidth ? 'Crea' : 'Crea salone';
+
+  const navigateToOwnerAgenda = React.useCallback(() => {
+    if (
+      Platform.OS === 'web' &&
+      typeof window !== 'undefined' &&
+      typeof window.location?.assign === 'function'
+    ) {
+      window.location.assign('/agenda');
+      return;
+    }
+
+    router.replace('/agenda');
+  }, [router]);
 
   const scrollToRegisterCard = () => {
     requestAnimationFrame(() => {
@@ -184,6 +242,25 @@ export function OwnerAccessScreen() {
         y: Math.max(registerCardY.current - 18, 0),
         animated: true,
       });
+    });
+  };
+
+  const openRegisterCard = () => {
+    setShowRegister(true);
+    setShowReset(false);
+    setActiveMode('register');
+    scrollToRegisterCard();
+  };
+
+  const toggleRegistrationCategory = (option: string) => {
+    setRegisterSelectedCategories((current) => {
+      const normalizedOption = option.trim().toLowerCase();
+      const exists = current.some((item) => item.trim().toLowerCase() === normalizedOption);
+      if (exists) {
+        return current.filter((item) => item.trim().toLowerCase() !== normalizedOption);
+      }
+
+      return [...current, option];
     });
   };
 
@@ -197,16 +274,31 @@ export function OwnerAccessScreen() {
     }
 
     setFormErrors((current) => ({ ...current, loginEmail: undefined }));
-
+    setLoginFeedback('');
     setLoadingAction('login');
-    const result = await loginOwnerAccount(loginEmail, loginPassword);
-    setLoadingAction(null);
 
-    if (!result.ok) {
-      Alert.alert(
-        tApp(appLanguage, 'auth_login_failed_title'),
-        result.error ?? tApp(appLanguage, 'auth_login_failed_body')
-      );
+    try {
+      const result = await loginOwnerAccount(loginEmail, loginPassword);
+
+      if (!result.ok) {
+        setLoginFeedback(result.error ?? tApp(appLanguage, 'auth_login_failed_body'));
+        Alert.alert(
+          tApp(appLanguage, 'auth_login_failed_title'),
+          result.error ?? tApp(appLanguage, 'auth_login_failed_body')
+        );
+        return;
+      }
+
+      navigateToOwnerAgenda();
+    } catch (error) {
+      const fallbackError =
+        error instanceof Error && error.message.trim()
+          ? error.message.trim()
+          : tApp(appLanguage, 'auth_login_failed_body');
+      setLoginFeedback(fallbackError);
+      Alert.alert(tApp(appLanguage, 'auth_login_failed_title'), fallbackError);
+    } finally {
+      setLoadingAction(null);
     }
   };
 
@@ -257,6 +349,12 @@ export function OwnerAccessScreen() {
     setLoadingAction(null);
 
     if (!result.ok) {
+      if ((result.error ?? '').toLowerCase().includes('mail gia registrato')) {
+        setFormErrors((current) => ({
+          ...current,
+          registerEmail: 'Account mail gia registrato. Inserire una nuova mail.',
+        }));
+      }
       Alert.alert(
         tApp(appLanguage, 'auth_register_failed_title'),
         result.error ?? tApp(appLanguage, 'auth_register_failed_body')
@@ -267,14 +365,12 @@ export function OwnerAccessScreen() {
     setLoginEmail(result.email ?? registerEmail.trim());
     setLoginPassword('');
     setRegisterPassword('');
+    setRegisterSelectedCategories([]);
+    setRegisterCustomCategoryInput('');
+    setRegisterCustomCategoryOpen(false);
     setShowRegister(false);
     setShowReset(false);
     setActiveMode('login');
-
-    Alert.alert(
-      tApp(appLanguage, 'auth_register_success_title'),
-      tApp(appLanguage, 'auth_register_success_body')
-    );
   };
 
   const handleResetPassword = async () => {
@@ -340,7 +436,7 @@ export function OwnerAccessScreen() {
       <View style={styles.backgroundGlowBottom} />
       <KeyboardAvoidingView
         style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : Platform.OS === 'android' ? 'height' : undefined}
       >
         <ScrollView
           ref={scrollRef}
@@ -351,6 +447,13 @@ export function OwnerAccessScreen() {
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.heroCard}>
+            <TouchableOpacity
+              style={styles.heroBackButton}
+              onPress={() => router.replace('/cliente-scanner')}
+              activeOpacity={0.88}
+            >
+              <Ionicons name="chevron-back" size={22} color="#0F172A" />
+            </TouchableOpacity>
             <View style={styles.heroBadgeRow}>
               <View style={styles.heroChip}>
                 <Text allowFontScaling={false} style={styles.heroChipText}>
@@ -366,7 +469,7 @@ export function OwnerAccessScreen() {
                 </View>
               </View>
               <Text allowFontScaling={false} style={styles.heroSubtitle}>
-                {tApp(appLanguage, 'auth_subtitle')}
+                Accedi al back office per gestire agenda, prenotazioni, clienti, cassa e servizi.
               </Text>
             </View>
 
@@ -444,9 +547,7 @@ export function OwnerAccessScreen() {
                   activeMode === 'register' && styles.modeSwitchButtonActive,
                 ]}
                 onPress={() => {
-                  setActiveMode('register');
-                  setShowRegister(true);
-                  scrollToRegisterCard();
+                  openRegisterCard();
                 }}
                 activeOpacity={0.9}
               >
@@ -555,7 +656,7 @@ export function OwnerAccessScreen() {
                   {loginTitleLabel}
                 </Text>
                 <Text allowFontScaling={false} style={styles.cardSubtitle}>
-                  {tApp(appLanguage, 'auth_login_subtitle')}
+                  Accedi con la mail del titolare e la password del salone.
                 </Text>
               </View>
             </View>
@@ -577,6 +678,8 @@ export function OwnerAccessScreen() {
               placeholder={isCompactWidth ? '' : tApp(appLanguage, 'auth_email_placeholder')}
               placeholderTextColor="#98a2b3"
               autoCapitalize="none"
+              autoComplete="email"
+              textContentType="username"
               keyboardType="email-address"
               value={loginEmail}
               onChangeText={(value) => {
@@ -609,6 +712,8 @@ export function OwnerAccessScreen() {
               placeholder={isCompactWidth ? '' : tApp(appLanguage, 'auth_password_placeholder')}
               placeholderTextColor="#98a2b3"
               secureTextEntry
+              autoComplete="current-password"
+              textContentType="password"
               value={loginPassword}
               onChangeText={setLoginPassword}
               onFocus={() => scrollToField(loginPasswordRef)}
@@ -638,6 +743,12 @@ export function OwnerAccessScreen() {
                   : loginButtonLabel}
               </Text>
             </TouchableOpacity>
+
+            {loginFeedback ? (
+              <Text allowFontScaling={false} style={styles.loginFeedbackText}>
+                {loginFeedback}
+              </Text>
+            ) : null}
 
             {biometricAvailable && Platform.OS !== 'web' ? (
               <TouchableOpacity
@@ -687,6 +798,22 @@ export function OwnerAccessScreen() {
                 {tApp(appLanguage, 'auth_forgot_password')}
               </Text>
             </TouchableOpacity>
+
+            <View style={styles.loginRegisterPrompt}>
+              <Text allowFontScaling={false} style={styles.loginRegisterPromptLabel}>
+                Non hai ancora creato il tuo spazio salone?
+              </Text>
+              <TouchableOpacity
+                style={styles.loginRegisterPromptButton}
+                onPress={openRegisterCard}
+                activeOpacity={0.9}
+              >
+                <Text allowFontScaling={false} style={styles.loginRegisterPromptButtonText}>
+                  Crea salone
+                </Text>
+                <Ionicons name="chevron-down" size={18} color="#0F766E" />
+              </TouchableOpacity>
+            </View>
 
                 {showReset ? (
               <View style={styles.inlinePanel}>
@@ -764,7 +891,7 @@ export function OwnerAccessScreen() {
                   {registerTitleLabel}
                 </Text>
                 <Text allowFontScaling={false} style={styles.cardSubtitle}>
-                  {tApp(appLanguage, 'auth_register_subtitle')}
+                  Crea il back office del tuo salone e poi potrai usarlo da app o da computer.
                 </Text>
               </View>
 
@@ -914,25 +1041,117 @@ export function OwnerAccessScreen() {
                   onChangeText={setRegisterPostalCode}
                   onFocus={() => scrollToField(registerPostalCodeRef)}
                   returnKeyType="next"
-                  onSubmitEditing={() => focusField(registerActivityCategoryRef)}
+                  onSubmitEditing={() => {
+                    if (registerActivityCategory.trim()) {
+                      focusField(registerEmailRef);
+                      return;
+                    }
+
+                    setRegisterCustomCategoryOpen(true);
+                    requestAnimationFrame(() => {
+                      scrollToField(registerActivityCategoryRef);
+                      registerActivityCategoryRef.current?.focus();
+                    });
+                  }}
                   blurOnSubmit={false}
                 />
 
-                <TextInput
-                  ref={registerActivityCategoryRef}
-                  allowFontScaling={false}
-                  maxFontSizeMultiplier={1}
-                  style={styles.input}
-                  placeholder="Categoria attivita"
-                  placeholderTextColor="#98a2b3"
-                  value={registerActivityCategory}
-                  onChangeText={setRegisterActivityCategory}
-                  autoCapitalize="characters"
-                  onFocus={() => scrollToField(registerActivityCategoryRef)}
-                  returnKeyType="next"
-                  onSubmitEditing={() => focusField(registerEmailRef)}
-                  blurOnSubmit={false}
-                />
+                <View style={styles.registerCategorySection}>
+                  <View style={styles.registerCategorySectionHeader}>
+                    <Text allowFontScaling={false} style={styles.registerCategorySectionTitle}>
+                      Scegli tipologia attività
+                    </Text>
+                    <Text allowFontScaling={false} style={styles.registerCategorySectionSubtitle}>
+                      Puoi selezionarne più di una. Serve solo come badge iniziale del salone: i servizi e i mestieri restano liberi anche dopo la registrazione.
+                    </Text>
+                  </View>
+
+                  <View style={styles.registerCategoryChipWrap}>
+                    {REGISTRATION_CATEGORY_PRESETS.map((option) => {
+                      const selected = registerSelectedCategories.some(
+                        (item) => item.trim().toLowerCase() === option.trim().toLowerCase()
+                      );
+
+                      return (
+                        <TouchableOpacity
+                          key={option}
+                          style={[
+                            styles.registerCategoryChip,
+                            selected && styles.registerCategoryChipActive,
+                          ]}
+                          activeOpacity={0.9}
+                          onPress={() => toggleRegistrationCategory(option)}
+                        >
+                          <Text
+                            allowFontScaling={false}
+                            style={[
+                              styles.registerCategoryChipText,
+                              selected && styles.registerCategoryChipTextActive,
+                            ]}
+                            numberOfLines={1}
+                          >
+                            {option}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                    <TouchableOpacity
+                      style={[
+                        styles.registerCategoryChip,
+                        styles.registerCategoryChipGhost,
+                        registerCustomCategoryOpen && styles.registerCategoryChipGhostActive,
+                      ]}
+                      activeOpacity={0.9}
+                      onPress={() => {
+                        setRegisterCustomCategoryOpen((current) => !current);
+                        requestAnimationFrame(() => {
+                          scrollToField(registerActivityCategoryRef);
+                          registerActivityCategoryRef.current?.focus();
+                        });
+                      }}
+                    >
+                      <Text
+                        allowFontScaling={false}
+                        style={[
+                          styles.registerCategoryChipText,
+                          registerCustomCategoryOpen && styles.registerCategoryChipGhostTextActive,
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {registerCustomCategoryOpen ? 'Chiudi nuova categoria' : '+ Nuova categoria'}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  {registerActivityCategory.trim() ? (
+                    <View style={styles.registerCategorySummary}>
+                      <Text allowFontScaling={false} style={styles.registerCategorySummaryLabel}>
+                        Badge salone iniziale
+                      </Text>
+                      <Text allowFontScaling={false} style={styles.registerCategorySummaryValue}>
+                        {registerActivityCategory}
+                      </Text>
+                    </View>
+                  ) : null}
+
+                  {registerCustomCategoryOpen ? (
+                    <TextInput
+                      ref={registerActivityCategoryRef}
+                      allowFontScaling={false}
+                      maxFontSizeMultiplier={1}
+                      style={styles.input}
+                      placeholder="Aggiungi una o più categorie personalizzate"
+                      placeholderTextColor="#98a2b3"
+                      value={registerCustomCategoryInput}
+                      onChangeText={setRegisterCustomCategoryInput}
+                      autoCapitalize="words"
+                      onFocus={() => scrollToField(registerActivityCategoryRef)}
+                      returnKeyType="next"
+                      onSubmitEditing={() => focusField(registerEmailRef)}
+                      blurOnSubmit={false}
+                    />
+                  ) : null}
+                </View>
 
                 <TextInput
                   ref={registerEmailRef}
@@ -942,6 +1161,8 @@ export function OwnerAccessScreen() {
                   placeholder={tApp(appLanguage, 'auth_email_placeholder')}
                   placeholderTextColor="#98a2b3"
                   autoCapitalize="none"
+                  autoComplete="email"
+                  textContentType="emailAddress"
                   keyboardType="email-address"
                   value={registerEmail}
                   onChangeText={(value) => {
@@ -969,6 +1190,8 @@ export function OwnerAccessScreen() {
                   placeholder={tApp(appLanguage, 'auth_password_placeholder')}
                   placeholderTextColor="#98a2b3"
                   secureTextEntry
+                  autoComplete="new-password"
+                  textContentType="newPassword"
                   value={registerPassword}
                   onChangeText={setRegisterPassword}
                   onFocus={() => scrollToField(registerPasswordRef)}
@@ -1044,8 +1267,11 @@ const styles = StyleSheet.create(withAndroidStyleSafety({
     paddingHorizontal: Platform.OS === 'android' ? 28 : 22,
     paddingTop: 68,
     paddingBottom: 40,
+    alignItems: 'center',
   },
   heroCard: {
+    width: '100%',
+    maxWidth: 720,
     backgroundColor: '#ffffff',
     borderRadius: 34,
     padding: Platform.OS === 'android' ? 26 : 22,
@@ -1057,11 +1283,24 @@ const styles = StyleSheet.create(withAndroidStyleSafety({
     shadowRadius: 18,
     shadowOffset: { width: 0, height: 10 },
     elevation: 10,
+    alignSelf: 'center',
+  },
+  heroBackButton: {
+    position: 'absolute',
+    top: 18,
+    left: 18,
+    width: 42,
+    height: 42,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#EEF4FF',
+    zIndex: 2,
   },
   heroBadgeRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'flex-start',
+    justifyContent: 'center',
     marginBottom: 14,
   },
   heroChip: {
@@ -1162,6 +1401,8 @@ const styles = StyleSheet.create(withAndroidStyleSafety({
     color: '#9d174d',
   },
   card: {
+    width: '100%',
+    maxWidth: 720,
     backgroundColor: '#ffffff',
     borderRadius: 30,
     padding: Platform.OS === 'android' ? 24 : 20,
@@ -1173,8 +1414,11 @@ const styles = StyleSheet.create(withAndroidStyleSafety({
     shadowRadius: 14,
     shadowOffset: { width: 0, height: 8 },
     elevation: 8,
+    alignSelf: 'center',
   },
   modeSwitch: {
+    width: '100%',
+    maxWidth: 720,
     flexDirection: 'row',
     flexWrap: 'wrap',
     backgroundColor: '#ffffff',
@@ -1303,6 +1547,100 @@ const styles = StyleSheet.create(withAndroidStyleSafety({
     borderColor: '#fca5a5',
     backgroundColor: '#fff7f7',
   },
+  registerCategorySection: {
+    width: '100%',
+    gap: 10,
+    marginBottom: 12,
+  },
+  registerCategorySectionHeader: {
+    alignItems: 'center',
+    gap: 5,
+  },
+  registerCategorySectionTitle: {
+    fontSize: 15,
+    lineHeight: 20,
+    fontWeight: '900',
+    color: '#0F172A',
+    textAlign: 'center',
+  },
+  registerCategorySectionSubtitle: {
+    fontSize: 12.5,
+    lineHeight: 18,
+    fontWeight: '700',
+    color: '#667085',
+    textAlign: 'center',
+  },
+  registerCategoryChipWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    justifyContent: 'center',
+  },
+  registerCategoryChip: {
+    minHeight: 34,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: 'rgba(148, 163, 184, 0.24)',
+    shadowColor: '#0f172a',
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  registerCategoryChipGhost: {
+    backgroundColor: '#FFF4C7',
+    borderColor: '#E7C96A',
+  },
+  registerCategoryChipGhostActive: {
+    backgroundColor: '#F9E38C',
+    borderColor: '#D7AF2B',
+  },
+  registerCategoryChipActive: {
+    backgroundColor: '#1e293b',
+    borderColor: '#1e293b',
+  },
+  registerCategoryChipText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#475569',
+    textAlign: 'center',
+  },
+  registerCategoryChipTextActive: {
+    color: '#ffffff',
+  },
+  registerCategoryChipGhostTextActive: {
+    color: '#7A5800',
+  },
+  registerCategorySummary: {
+    width: '100%',
+    borderRadius: 18,
+    backgroundColor: '#FFFBEA',
+    borderWidth: 1,
+    borderColor: '#F3E4AA',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  registerCategorySummaryLabel: {
+    fontSize: 11,
+    fontWeight: '900',
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+    color: '#9A6B00',
+    marginBottom: 4,
+  },
+  registerCategorySummaryValue: {
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '800',
+    color: '#5F4700',
+    textAlign: 'center',
+  },
   fieldErrorText: {
     marginTop: -8,
     marginBottom: 10,
@@ -1339,6 +1677,14 @@ const styles = StyleSheet.create(withAndroidStyleSafety({
   primaryButtonTextCompact: {
     fontSize: 14,
   },
+  loginFeedbackText: {
+    marginTop: 10,
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: '700',
+    color: '#b91c1c',
+    textAlign: 'center',
+  },
   biometricButton: {
     marginTop: 12,
     backgroundColor: '#eef2f7',
@@ -1371,6 +1717,35 @@ const styles = StyleSheet.create(withAndroidStyleSafety({
     textAlign: 'center',
     width: '100%',
     paddingHorizontal: Platform.OS === 'android' ? 8 : 0,
+  },
+  loginRegisterPrompt: {
+    marginTop: 14,
+    alignItems: 'center',
+    gap: 8,
+  },
+  loginRegisterPromptLabel: {
+    fontSize: 12.5,
+    lineHeight: 18,
+    fontWeight: '700',
+    color: '#667085',
+    textAlign: 'center',
+  },
+  loginRegisterPromptButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    minWidth: 172,
+    borderRadius: 999,
+    paddingHorizontal: 18,
+    paddingVertical: 11,
+    backgroundColor: '#EEF6F5',
+  },
+  loginRegisterPromptButtonText: {
+    fontSize: 15,
+    fontWeight: '900',
+    color: '#0F766E',
+    textAlign: 'center',
   },
   inlinePanel: {
     marginTop: 16,

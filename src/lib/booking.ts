@@ -94,7 +94,11 @@ export type AvailabilitySettings = {
   lunchBreakEnd: string;
   guidedSlotsEnabled: boolean;
   guidedSlotsStrategy: 'balanced' | 'protect_long_services' | 'fill_gaps';
-  guidedSlotsVisibility: 'recommended_first' | 'recommended_only';
+  guidedSlotsVisibility:
+    | 'recommended_first'
+    | 'recommended_only'
+    | 'recommended_and_all';
+  guidedSlotsUpdatedAt?: string;
 };
 
 export const DEFAULT_MINIMUM_NOTICE_MINUTES = 30;
@@ -324,9 +328,16 @@ export const normalizeAvailabilitySettings = (
         ? settings.guidedSlotsStrategy
         : 'balanced',
     guidedSlotsVisibility:
-      settings?.guidedSlotsVisibility === 'recommended_only'
-        ? 'recommended_only'
+      settings?.guidedSlotsVisibility === 'recommended_first' ||
+      settings?.guidedSlotsVisibility === 'recommended_only' ||
+      settings?.guidedSlotsVisibility === 'recommended_and_all'
+        ? settings.guidedSlotsVisibility
         : 'recommended_first',
+    guidedSlotsUpdatedAt:
+      typeof settings?.guidedSlotsUpdatedAt === 'string' &&
+      settings.guidedSlotsUpdatedAt.trim()
+        ? settings.guidedSlotsUpdatedAt.trim()
+        : undefined,
   };
 };
 
@@ -682,11 +693,13 @@ export const assignFallbackOperatorsToAppointments = ({
   services,
   operators,
   settings,
+  preserveExplicitOperatorAssignments = false,
 }: {
   appointments: SharedAppointment[];
   services: SharedService[];
   operators: SharedOperator[];
   settings?: AvailabilitySettings | null;
+  preserveExplicitOperatorAssignments?: boolean;
 }) => {
   if (appointments.length === 0 || operators.length === 0) {
     return appointments;
@@ -729,10 +742,22 @@ export const assignFallbackOperatorsToAppointments = ({
     pool.push(appointment);
   };
 
+  const getAssignedLoadForOperator = (dateValue: string, operatorId: string) =>
+    getAssignedPool(dateValue, operatorId).reduce((total, item) => {
+      const duration =
+        typeof item.durataMinuti === 'number'
+          ? item.durataMinuti
+          : getServiceDuration(item.servizio, services);
+      return total + Math.max(duration, 0);
+    }, 0);
+
   return normalizedAppointments.map((appointment) => {
     const dateValue = appointment.data ?? getTodayDateString();
     const existingOperatorId = appointment.operatoreId?.trim() ?? '';
     const existingOperatorName = appointment.operatoreNome?.trim() ?? '';
+    const hasExplicitNonSalonOperator =
+      (!!existingOperatorId && !isSalonCapacityOperatorId(existingOperatorId)) ||
+      !!existingOperatorName;
     const usesOperatorsForAppointment = doesServiceUseOperators(appointment.servizio, services);
 
     if (!usesOperatorsForAppointment) {
@@ -780,6 +805,14 @@ export const assignFallbackOperatorsToAppointments = ({
       return resolvedAppointment;
     }
 
+    if (preserveExplicitOperatorAssignments && hasExplicitNonSalonOperator) {
+      if (existingOperatorId) {
+        registerAssignedAppointment(dateValue, existingOperatorId, appointment);
+      }
+
+      return appointment;
+    }
+
     const normalizedExistingOperatorName = existingOperatorName.toLowerCase();
     compatibleOperators.sort((first, second) => {
       const firstMatchesName =
@@ -805,20 +838,43 @@ export const assignFallbackOperatorsToAppointments = ({
         ? appointment.durataMinuti
         : getServiceDuration(appointment.servizio, services);
 
-    const selectedOperator = compatibleOperators.find((operator) => {
-      const operatorId = operator.id.trim();
-      if (!operatorId) return false;
+    const selectedOperator = compatibleOperators
+      .filter((operator) => {
+        const operatorId = operator.id.trim();
+        if (!operatorId) return false;
 
-      return !getAssignedPool(dateValue, operatorId).some((existingAppointment) =>
-        doesTimeRangeConflictWithAppointment({
-          startTime: appointment.ora,
-          durationMinutes: appointmentDuration,
-          appointment: existingAppointment,
-          services,
-          settings,
-        })
-      );
-    });
+        return !getAssignedPool(dateValue, operatorId).some((existingAppointment) =>
+          doesTimeRangeConflictWithAppointment({
+            startTime: appointment.ora,
+            durationMinutes: appointmentDuration,
+            appointment: existingAppointment,
+            services,
+            settings,
+          })
+        );
+      })
+      .sort((first, second) => {
+        const firstId = first.id.trim();
+        const secondId = second.id.trim();
+        const firstLoad = getAssignedLoadForOperator(dateValue, firstId);
+        const secondLoad = getAssignedLoadForOperator(dateValue, secondId);
+
+        if (firstLoad !== secondLoad) {
+          return firstLoad - secondLoad;
+        }
+
+        const firstCount = getAssignedPool(dateValue, firstId).length;
+        const secondCount = getAssignedPool(dateValue, secondId).length;
+        if (firstCount !== secondCount) {
+          return firstCount - secondCount;
+        }
+
+        const firstName = first.nome.trim().toLowerCase();
+        const secondName = second.nome.trim().toLowerCase();
+        const nameCompare = firstName.localeCompare(secondName);
+        if (nameCompare !== 0) return nameCompare;
+        return firstId.localeCompare(secondId);
+      })[0];
 
     if (!selectedOperator) {
       return appointment;

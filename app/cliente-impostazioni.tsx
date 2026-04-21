@@ -5,6 +5,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import { Alert, Image, Keyboard, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { getAppLanguageOptions, resolveStoredAppLanguage, tApp, type AppLanguage } from '../src/lib/i18n';
+import { normalizeSalonCode } from '../src/lib/platform';
 import { useResponsiveLayout } from '../src/lib/responsive';
 
 const FRONTEND_LANGUAGE_KEY = 'salon_manager_frontend_language';
@@ -13,6 +14,14 @@ const FRONTEND_LAST_SALON_CODE_KEY = 'salon_manager_frontend_last_salon_code';
 const FRONTEND_BIOMETRIC_ENABLED_KEY = 'salon_manager_frontend_biometric_enabled';
 const FRONTEND_BIOMETRIC_PROFILE_KEY = 'salon_manager_frontend_biometric_profile';
 const FRONTEND_BIOMETRIC_SALON_CODE_KEY = 'salon_manager_frontend_biometric_salon_code';
+const buildFrontendProfileKeyForSalon = (salonCode?: string | null) => {
+  const normalized = normalizeSalonCode(salonCode ?? '');
+  return normalized ? `${FRONTEND_PROFILE_KEY}:${normalized}` : FRONTEND_PROFILE_KEY;
+};
+const buildFrontendBiometricProfileKeyForSalon = (salonCode?: string | null) => {
+  const normalized = normalizeSalonCode(salonCode ?? '');
+  return normalized ? `${FRONTEND_BIOMETRIC_PROFILE_KEY}:${normalized}` : FRONTEND_BIOMETRIC_PROFILE_KEY;
+};
 
 export default function ClienteImpostazioniScreen() {
   const router = useRouter();
@@ -31,7 +40,6 @@ export default function ClienteImpostazioniScreen() {
   } | null>(null);
   const [activeSalonCode, setActiveSalonCode] = useState('');
   const salonParam = Array.isArray(searchParams.salon) ? searchParams.salon[0] : searchParams.salon;
-
   useEffect(() => {
     const loadSettings = async () => {
       try {
@@ -44,8 +52,14 @@ export default function ClienteImpostazioniScreen() {
         setFrontendLanguage(resolveStoredAppLanguage(savedLanguage));
         setFrontendBiometricEnabled(savedBiometricEnabled === 'true');
 
-        const parsedProfile = savedProfileRaw
-          ? (JSON.parse(savedProfileRaw) as {
+        const resolvedSalonCode = normalizeSalonCode(salonParam ?? savedSalonCode ?? '');
+        const scopedProfileRaw = resolvedSalonCode
+          ? await AsyncStorage.getItem(buildFrontendProfileKeyForSalon(resolvedSalonCode))
+          : null;
+        const effectiveProfileRaw = scopedProfileRaw ?? savedProfileRaw;
+
+        const parsedProfile = effectiveProfileRaw
+          ? (JSON.parse(effectiveProfileRaw) as {
               nome?: string;
               cognome?: string;
               email?: string;
@@ -67,51 +81,16 @@ export default function ClienteImpostazioniScreen() {
             : null;
 
         setActiveProfile(normalizedProfile);
-        setActiveSalonCode((savedSalonCode ?? '').trim());
-
-        if (!normalizedProfile) {
-          if (Platform.OS === 'web' && typeof window !== 'undefined') {
-            const params = new URLSearchParams();
-            if (salonParam) {
-              params.set('salon', salonParam);
-            }
-            params.set('mode', 'login');
-            window.location.assign(`/cliente?${params.toString()}`);
-            return;
-          }
-
-          router.replace({
-            pathname: '/cliente',
-            params: {
-              salon: salonParam || undefined,
-              mode: 'login',
-            },
-          });
-        }
+        setActiveSalonCode(resolvedSalonCode || normalizeSalonCode(savedSalonCode ?? ''));
       } catch (error) {
         console.log('Errore caricamento impostazioni frontend:', error);
-        if (Platform.OS === 'web' && typeof window !== 'undefined') {
-          const params = new URLSearchParams();
-          if (salonParam) {
-            params.set('salon', salonParam);
-          }
-          params.set('mode', 'login');
-          window.location.assign(`/cliente?${params.toString()}`);
-          return;
-        }
-
-        router.replace({
-          pathname: '/cliente',
-          params: {
-            salon: salonParam || undefined,
-            mode: 'login',
-          },
-        });
+        setActiveProfile(null);
+        setActiveSalonCode(normalizeSalonCode(salonParam ?? ''));
       }
     };
 
     void loadSettings();
-  }, [router, salonParam]);
+  }, [salonParam]);
 
   useEffect(() => {
     (async () => {
@@ -170,12 +149,17 @@ export default function ClienteImpostazioniScreen() {
     setFrontendBiometricBusy(true);
 
     try {
-      const [savedProfile, savedSalonCode] = await Promise.all([
+      const [legacySavedProfile, savedSalonCode] = await Promise.all([
         AsyncStorage.getItem(FRONTEND_PROFILE_KEY),
         AsyncStorage.getItem(FRONTEND_LAST_SALON_CODE_KEY),
       ]);
+      const normalizedSalonCode = normalizeSalonCode(activeSalonCode || (savedSalonCode ?? ''));
+      const scopedSavedProfile = normalizedSalonCode
+        ? await AsyncStorage.getItem(buildFrontendProfileKeyForSalon(normalizedSalonCode))
+        : null;
+      const savedProfile = scopedSavedProfile ?? legacySavedProfile;
 
-      if (!savedProfile || !savedSalonCode) {
+      if (!savedProfile || !normalizedSalonCode) {
         Alert.alert(
           'Accesso cliente richiesto',
           'Accedi prima nell’area cliente con email e cellulare, poi potrai attivare Face ID o biometria.'
@@ -200,7 +184,8 @@ export default function ClienteImpostazioniScreen() {
       await AsyncStorage.multiSet([
         [FRONTEND_BIOMETRIC_ENABLED_KEY, 'true'],
         [FRONTEND_BIOMETRIC_PROFILE_KEY, savedProfile],
-        [FRONTEND_BIOMETRIC_SALON_CODE_KEY, savedSalonCode],
+        [buildFrontendBiometricProfileKeyForSalon(normalizedSalonCode), savedProfile],
+        [FRONTEND_BIOMETRIC_SALON_CODE_KEY, normalizedSalonCode],
       ]);
       setFrontendBiometricEnabled(true);
     } finally {
@@ -224,27 +209,26 @@ export default function ClienteImpostazioniScreen() {
 
   const redirectToFrontendAccess = () => {
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
-      window.location.assign('/cliente?mode=login');
+      window.location.assign('/');
       return;
     }
 
-    router.replace({
-      pathname: '/cliente',
-      params: { mode: 'login' },
-    });
+    router.replace('/cliente-scanner');
   };
 
   const performFrontendLogout = async () => {
+    const currentSalonCode = normalizeSalonCode(activeSalonCode || salonParam || '');
+    const scopedKeysToRemove = currentSalonCode
+      ? [buildFrontendProfileKeyForSalon(currentSalonCode)]
+      : [];
+
     await AsyncStorage.multiRemove([
       FRONTEND_PROFILE_KEY,
       FRONTEND_LAST_SALON_CODE_KEY,
-      FRONTEND_BIOMETRIC_ENABLED_KEY,
-      FRONTEND_BIOMETRIC_PROFILE_KEY,
-      FRONTEND_BIOMETRIC_SALON_CODE_KEY,
+      ...scopedKeysToRemove,
     ]);
     setActiveProfile(null);
     setActiveSalonCode('');
-    setFrontendBiometricEnabled(false);
 
     const navigationRouter = router as typeof router & {
       dismissAll?: () => void;
@@ -316,7 +300,7 @@ export default function ClienteImpostazioniScreen() {
           <View style={styles.titleRow}>
             <View style={styles.titleBadge}>
               <Image
-                source={require('../assets/header-settings-icon.png')}
+                source={require('../assets/header-impostazioni-icon.png')}
                 style={styles.titleBadgeImage}
                 resizeMode="contain"
               />
@@ -610,6 +594,20 @@ const styles = StyleSheet.create({
   },
   languageChipNoteActive: {
     color: '#d7dde7',
+  },
+  actionButton: {
+    minWidth: 220,
+    backgroundColor: '#0f172a',
+    borderRadius: 22,
+    paddingVertical: 14,
+    paddingHorizontal: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  actionButtonText: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: '#ffffff',
   },
   logoutCard: {
     backgroundColor: '#fff1f2',

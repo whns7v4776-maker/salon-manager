@@ -1,7 +1,12 @@
-import { getServiceDuration, normalizeAvailabilitySettings, normalizeRoleName } from './booking';
+import {
+  assignFallbackOperatorsToAppointments,
+  getServiceDuration,
+  normalizeAvailabilitySettings,
+  normalizeRoleName,
+} from './booking';
 import { normalizeWorkspace, type SalonWorkspace } from './platform';
 import { normalizeServiceAccentKey } from './service-accents';
-import { supabase } from './supabase';
+import { supabase, supabaseAnonKey, supabaseUrl } from './supabase';
 
 export type ClientPortalSnapshot = {
   workspace: SalonWorkspace;
@@ -14,6 +19,14 @@ export type ClientPortalSnapshot = {
   serviceCardColorOverrides?: Record<string, string>;
   roleCardColorOverrides?: Record<string, string>;
 };
+
+export type ClientPortalAvailabilitySnapshot = {
+  workspace: Pick<
+    SalonWorkspace,
+    'id' | 'ownerEmail' | 'salonCode' | 'salonName' | 'updatedAt'
+  >;
+  availabilitySettings: ReturnType<typeof normalizeAvailabilitySettings>;
+} | null;
 
 export type PublicBookingOccupancyItem = {
   id: string;
@@ -30,6 +43,49 @@ export type PublicBookingOccupancyItem = {
 };
 
 const CLIENT_PORTAL_RPC_TIMEOUT_MS = 8000;
+const CLIENT_PORTAL_PUBLISH_TIMEOUT_MS = 8000;
+
+const fetchPortalRpcRaw = async (
+  rpcName: 'get_client_portal_snapshot' | 'get_client_portal_availability_settings',
+  payload: Record<string, unknown>
+) => {
+  const response = await fetch(`${supabaseUrl}/rest/v1/rpc/${rpcName}`, {
+    method: 'POST',
+    cache: 'no-store',
+    headers: {
+      'Content-Type': 'application/json',
+      'Cache-Control': 'no-cache, no-store, max-age=0',
+      Pragma: 'no-cache',
+      apikey: supabaseAnonKey,
+      Authorization: `Bearer ${supabaseAnonKey}`,
+    },
+    body: JSON.stringify(payload),
+  });
+
+  const responseText = await response.text();
+
+  if (!response.ok) {
+    throw new Error(`client_portal_raw_fetch_failed:${response.status}`);
+  }
+
+  const contentType = response.headers.get('content-type')?.toLowerCase() ?? '';
+  const trimmedResponseText = responseText.trim();
+
+  if (
+    !contentType.includes('application/json') &&
+    !trimmedResponseText.startsWith('{') &&
+    !trimmedResponseText.startsWith('[') &&
+    !trimmedResponseText.startsWith('null')
+  ) {
+    throw new Error('client_portal_raw_invalid_payload');
+  }
+
+  try {
+    return trimmedResponseText ? JSON.parse(trimmedResponseText) : null;
+  } catch {
+    throw new Error('client_portal_raw_invalid_json');
+  }
+};
 
 const normalizeNumber = (value: unknown): number | undefined => {
   if (typeof value === 'number' && Number.isFinite(value)) {
@@ -41,6 +97,25 @@ const normalizeNumber = (value: unknown): number | undefined => {
     if (Number.isFinite(parsed)) {
       return parsed;
     }
+  }
+
+  return undefined;
+};
+
+const normalizeOptionalBoolean = (value: unknown): boolean | undefined => {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+
+  if (typeof value === 'number') {
+    if (value === 1) return true;
+    if (value === 0) return false;
+  }
+
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (['true', 't', '1', 'yes'].includes(normalized)) return true;
+    if (['false', 'f', '0', 'no'].includes(normalized)) return false;
   }
 
   return undefined;
@@ -115,6 +190,7 @@ const normalizeAppointmentRecord = (item: Record<string, any>) => ({
   servizio: String(item.servizio ?? item.service_name ?? item.requested_service_name ?? '').trim(),
   prezzo: normalizeNumber(item.prezzo ?? item.price ?? item.requested_price) ?? 0,
   durataMinuti: normalizeNumber(item.durataMinuti ?? item.duration_minutes),
+  mestiereRichiesto: String(item.mestiereRichiesto ?? item.required_role ?? '').trim() || undefined,
   operatoreId: String(item.operatoreId ?? item.operator_id ?? '').trim() || undefined,
   operatoreNome: String(item.operatoreNome ?? item.operator_name ?? '').trim() || undefined,
   macchinarioIds: normalizeStringIdArray(item.macchinarioIds ?? item.machinery_ids),
@@ -128,6 +204,7 @@ const normalizeRequestRecord = (item: Record<string, any>) => ({
   servizio: String(item.servizio ?? item.requested_service_name ?? '').trim(),
   prezzo: normalizeNumber(item.prezzo ?? item.requested_price) ?? 0,
   durataMinuti: normalizeNumber(item.durataMinuti ?? item.requested_duration_minutes),
+  mestiereRichiesto: String(item.mestiereRichiesto ?? item.required_role ?? '').trim() || undefined,
   nome: String(item.nome ?? item.customer_name ?? '').trim(),
   cognome: String(item.cognome ?? item.customer_surname ?? '').trim(),
   email: String(item.email ?? item.customer_email ?? '').trim(),
@@ -145,8 +222,13 @@ const normalizeRequestRecord = (item: Record<string, any>) => ({
   origine: item.origine ?? item.origin,
   stato: String(item.stato ?? item.status ?? '').trim(),
   createdAt: String(item.createdAt ?? item.created_at ?? '').trim(),
-  viewedByCliente: item.viewedByCliente ?? item.viewed_by_customer,
-  viewedBySalon: item.viewedBySalon ?? item.viewed_by_salon,
+  viewedByCliente: normalizeOptionalBoolean(item.viewedByCliente ?? item.viewed_by_customer),
+  viewedBySalon: normalizeOptionalBoolean(item.viewedBySalon ?? item.viewed_by_salon),
+  // Important invariant: preserve the explicit cancellation source coming from the
+  // backend snapshot. If we drop it here, downstream normalizers may infer the wrong
+  // origin and incorrectly surface "annullata dal cliente" for salon-side cancellations.
+  cancellationSource:
+    String(item.cancellationSource ?? item.cancellation_source ?? '').trim() || undefined,
 });
 
 const normalizeServiceRecord = (item: Record<string, any>) => ({
@@ -186,21 +268,156 @@ const normalizePortalSnapshot = (data: Record<string, any> | null): ClientPortal
           .map(normalizeRequestRecord)
       : [],
     availabilitySettings: normalizeAvailabilitySettings(data.availabilitySettings ?? {}),
-    serviceCardColorOverrides: normalizeServiceColorOverrideMap(data.serviceCardColorOverrides),
-    roleCardColorOverrides: normalizeRoleColorOverrideMap(data.roleCardColorOverrides),
+    serviceCardColorOverrides: normalizeServiceColorOverrideMap(
+      data.serviceCardColorOverrides ?? data.service_card_color_overrides
+    ),
+    roleCardColorOverrides: normalizeRoleColorOverrideMap(
+      data.roleCardColorOverrides ?? data.role_card_color_overrides
+    ),
   };
 };
 
 export const fetchClientPortalSnapshot = async (salonCode: string) => {
-  const rpcTask = Promise.resolve(
-    supabase.rpc('get_client_portal_snapshot', {
+  try {
+    const rpcTask = Promise.resolve(
+      supabase.rpc('get_client_portal_snapshot', {
+        p_salon_code: salonCode,
+      })
+    );
+    const timeoutTask = new Promise<never>((_, reject) => {
+      const timer = setTimeout(() => {
+        reject(new Error('client_portal_snapshot_timeout'));
+      }, CLIENT_PORTAL_RPC_TIMEOUT_MS);
+
+      rpcTask.finally(() => clearTimeout(timer)).catch(() => undefined);
+    });
+
+    const { data, error } = await Promise.race([rpcTask, timeoutTask]);
+
+    if (error) {
+      throw error;
+    }
+
+    return normalizePortalSnapshot((data ?? null) as Record<string, any> | null);
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message.trim().toLowerCase() : String(error).trim().toLowerCase();
+
+    if (
+      !message.includes('client_portal_snapshot_timeout') &&
+      !message.includes('client_portal_raw_invalid_payload') &&
+      !message.includes('client_portal_raw_invalid_json') &&
+      !message.includes('jwt') &&
+      !message.includes('session') &&
+      !message.includes('auth')
+    ) {
+      throw error;
+    }
+
+    const fallbackData = await fetchPortalRpcRaw('get_client_portal_snapshot', {
       p_salon_code: salonCode,
+    });
+    return normalizePortalSnapshot((fallbackData ?? null) as Record<string, any> | null);
+  }
+};
+
+export const fetchClientPortalAvailabilitySettings = async (
+  salonCode: string
+): Promise<ClientPortalAvailabilitySnapshot> => {
+  try {
+    const data = await fetchPortalRpcRaw('get_client_portal_availability_settings', {
+      p_salon_code: salonCode,
+    });
+
+    if (!data || typeof data !== 'object') {
+      return null;
+    }
+
+    const workspacePayload =
+      data.workspace && typeof data.workspace === 'object'
+        ? (data.workspace as Record<string, unknown>)
+        : {};
+
+    return {
+      workspace: {
+        id: String(workspacePayload.id ?? '').trim(),
+        ownerEmail: String(workspacePayload.ownerEmail ?? '').trim().toLowerCase(),
+        salonCode: String(workspacePayload.salonCode ?? '').trim().toLowerCase(),
+        salonName: String(workspacePayload.salonName ?? '').trim(),
+        updatedAt: String(workspacePayload.updatedAt ?? '').trim(),
+      },
+      availabilitySettings: normalizeAvailabilitySettings(data.availabilitySettings ?? {}),
+    };
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message.trim().toLowerCase() : String(error).trim().toLowerCase();
+
+    if (
+      !message.includes('client_portal_raw_fetch_failed') &&
+      !message.includes('client_portal_availability_timeout') &&
+      !message.includes('client_portal_raw_invalid_payload') &&
+      !message.includes('client_portal_raw_invalid_json')
+    ) {
+      throw error;
+    }
+
+    const rpcTask = Promise.resolve(
+      supabase.rpc('get_client_portal_availability_settings', {
+        p_salon_code: salonCode,
+      })
+    );
+    const timeoutTask = new Promise<never>((_, reject) => {
+      const timer = setTimeout(() => {
+        reject(new Error('client_portal_availability_timeout'));
+      }, CLIENT_PORTAL_RPC_TIMEOUT_MS);
+
+      rpcTask.finally(() => clearTimeout(timer)).catch(() => undefined);
+    });
+
+    const result = await Promise.race([rpcTask, timeoutTask]);
+
+    if (result.error || !result.data || typeof result.data !== 'object') {
+      return null;
+    }
+
+    const workspacePayload =
+      result.data.workspace && typeof result.data.workspace === 'object'
+        ? (result.data.workspace as Record<string, unknown>)
+        : {};
+
+    return {
+      workspace: {
+        id: String(workspacePayload.id ?? '').trim(),
+        ownerEmail: String(workspacePayload.ownerEmail ?? '').trim().toLowerCase(),
+        salonCode: String(workspacePayload.salonCode ?? '').trim().toLowerCase(),
+        salonName: String(workspacePayload.salonName ?? '').trim(),
+        updatedAt: String(workspacePayload.updatedAt ?? '').trim(),
+      },
+      availabilitySettings: normalizeAvailabilitySettings(result.data.availabilitySettings ?? {}),
+    };
+  }
+};
+
+export const updateClientPortalAvailabilitySettings = async ({
+  ownerEmail,
+  salonCode,
+  availabilitySettings,
+}: {
+  ownerEmail: string;
+  salonCode: string;
+  availabilitySettings: ReturnType<typeof normalizeAvailabilitySettings>;
+}): Promise<ClientPortalAvailabilitySnapshot> => {
+  const rpcTask = Promise.resolve(
+    supabase.rpc('update_client_portal_availability_settings', {
+      p_owner_email: ownerEmail,
+      p_salon_code: salonCode,
+      p_availability_settings: availabilitySettings,
     })
   );
   const timeoutTask = new Promise<never>((_, reject) => {
     const timer = setTimeout(() => {
-      reject(new Error('client_portal_snapshot_timeout'));
-    }, CLIENT_PORTAL_RPC_TIMEOUT_MS);
+      reject(new Error('client_portal_availability_update_timeout'));
+    }, CLIENT_PORTAL_PUBLISH_TIMEOUT_MS);
 
     rpcTask.finally(() => clearTimeout(timer)).catch(() => undefined);
   });
@@ -211,7 +428,25 @@ export const fetchClientPortalSnapshot = async (salonCode: string) => {
     throw error;
   }
 
-  return normalizePortalSnapshot((data ?? null) as Record<string, any> | null);
+  if (!data || typeof data !== 'object') {
+    return null;
+  }
+
+  const workspacePayload =
+    data.workspace && typeof data.workspace === 'object'
+      ? (data.workspace as Record<string, unknown>)
+      : {};
+
+  return {
+    workspace: {
+      id: String(workspacePayload.id ?? '').trim(),
+      ownerEmail: String(workspacePayload.ownerEmail ?? '').trim().toLowerCase(),
+      salonCode: String(workspacePayload.salonCode ?? '').trim().toLowerCase(),
+      salonName: String(workspacePayload.salonName ?? '').trim(),
+      updatedAt: String(workspacePayload.updatedAt ?? '').trim(),
+    },
+    availabilitySettings: normalizeAvailabilitySettings(data.availabilitySettings ?? {}),
+  };
 };
 
 export const derivePublicBookingOccupancyFromSnapshot = (
@@ -301,7 +536,13 @@ export const derivePublicBookingOccupancyFromSnapshot = (
     }))
     .filter((item) => item.ora && item.servizio);
 
-  return [...normalizedAppointments, ...materializedRequests];
+  return assignFallbackOperatorsToAppointments({
+    appointments: [...normalizedAppointments, ...materializedRequests],
+    services: services as any[],
+    operators: (Array.isArray(snapshot.operatori) ? snapshot.operatori : []) as any[],
+    settings: snapshot.availabilitySettings,
+    preserveExplicitOperatorAssignments: true,
+  }) as PublicBookingOccupancyItem[];
 };
 
 export const fetchPublicBookingOccupancy = async (
@@ -345,9 +586,20 @@ export const publishClientPortalSnapshot = async (snapshot: ClientPortalSnapshot
     roleCardColorOverrides: snapshot.roleCardColorOverrides ?? {},
   };
 
-  const { data, error } = await supabase.rpc('upsert_client_portal_snapshot', {
-    p_payload: payload,
+  const rpcTask = Promise.resolve(
+    supabase.rpc('upsert_client_portal_snapshot', {
+      p_payload: payload,
+    })
+  );
+  const timeoutTask = new Promise<never>((_, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error('client_portal_publish_timeout'));
+    }, CLIENT_PORTAL_PUBLISH_TIMEOUT_MS);
+
+    rpcTask.finally(() => clearTimeout(timer)).catch(() => undefined);
   });
+
+  const { data, error } = await Promise.race([rpcTask, timeoutTask]);
 
   if (error) {
     throw error;

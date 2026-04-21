@@ -1,12 +1,14 @@
 import { Ionicons } from '@expo/vector-icons';
+import Constants from 'expo-constants';
 import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
 import React from 'react';
-import { Alert, Image, Keyboard, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, Image, Keyboard, Linking, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { AppWordmark } from '../components/app-wordmark';
 import { HapticTouchable } from '../components/ui/haptic-touchable';
 import { useAppContext } from '../src/context/AppContext';
 import { getAppLanguageOptions, tApp } from '../src/lib/i18n';
+import { getNotificationPermissionStatus, requestNotificationPermissionsOnly } from '../src/lib/push/push-notifications';
 import { useResponsiveLayout } from '../src/lib/responsive';
 
 export default function ImpostazioniScreen() {
@@ -25,6 +27,10 @@ export default function ImpostazioniScreen() {
     toggleBiometricEnabled,
   } = useAppContext();
   const [biometricBusy, setBiometricBusy] = React.useState(false);
+  const [notificationPermission, setNotificationPermission] = React.useState<
+    'granted' | 'denied' | 'undetermined' | string
+  >('undetermined');
+  const [notificationBusy, setNotificationBusy] = React.useState(false);
   const languageOptions = getAppLanguageOptions(appLanguage);
   const isMobile = Platform.OS === 'ios' || Platform.OS === 'android';
 
@@ -43,6 +49,25 @@ export default function ImpostazioniScreen() {
     ? 'Accesso rapido attivo: entrerai direttamente con biometria senza inserire il codice.'
     : 'Attiva l\'accesso biometrico per entrare senza codice.';
 
+  React.useEffect(() => {
+    let mounted = true;
+
+    void (async () => {
+      try {
+        const status = await getNotificationPermissionStatus();
+        if (mounted) {
+          setNotificationPermission(status);
+        }
+      } catch (error) {
+        console.log('Errore lettura permessi notifiche:', error);
+      }
+    })();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
   const handleBack = React.useCallback(() => {
     Haptics.selectionAsync().catch(() => null);
 
@@ -60,14 +85,27 @@ export default function ImpostazioniScreen() {
   }, [router]);
 
   const handleLogout = () => {
-    Alert.alert(tApp(appLanguage, 'settings_logout_confirm_title'), tApp(appLanguage, 'settings_logout_confirm_body'), [
+    const title = tApp(appLanguage, 'settings_logout_confirm_title');
+    const body = tApp(appLanguage, 'settings_logout_confirm_body');
+
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      const confirmed = window.confirm(`${title}\n\n${body}`);
+      if (!confirmed) return;
+      void (async () => {
+        await logoutOwnerAccount();
+        router.replace('/cliente-scanner');
+      })();
+      return;
+    }
+
+    Alert.alert(title, body, [
       { text: tApp(appLanguage, 'common_cancel'), style: 'cancel' },
       {
         text: tApp(appLanguage, 'common_logout'),
         style: 'destructive',
         onPress: async () => {
           await logoutOwnerAccount();
-          router.replace('/');
+          router.replace('/cliente-scanner');
         },
       },
     ]);
@@ -109,6 +147,59 @@ export default function ImpostazioniScreen() {
     toggleBiometricEnabled,
   ]);
 
+  const notificationTitle = !isMobile
+    ? 'Notifiche push'
+    : notificationPermission === 'granted'
+    ? 'Notifiche attive'
+    : 'Attiva notifiche';
+
+  const notificationDescription = !isMobile
+    ? 'Disponibile solo su app iOS/Android.'
+    : notificationPermission === 'granted'
+    ? 'Il permesso notifiche del dispositivo è attivo per questa installazione.'
+    : notificationPermission === 'denied'
+    ? 'Le notifiche sono bloccate. Tocca qui per aprire le impostazioni del telefono.'
+    : 'Tocca qui per far comparire il popup Consenti notifiche.';
+
+  const handleNotificationsPermission = React.useCallback(async () => {
+    if (!isMobile || notificationBusy) {
+      return;
+    }
+
+    setNotificationBusy(true);
+    try {
+      if (notificationPermission === 'denied') {
+        await Linking.openSettings();
+        return;
+      }
+
+      const status = await requestNotificationPermissionsOnly();
+      setNotificationPermission(status);
+
+      if (status === 'granted') {
+        Alert.alert(
+          'Notifiche attive',
+          Constants.executionEnvironment === 'storeClient'
+            ? 'Il permesso notifiche di Expo Go è attivo. Le notifiche locali ora possono comparire.'
+            : 'Il permesso notifiche è attivo su questa app.'
+        );
+        return;
+      }
+
+      if (status === 'denied') {
+        Alert.alert(
+          'Notifiche bloccate',
+          'Hai negato il permesso. Puoi riattivarlo dalle impostazioni del telefono.'
+        );
+      }
+    } catch (error) {
+      console.log('Errore richiesta permessi notifiche:', error);
+      Alert.alert('Notifiche', 'Non sono riuscito ad aprire la richiesta notifiche.');
+    } finally {
+      setNotificationBusy(false);
+    }
+  }, [isMobile, notificationBusy, notificationPermission]);
+
   return (
     <ScrollView
       style={styles.container}
@@ -140,7 +231,7 @@ export default function ImpostazioniScreen() {
 
             <View style={styles.headerSettingsButton}>
               <Image
-                source={require('../assets/header-settings-icon.png')}
+                source={require('../assets/header-impostazioni-icon.png')}
                 style={styles.headerSettingsImage}
                 resizeMode="contain"
               />
@@ -234,6 +325,43 @@ export default function ImpostazioniScreen() {
                   biometricEnabled && styles.biometricToggleKnobActive,
                 ]}
               />
+            </View>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.biometricRow,
+              notificationPermission === 'granted' && styles.biometricRowActive,
+              (!isMobile || notificationBusy) && styles.cardDisabled,
+            ]}
+            onPress={handleNotificationsPermission}
+            activeOpacity={0.9}
+            disabled={notificationBusy || !isMobile}
+          >
+            <View style={styles.biometricContent}>
+              <Text style={styles.biometricTitle}>{notificationTitle}</Text>
+              <Text style={styles.biometricText}>{notificationDescription}</Text>
+              {Constants.executionEnvironment === 'storeClient' ? (
+                <Text style={styles.permissionHint}>
+                  In Expo Go puoi autorizzare il permesso, ma le push backend complete restano limitate.
+                </Text>
+              ) : null}
+            </View>
+
+            <View
+              style={[
+                styles.permissionBadge,
+                notificationPermission === 'granted' && styles.permissionBadgeActive,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.permissionBadgeText,
+                  notificationPermission === 'granted' && styles.permissionBadgeTextActive,
+                ]}
+              >
+                {notificationPermission === 'granted' ? 'ON' : 'OFF'}
+              </Text>
             </View>
           </TouchableOpacity>
         </View>
@@ -483,6 +611,34 @@ const styles = StyleSheet.create({
   biometricToggleKnobActive: {
     alignSelf: 'flex-end',
   },
+  permissionBadge: {
+    minWidth: 56,
+    height: 32,
+    borderRadius: 999,
+    backgroundColor: '#E5E7EB',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+  },
+  permissionBadgeActive: {
+    backgroundColor: '#0F172A',
+  },
+  permissionBadgeText: {
+    fontSize: 12,
+    fontWeight: '900',
+    color: '#475569',
+    letterSpacing: 0.8,
+  },
+  permissionBadgeTextActive: {
+    color: '#FFFFFF',
+  },
+  permissionHint: {
+    marginTop: 8,
+    fontSize: 12,
+    lineHeight: 18,
+    color: '#94A3B8',
+    textAlign: 'center',
+  },
   languageChip: {
     backgroundColor: '#F8FAFC',
     borderRadius: 20,
@@ -518,6 +674,9 @@ const styles = StyleSheet.create({
     marginTop: 14,
     backgroundColor: '#F8FAFC',
     borderRadius: 18,
+    minWidth: 260,
+    alignSelf: 'center',
+    paddingHorizontal: 22,
     paddingVertical: 14,
     alignItems: 'center',
     borderWidth: 1,
