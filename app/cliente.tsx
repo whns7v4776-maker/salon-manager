@@ -2636,76 +2636,6 @@ export default function ClienteFrontendScreen() {
     effectiveAvailabilitySettings.guidedSlotsEnabled;
   const guidedSlotsStrategy = effectiveAvailabilitySettings.guidedSlotsStrategy;
   const guidedSlotsVisibility = effectiveAvailabilitySettings.guidedSlotsVisibility;
-  const bookableFrontendTimeSlots = useMemo(
-    () =>
-      displayTimeSlots.filter(
-        (slotTime) => !orariNonDisponibili.has(slotTime) && !orariInConflitto.has(slotTime)
-      ),
-    [displayTimeSlots, orariInConflitto, orariNonDisponibili]
-  );
-  const guidedRecommendedTimeSlots = useMemo(() => {
-    if (!guidedSlotsActive || !bookableFrontendTimeSlots.length || !servizio.trim()) {
-      return [];
-    }
-
-    const slotIntervalMinutes = getSlotIntervalForDate(effectiveAvailabilitySettings, data);
-    const availableBlocks = buildGuidedSlotBlocks(bookableFrontendTimeSlots, slotIntervalMinutes);
-    const selectedDuration = getServiceDuration(servizio, effectiveServizi);
-
-    const scoredSlots = bookableFrontendTimeSlots
-      .map((slotTime) => {
-        const block = availableBlocks.find((item) => item.slots.includes(slotTime));
-        if (!block) {
-          return { slotTime, score: Number.NEGATIVE_INFINITY };
-        }
-
-        return {
-          slotTime,
-          score: scoreGuidedSlot({
-            slotTime,
-            block,
-            serviceDurationMinutes: selectedDuration,
-            intervalMinutes: slotIntervalMinutes,
-            strategy: guidedSlotsStrategy as GuidedSlotStrategy,
-          }),
-        };
-      })
-      .sort((first, second) => second.score - first.score);
-
-    if (scoredSlots.length <= MAX_GUIDED_SLOT_RECOMMENDATIONS) {
-      return scoredSlots.map((item) => item.slotTime);
-    }
-
-    const bestScore = scoredSlots[0]?.score ?? Number.NEGATIVE_INFINITY;
-    const thresholdSlots = scoredSlots.filter((item) => item.score >= bestScore - 24);
-    const limitedSlots = thresholdSlots.slice(0, MAX_GUIDED_SLOT_RECOMMENDATIONS);
-
-    return (limitedSlots.length ? limitedSlots : scoredSlots.slice(0, MAX_GUIDED_SLOT_RECOMMENDATIONS))
-      .map((item) => item.slotTime)
-      .sort((first, second) => timeToMinutes(first) - timeToMinutes(second));
-  }, [
-    bookableFrontendTimeSlots,
-    data,
-    effectiveAvailabilitySettings,
-    effectiveServizi,
-    guidedSlotsActive,
-    guidedSlotsStrategy,
-    servizio,
-  ]);
-  const shouldShowOnlyRecommendedSlots =
-    guidedSlotsActive &&
-    guidedRecommendedTimeSlots.length > 0 &&
-    guidedSlotsVisibility === 'recommended_only';
-  const shouldShowGuidedRecommendations =
-    guidedSlotsActive && guidedRecommendedTimeSlots.length > 0;
-  const shouldShowExpandedTimeGrid =
-    !shouldShowGuidedRecommendations ||
-    guidedSlotsVisibility === 'recommended_only'
-      ? !shouldShowOnlyRecommendedSlots
-      : showAllGuidedSlots;
-  const visibleFrontendTimeSlots = shouldShowOnlyRecommendedSlots
-    ? guidedRecommendedTimeSlots
-    : displayTimeSlots;
 
   const orariOccupati = useMemo(
     () =>
@@ -2743,12 +2673,151 @@ export default function ClienteFrontendScreen() {
     ]
   );
 
+  const bookableFrontendTimeSlots = useMemo(
+    () =>
+      displayTimeSlots.filter(
+        (slotTime) =>
+          !orariNonDisponibili.has(slotTime) &&
+          !orariInConflitto.has(slotTime) &&
+          !orariOccupati.has(slotTime)
+      ),
+    [displayTimeSlots, orariInConflitto, orariNonDisponibili, orariOccupati]
+  );
+  const guidedRecommendedTimeSlots = useMemo(() => {
+    if (!guidedSlotsActive || !bookableFrontendTimeSlots.length || !servizio.trim()) {
+      return [];
+    }
+
+    const slotIntervalMinutes = getSlotIntervalForDate(effectiveAvailabilitySettings, data);
+    const availableBlocks = buildGuidedSlotBlocks(bookableFrontendTimeSlots, slotIntervalMinutes);
+    const selectedDuration = getServiceDuration(servizio, effectiveServizi);
+    const serviceSlots = Math.max(
+      1,
+      Math.ceil(selectedDuration / Math.max(slotIntervalMinutes, 15))
+    );
+
+    const scoredSlots = bookableFrontendTimeSlots
+      .map((slotTime) => {
+        const block = availableBlocks.find((item) => item.slots.includes(slotTime));
+        if (!block) {
+          return {
+            slotTime,
+            score: Number.NEGATIVE_INFINITY,
+            blockSize: 0,
+            remainingBefore: 0,
+            remainingAfter: 0,
+            createsSplit: false,
+            touchesEdge: false,
+            fillsGapExactly: false,
+            serviceFitsBlock: false,
+          };
+        }
+
+        const slotIndex = block.slots.indexOf(slotTime);
+        const serviceFitsBlock = slotIndex >= 0 && slotIndex + serviceSlots <= block.slots.length;
+        const remainingBefore = slotIndex;
+        const remainingAfter = serviceFitsBlock
+          ? Math.max(0, block.slots.length - slotIndex - serviceSlots)
+          : 0;
+        const fillsGapExactly = serviceFitsBlock && remainingBefore === 0 && remainingAfter === 0;
+        const touchesEdge = serviceFitsBlock && (remainingBefore === 0 || remainingAfter === 0);
+        const createsSplit = serviceFitsBlock && remainingBefore > 0 && remainingAfter > 0;
+
+        return {
+          slotTime,
+          score: serviceFitsBlock
+            ? scoreGuidedSlot({
+                slotTime,
+                block,
+                serviceDurationMinutes: selectedDuration,
+                intervalMinutes: slotIntervalMinutes,
+                strategy: guidedSlotsStrategy as GuidedSlotStrategy,
+              })
+            : Number.NEGATIVE_INFINITY,
+          blockSize: block.slots.length,
+          remainingBefore,
+          remainingAfter,
+          createsSplit,
+          touchesEdge,
+          fillsGapExactly,
+          serviceFitsBlock,
+        };
+      })
+      .filter((item) => item.serviceFitsBlock)
+      .sort((first, second) => {
+        if (guidedSlotsStrategy === 'protect_long_services') {
+          if (Number(first.createsSplit) !== Number(second.createsSplit)) {
+            return Number(first.createsSplit) - Number(second.createsSplit);
+          }
+          if (Number(second.touchesEdge) !== Number(first.touchesEdge)) {
+            return Number(second.touchesEdge) - Number(first.touchesEdge);
+          }
+          if (second.remainingAfter !== first.remainingAfter) {
+            return second.remainingAfter - first.remainingAfter;
+          }
+        }
+
+        if (guidedSlotsStrategy === 'fill_gaps') {
+          if (Number(second.fillsGapExactly) !== Number(first.fillsGapExactly)) {
+            return Number(second.fillsGapExactly) - Number(first.fillsGapExactly);
+          }
+          if (first.blockSize !== second.blockSize) {
+            return first.blockSize - second.blockSize;
+          }
+          if (Number(first.createsSplit) !== Number(second.createsSplit)) {
+            return Number(first.createsSplit) - Number(second.createsSplit);
+          }
+        }
+
+        const scoreDelta = second.score - first.score;
+        if (scoreDelta !== 0) {
+          return scoreDelta;
+        }
+
+        return timeToMinutes(first.slotTime) - timeToMinutes(second.slotTime);
+      });
+
+    if (scoredSlots.length <= MAX_GUIDED_SLOT_RECOMMENDATIONS) {
+      return scoredSlots.map((item) => item.slotTime);
+    }
+
+    return scoredSlots
+      .slice(0, MAX_GUIDED_SLOT_RECOMMENDATIONS)
+      .map((item) => item.slotTime)
+      .sort((first, second) => timeToMinutes(first) - timeToMinutes(second));
+  }, [
+    bookableFrontendTimeSlots,
+    data,
+    effectiveAvailabilitySettings,
+    effectiveServizi,
+    guidedSlotsActive,
+    guidedSlotsStrategy,
+    servizio,
+  ]);
+  const shouldShowOnlyRecommendedSlots =
+    guidedSlotsActive &&
+    guidedRecommendedTimeSlots.length > 0 &&
+    guidedSlotsVisibility === 'recommended_only';
+  const shouldShowGuidedRecommendations =
+    guidedSlotsActive && guidedRecommendedTimeSlots.length > 0;
+  const shouldShowExpandedTimeGrid =
+    !shouldShowGuidedRecommendations ||
+    guidedSlotsVisibility === 'recommended_only'
+      ? !shouldShowOnlyRecommendedSlots
+      : showAllGuidedSlots;
+  const visibleFrontendTimeSlots = shouldShowOnlyRecommendedSlots
+    ? guidedRecommendedTimeSlots
+    : displayTimeSlots;
+
   const canAnySlotBeBooked = useMemo(
     () =>
       displayTimeSlots.some(
-        (slotTime) => !orariNonDisponibili.has(slotTime) && !orariInConflitto.has(slotTime)
+        (slotTime) =>
+          !orariNonDisponibili.has(slotTime) &&
+          !orariInConflitto.has(slotTime) &&
+          !orariOccupati.has(slotTime)
       ),
-    [displayTimeSlots, orariInConflitto, orariNonDisponibili]
+    [displayTimeSlots, orariInConflitto, orariNonDisponibili, orariOccupati]
   );
 
   useEffect(() => {
