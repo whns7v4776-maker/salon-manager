@@ -466,6 +466,21 @@ const formatDisplayPersonName = (...parts: Array<string | null | undefined>) =>
     .join(' ')
     .trim();
 
+const normalizePriceValue = (value: unknown, fallback = 0) => {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+
+  return fallback;
+};
+
 type FrontendProfile = {
   nome: string;
   cognome: string;
@@ -8275,6 +8290,9 @@ export default function ClienteFrontendScreen() {
 
     return sortedFrontendServizi.map((item) => {
       const selected = item.nome === servizio;
+      const displayPrice = normalizePriceValue(item.prezzo, 0);
+      const displayOriginalPrice = normalizePriceValue(item.prezzoOriginale, 0);
+      const hasDiscount = displayOriginalPrice > displayPrice;
       const serviceUsesOperators =
         getConfiguredOperatorsForFrontendService({
           serviceName: item.nome,
@@ -8409,20 +8427,20 @@ export default function ClienteFrontendScreen() {
             adjustsFontSizeToFit
             minimumFontScale={0.72}
           >
-            € {item.prezzo.toFixed(2)}
+            € {displayPrice.toFixed(2)}
           </Text>
           {selected ? (
             <View style={styles.serviceSelectedBadge}>
               <Text style={styles.serviceSelectedBadgeText}>Scelto</Text>
             </View>
           ) : null}
-          {item.prezzoOriginale && item.prezzoOriginale > item.prezzo ? (
+          {hasDiscount ? (
             <View style={styles.discountRow}>
               <View style={styles.discountBadge}>
                 <Text style={styles.discountBadgeText}>Sconto</Text>
               </View>
               <Text style={styles.servicePriceOriginal}>
-                € {item.prezzoOriginale.toFixed(2)}
+                € {displayOriginalPrice.toFixed(2)}
               </Text>
             </View>
           ) : null}

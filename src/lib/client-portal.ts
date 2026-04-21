@@ -236,6 +236,16 @@ const normalizeServiceRecord = (item: Record<string, any>) => ({
   id: String(item.id ?? '').trim(),
   nome: String(item.nome ?? item.name ?? '').trim(),
   prezzo: normalizeNumber(item.prezzo ?? item.price) ?? 0,
+  prezzoOriginale: (() => {
+    const normalizedPrice = normalizeNumber(item.prezzo ?? item.price) ?? 0;
+    const normalizedOriginalPrice = normalizeNumber(
+      item.prezzoOriginale ?? item.original_price ?? item.originalPrice
+    );
+
+    return typeof normalizedOriginalPrice === 'number' && normalizedOriginalPrice > normalizedPrice
+      ? normalizedOriginalPrice
+      : undefined;
+  })(),
   durataMinuti: normalizeNumber(item.durataMinuti ?? item.duration_minutes),
   mestiereRichiesto: String(item.mestiereRichiesto ?? item.required_role ?? '').trim(),
   macchinarioIds: normalizeStringIdArray(item.macchinarioIds ?? item.machinery_ids),
