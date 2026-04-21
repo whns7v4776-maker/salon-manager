@@ -4588,6 +4588,10 @@ export default function ClienteFrontendScreen() {
     const slotIntervalMinutes = getSlotIntervalForDate(effectiveAvailabilitySettings, data);
     const availableBlocks = buildGuidedSlotBlocks(bookableFrontendTimeSlots, slotIntervalMinutes);
     const selectedDuration = getServiceDuration(servizio, effectiveServizi);
+    const serviceSlots = Math.max(
+      1,
+      Math.ceil(selectedDuration / Math.max(slotIntervalMinutes, 15))
+    );
 
     const scoredSlots = bookableFrontendTimeSlots
       .map((slotTime) => {
@@ -4604,14 +4608,29 @@ export default function ClienteFrontendScreen() {
             startsAtEdge: false,
             touchesEdge: false,
             createsSplit: false,
+            serviceFitsBlock: false,
           };
         }
 
-        const serviceSlots = Math.max(
-          1,
-          Math.ceil(selectedDuration / Math.max(slotIntervalMinutes, 15))
-        );
         const slotIndex = block.slots.indexOf(slotTime);
+        const serviceFitsBlock = slotIndex >= 0 && slotIndex + serviceSlots <= block.slots.length;
+
+        if (!serviceFitsBlock) {
+          return {
+            slotTime,
+            score: Number.NEGATIVE_INFINITY,
+            blockSize: block.slots.length,
+            remainingBefore: slotIndex,
+            remainingAfter: 0,
+            preservedLargestChunk: 0,
+            fillsGapExactly: false,
+            startsAtEdge: false,
+            touchesEdge: false,
+            createsSplit: false,
+            serviceFitsBlock: false,
+          };
+        }
+
         const remainingBefore = slotIndex;
         const remainingAfter = Math.max(0, block.slots.length - slotIndex - serviceSlots);
         const fillsGapExactly = remainingBefore === 0 && remainingAfter === 0;
@@ -4637,10 +4656,13 @@ export default function ClienteFrontendScreen() {
           startsAtEdge,
           touchesEdge,
           createsSplit,
+          serviceFitsBlock,
         };
       });
 
-    const scoredSlotsSorted = [...scoredSlots].sort((first, second) => {
+    const eligibleScoredSlots = scoredSlots.filter((item) => item.serviceFitsBlock);
+
+    const scoredSlotsSorted = [...eligibleScoredSlots].sort((first, second) => {
       if (guidedSlotsStrategy === 'protect_long_services') {
         if (Number(first.createsSplit) !== Number(second.createsSplit)) {
           return Number(first.createsSplit) - Number(second.createsSplit);
@@ -4712,10 +4734,30 @@ export default function ClienteFrontendScreen() {
       return item.touchesEdge || !item.createsSplit;
     });
 
+    const prioritizedStrategySlots =
+      guidedSlotsStrategy === 'protect_long_services'
+        ? preferredSlots.filter((item) => item.touchesEdge && !item.createsSplit)
+        : guidedSlotsStrategy === 'fill_gaps'
+          ? preferredSlots.filter(
+              (item) =>
+                item.fillsGapExactly ||
+                (item.touchesEdge && item.blockSize <= serviceSlots + 1) ||
+                (!item.createsSplit && item.blockSize <= serviceSlots + 2)
+            )
+          : scoredSlotsSorted;
+
     const candidateSlots =
-      preferredSlots.length >= MAX_GUIDED_SLOT_RECOMMENDATIONS
-        ? preferredSlots
-        : scoredSlotsSorted;
+      prioritizedStrategySlots.length >= MAX_GUIDED_SLOT_RECOMMENDATIONS
+        ? prioritizedStrategySlots
+        : [
+            ...prioritizedStrategySlots,
+            ...scoredSlotsSorted.filter(
+              (item) =>
+                !prioritizedStrategySlots.some(
+                  (candidate) => candidate.slotTime === item.slotTime
+                )
+            ),
+          ];
 
     if (candidateSlots.length <= MAX_GUIDED_SLOT_RECOMMENDATIONS) {
       return candidateSlots.map((item) => item.slotTime);
@@ -4731,6 +4773,7 @@ export default function ClienteFrontendScreen() {
     effectiveServizi,
     guidedSlotsActive,
     guidedSlotsStrategy,
+    serviceUsesOperatorScheduling,
     servizio,
   ]);
   const hasGuidedRecommendations = guidedRecommendedTimeSlots.length > 0;
