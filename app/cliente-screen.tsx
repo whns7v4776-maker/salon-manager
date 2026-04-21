@@ -8709,6 +8709,154 @@ export default function ClienteFrontendScreen() {
     );
   };
 
+  const renderFrontendBookingTimesContent = (): ReactNode => {
+    if (!canChooseTime) {
+      return null;
+    }
+
+    try {
+      return (
+        <View style={styles.frontendBookingTimesWrap}>
+          {shouldShowGuidedRecommendations ? (
+            isWeb ? (
+              <View style={[styles.guidedTimePanel, styles.guidedTimePanelWeb]}>
+                <View style={[styles.guidedTimeHeader, styles.guidedTimeHeaderWeb]}>
+                  <View style={styles.guidedTimeEyebrowPill}>
+                    <Text style={styles.guidedTimeEyebrowPillText}>Prima scelta</Text>
+                  </View>
+                  <Text style={[styles.guidedTimeTitle, styles.guidedTimeTitleWeb]}>
+                    Orari consigliati
+                  </Text>
+                  <Text style={[styles.guidedTimeHint, styles.guidedTimeHintWeb]}>
+                    Gli slot migliori da mostrare sul frontend web, costruiti solo sugli orari davvero prenotabili.
+                  </Text>
+                </View>
+                <View style={[styles.guidedTimeGrid, styles.guidedTimeGridWeb]}>
+                  {guidedRecommendedTimeSlots.map((item) => renderGuidedBookingTimeSlot(item))}
+                </View>
+                {guidedSlotsVisibility === 'recommended_first' ? (
+                  <TouchableOpacity
+                    style={[styles.guidedTimeToggleButton, styles.guidedTimeToggleButtonWeb]}
+                    onPress={() => setShowAllGuidedSlots((current) => !current)}
+                    activeOpacity={0.9}
+                  >
+                    <Text
+                      style={[
+                        styles.guidedTimeToggleButtonText,
+                        styles.guidedTimeToggleButtonTextWeb,
+                      ]}
+                    >
+                      {showAllGuidedSlots ? 'Nascondi altri orari' : 'Mostra tutti gli orari'}
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+            ) : (
+              <View style={styles.frontendBookingTimesSection}>
+                <View style={styles.frontendBookingTimesSectionHeader}>
+                  <View style={styles.frontendBookingTimesSectionPill}>
+                    <Text style={styles.frontendBookingTimesSectionPillText}>Prima scelta</Text>
+                  </View>
+                  <Text style={styles.frontendBookingTimesSectionTitle}>Orari consigliati</Text>
+                  <Text style={styles.frontendBookingTimesSectionHint}>
+                    Gli slot migliori per partire subito con una scelta rapida.
+                  </Text>
+                </View>
+                <View
+                  style={[
+                    styles.frontendBookingTimesGrid,
+                    recommendedSlotCount <= 2 && styles.frontendBookingTimesGridRecommendedCompact,
+                  ]}
+                >
+                  {guidedRecommendedTimeSlots.map((item) =>
+                    renderCompactBookingTimeSlot(item, {
+                      recommended: true,
+                      section: 'recommended',
+                    })
+                  )}
+                </View>
+                {guidedSlotsVisibility === 'recommended_first' ? (
+                  <TouchableOpacity
+                    style={styles.frontendBookingTimesToggle}
+                    onPress={() => setShowAllGuidedSlots((current) => !current)}
+                    activeOpacity={0.9}
+                  >
+                    <Text style={styles.frontendBookingTimesToggleText}>
+                      {showAllGuidedSlots ? 'Nascondi altri orari' : 'Mostra tutti gli orari'}
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+            )
+          ) : null}
+
+          {shouldRenderExpandedTimeGrid ? (
+            <View style={styles.frontendBookingTimesSection}>
+              <View style={styles.frontendBookingTimesSectionHeader}>
+                <Text style={styles.frontendBookingTimesSectionTitle}>
+                  {shouldShowGuidedRecommendations ? 'Altri orari' : 'Tutti gli orari'}
+                </Text>
+                <Text style={styles.frontendBookingTimesSectionHint}>
+                  {shouldShowGuidedRecommendations
+                    ? 'Orari disponibili aggiuntivi oltre ai consigliati.'
+                    : isWeb
+                      ? 'Vista completa degli slot disponibili, ottimizzata per web.'
+                      : 'Vista completa degli slot disponibili, ottimizzata per app.'}
+                </Text>
+              </View>
+              <View style={styles.frontendBookingTimesGrid}>
+                {visibleExpandedFrontendTimeSlots.map((item) =>
+                  renderCompactBookingTimeSlot(item, { section: 'all' })
+                )}
+              </View>
+            </View>
+          ) : null}
+        </View>
+      );
+    } catch (error) {
+      console.error('Failed to render frontend booking times', error);
+
+      return (
+        <View style={styles.frontendBookingTimesWrap}>
+          {guidedRecommendedTimeSlots.length > 0 ? (
+            <View style={styles.frontendBookingTimesSection}>
+              <View style={styles.frontendBookingTimesSectionHeader}>
+                <Text style={styles.frontendBookingTimesSectionTitle}>Orari consigliati</Text>
+                <Text style={styles.frontendBookingTimesSectionHint}>
+                  Fallback sicuro del frontend mentre ripristiniamo il layout guidato.
+                </Text>
+              </View>
+              <View style={styles.frontendBookingTimesGrid}>
+                {guidedRecommendedTimeSlots.map((item) =>
+                  renderCompactBookingTimeSlot(item, {
+                    recommended: true,
+                    section: 'recommended',
+                  })
+                )}
+              </View>
+            </View>
+          ) : null}
+          <View style={styles.frontendBookingTimesSection}>
+            <View style={styles.frontendBookingTimesSectionHeader}>
+              <Text style={styles.frontendBookingTimesSectionTitle}>
+                {guidedRecommendedTimeSlots.length > 0 ? 'Altri orari' : 'Tutti gli orari'}
+              </Text>
+              <Text style={styles.frontendBookingTimesSectionHint}>
+                Vista di sicurezza del time picker cliente.
+              </Text>
+            </View>
+            <View style={styles.frontendBookingTimesGrid}>
+              {(visibleExpandedFrontendTimeSlots.length > 0
+                ? visibleExpandedFrontendTimeSlots
+                : displayTimeSlots
+              ).map((item) => renderCompactBookingTimeSlot(item, { section: 'all' }))}
+            </View>
+          </View>
+        </View>
+      );
+    }
+  };
+
   const renderHeroTopBar = () => (
     <View
       pointerEvents={isWeb ? 'auto' : 'box-none'}
@@ -10018,108 +10166,7 @@ export default function ClienteFrontendScreen() {
                 Nessuno slot libero per questo servizio nel giorno selezionato.
               </Text>
             ) : null}
-            {canChooseTime ? (
-              <View style={styles.frontendBookingTimesWrap}>
-                {shouldShowGuidedRecommendations ? (
-                  isWeb ? (
-                    <View style={[styles.guidedTimePanel, styles.guidedTimePanelWeb]}>
-                      <View style={[styles.guidedTimeHeader, styles.guidedTimeHeaderWeb]}>
-                        <View style={styles.guidedTimeEyebrowPill}>
-                          <Text style={styles.guidedTimeEyebrowPillText}>Prima scelta</Text>
-                        </View>
-                        <Text style={[styles.guidedTimeTitle, styles.guidedTimeTitleWeb]}>
-                          Orari consigliati
-                        </Text>
-                        <Text style={[styles.guidedTimeHint, styles.guidedTimeHintWeb]}>
-                          Gli slot migliori da mostrare sul frontend web, costruiti solo sugli orari davvero prenotabili.
-                        </Text>
-                      </View>
-                      <View style={[styles.guidedTimeGrid, styles.guidedTimeGridWeb]}>
-                        {guidedRecommendedTimeSlots.map((item) => renderGuidedBookingTimeSlot(item))}
-                      </View>
-                      {guidedSlotsVisibility === 'recommended_first' ? (
-                        <TouchableOpacity
-                          style={[styles.guidedTimeToggleButton, styles.guidedTimeToggleButtonWeb]}
-                          onPress={() => setShowAllGuidedSlots((current) => !current)}
-                          activeOpacity={0.9}
-                        >
-                          <Text
-                            style={[
-                              styles.guidedTimeToggleButtonText,
-                              styles.guidedTimeToggleButtonTextWeb,
-                            ]}
-                          >
-                            {showAllGuidedSlots ? 'Nascondi altri orari' : 'Mostra tutti gli orari'}
-                          </Text>
-                        </TouchableOpacity>
-                      ) : null}
-                    </View>
-                  ) : (
-                    <View style={styles.frontendBookingTimesSection}>
-                      <View style={styles.frontendBookingTimesSectionHeader}>
-                        <View style={styles.frontendBookingTimesSectionPill}>
-                          <Text style={styles.frontendBookingTimesSectionPillText}>
-                            Prima scelta
-                          </Text>
-                        </View>
-                        <Text style={styles.frontendBookingTimesSectionTitle}>
-                          Orari consigliati
-                        </Text>
-                        <Text style={styles.frontendBookingTimesSectionHint}>
-                          Gli slot migliori per partire subito con una scelta rapida.
-                        </Text>
-                      </View>
-                      <View
-                        style={[
-                          styles.frontendBookingTimesGrid,
-                          recommendedSlotCount <= 2 && styles.frontendBookingTimesGridRecommendedCompact,
-                        ]}
-                      >
-                        {guidedRecommendedTimeSlots.map((item) =>
-                          renderCompactBookingTimeSlot(item, {
-                            recommended: true,
-                            section: 'recommended',
-                          })
-                        )}
-                      </View>
-                      {guidedSlotsVisibility === 'recommended_first' ? (
-                        <TouchableOpacity
-                          style={styles.frontendBookingTimesToggle}
-                          onPress={() => setShowAllGuidedSlots((current) => !current)}
-                          activeOpacity={0.9}
-                        >
-                          <Text style={styles.frontendBookingTimesToggleText}>
-                            {showAllGuidedSlots ? 'Nascondi altri orari' : 'Mostra tutti gli orari'}
-                          </Text>
-                        </TouchableOpacity>
-                      ) : null}
-                    </View>
-                  )
-                ) : null}
-
-                {shouldRenderExpandedTimeGrid ? (
-                  <View style={styles.frontendBookingTimesSection}>
-                    <View style={styles.frontendBookingTimesSectionHeader}>
-                      <Text style={styles.frontendBookingTimesSectionTitle}>
-                        {shouldShowGuidedRecommendations ? 'Altri orari' : 'Tutti gli orari'}
-                      </Text>
-                      <Text style={styles.frontendBookingTimesSectionHint}>
-                        {shouldShowGuidedRecommendations
-                          ? 'Orari disponibili aggiuntivi oltre ai consigliati.'
-                          : isWeb
-                            ? 'Vista completa degli slot disponibili, ottimizzata per web.'
-                            : 'Vista completa degli slot disponibili, ottimizzata per app.'}
-                      </Text>
-                    </View>
-                    <View style={styles.frontendBookingTimesGrid}>
-                      {visibleExpandedFrontendTimeSlots.map((item) =>
-                        renderCompactBookingTimeSlot(item, { section: 'all' })
-                      )}
-                    </View>
-                  </View>
-                ) : null}
-              </View>
-            ) : null}
+            {renderFrontendBookingTimesContent()}
             {waitlistSlotBlocks.length > 0 ? (
               <View style={styles.waitlistSection}>
                 <Text style={styles.waitlistSectionTitle}>Avvisi disponibilità</Text>
