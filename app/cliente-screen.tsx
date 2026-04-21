@@ -2354,12 +2354,34 @@ export default function ClienteFrontendScreen() {
       setPublicAvailabilitySettings(null);
       return;
     }
-    const nextSignature = buildPublicSalonStateSignature(nextState);
+
+    const mergedAvailabilitySettings = mergeFrontendAvailabilitySettings({
+      currentSettings: nextState.availabilitySettings,
+      incomingSettings: publicAvailabilitySettings,
+    });
+    const mergedState =
+      mergedAvailabilitySettings === nextState.availabilitySettings
+        ? nextState
+        : {
+            ...nextState,
+            availabilitySettings: mergedAvailabilitySettings,
+          };
+    const nextSignature = buildPublicSalonStateSignature(mergedState);
+
     if (publicSalonStateSignatureRef.current !== nextSignature) {
       publicSalonStateSignatureRef.current = nextSignature;
-      setPublicSalonState(nextState);
+      setPublicSalonState(mergedState);
     }
-  }, []);
+
+    setPublicAvailabilitySettings((current) =>
+      current
+        ? mergeFrontendAvailabilitySettings({
+            currentSettings: current,
+            incomingSettings: mergedAvailabilitySettings,
+          })
+        : mergedAvailabilitySettings
+    );
+  }, [publicAvailabilitySettings]);
   const applyPublicAvailabilitySettings = useCallback(
     (
       incomingSettings?: Partial<ReturnType<typeof normalizeAvailabilitySettings>> | null
@@ -2530,9 +2552,21 @@ export default function ClienteFrontendScreen() {
     () => (isCurrentWorkspaceSalon ? operatori : publicSalonState?.operatori ?? []),
     [isCurrentWorkspaceSalon, operatori, publicSalonState?.operatori]
   );
+  const mergedPublicAvailabilitySettings = useMemo(() => {
+    const snapshotSettings = publicSalonState?.availabilitySettings;
+
+    if (publicAvailabilitySettings && snapshotSettings) {
+      return mergeFrontendAvailabilitySettings({
+        currentSettings: snapshotSettings,
+        incomingSettings: publicAvailabilitySettings,
+      });
+    }
+
+    return publicAvailabilitySettings ?? snapshotSettings ?? normalizeAvailabilitySettings();
+  }, [publicAvailabilitySettings, publicSalonState?.availabilitySettings]);
   const effectiveAvailabilitySettings = isCurrentWorkspaceSalon
     ? availabilitySettings
-    : publicAvailabilitySettings ?? publicSalonState?.availabilitySettings ?? normalizeAvailabilitySettings();
+    : mergedPublicAvailabilitySettings;
   const effectiveAppuntamenti = useMemo(
     () =>
       assignFallbackOperatorsToAppointments({
