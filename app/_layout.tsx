@@ -36,7 +36,7 @@ const PUBLIC_SEGMENTS = new Set([
   'reset-password',
 ]);
 const OWNER_ROUTE = '/proprietario' as Href;
-const NATIVE_LOGGED_OUT_ROUTE = '/' as Href;
+const NATIVE_LOGGED_OUT_ROUTE = '/cliente-scanner' as Href;
 const isUuid = (value?: string | null) =>
   !!value &&
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);

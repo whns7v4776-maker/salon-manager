@@ -93,7 +93,7 @@ export default function ImpostazioniScreen() {
       if (!confirmed) return;
       void (async () => {
         await logoutOwnerAccount();
-        router.replace('/');
+        router.replace('/cliente-scanner');
       })();
       return;
     }
@@ -105,7 +105,7 @@ export default function ImpostazioniScreen() {
         style: 'destructive',
         onPress: async () => {
           await logoutOwnerAccount();
-          router.replace('/');
+          router.replace('/cliente-scanner');
         },
       },
     ]);

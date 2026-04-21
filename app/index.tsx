@@ -31,8 +31,7 @@ import { normalizeSalonCode } from '../src/lib/platform';
 import { useResponsiveLayout } from '../src/lib/responsive';
 import ClienteFrontendScreen from './cliente-screen';
 
-const DEFAULT_PUBLIC_CLIENT_BASE_URL =
-  'https://salon-manager-tjxefsr5j-6rwdtrgntc-3362s-projects.vercel.app';
+const DEFAULT_PUBLIC_CLIENT_BASE_URL = 'https://salon-manager-puce.vercel.app';
 
 const normalizeSalonCodeInput = (value: string) =>
   value
@@ -118,6 +117,29 @@ const buildPublicClientUrl = (
   });
 
   return url.toString();
+};
+
+const buildNativeClientHref = (
+  pathname = '/cliente-screen',
+  params?: Record<string, string | null | undefined>
+): Href => {
+  const normalizedParams = Object.entries(params ?? {}).reduce<Record<string, string>>(
+    (accumulator, [key, value]) => {
+      const normalizedValue = String(value ?? '').trim();
+      if (!normalizedValue) {
+        return accumulator;
+      }
+
+      accumulator[key] = normalizedValue;
+      return accumulator;
+    },
+    {}
+  );
+
+  return {
+    pathname: pathname as Href,
+    params: normalizedParams,
+  } as Href;
 };
 
 const openPublicClientInApp = async (url: string, errorMessage: string) => {
@@ -628,10 +650,7 @@ export default function PublicClientLandingScreen() {
     setSalonCodeActionMessage('');
     setSalonCodeActionIsError(false);
     if (Platform.OS !== 'web') {
-      void openPublicClientInApp(
-        buildPublicClientUrl(),
-        'Non sono riuscito ad aprire l’area cliente sul web stabile.'
-      );
+      navigateToHref('/cliente-scanner');
       return;
     }
 
@@ -723,15 +742,14 @@ export default function PublicClientLandingScreen() {
       setSalonCode(workspace.salonCode);
 
       if (Platform.OS !== 'web') {
-        void openPublicClientInApp(
-          buildPublicClientUrl('/cliente', {
+        navigateToHref(
+          buildNativeClientHref('/cliente-screen', {
             salon: workspace.salonCode,
             mode: 'booking',
             email: nextProfile.email,
             phone: nextProfile.telefono,
             autologin: '1',
-          }),
-          'Non sono riuscito ad aprire il salone sul web stabile.'
+          })
         );
         return;
       }
@@ -797,13 +815,12 @@ export default function PublicClientLandingScreen() {
 
       const biometricSalonCode = normalizeSalonCode(savedBiometricSalonCode || savedSalonCode) || undefined;
 
-      void openPublicClientInApp(
-        buildPublicClientUrl('/cliente', {
+      navigateToHref(
+        buildNativeClientHref('/cliente-screen', {
           salon: biometricSalonCode,
           biometric: '1',
           mode: 'booking',
-        }),
-        'Non sono riuscito ad aprire il salone sul web stabile.'
+        })
       );
 
       return;
@@ -1154,7 +1171,7 @@ export default function PublicClientLandingScreen() {
           animationType="slide"
           presentationStyle="fullScreen"
           onRequestClose={() => {
-            router.replace('/');
+            router.replace('/cliente-scanner');
           }}
         >
           <ClienteFrontendScreen />

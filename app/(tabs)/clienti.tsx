@@ -81,8 +81,7 @@ const buildInstagramUrl = (value?: string | null) => {
   return handle ? `https://instagram.com/${handle}` : '';
 };
 const IS_ANDROID = Platform.OS === 'android';
-const DEFAULT_PUBLIC_CLIENT_BASE_URL =
-  'https://salon-manager-tjxefsr5j-6rwdtrgntc-3362s-projects.vercel.app';
+const DEFAULT_PUBLIC_CLIENT_BASE_URL = 'https://salon-manager-puce.vercel.app';
 const CUSTOMER_REMINDER_HOUR_OPTIONS = [0, 1, 2, 3, 6, 12, 24, 48] as const;
 
 const formatReminderHoursLabel = (hours: number) => {

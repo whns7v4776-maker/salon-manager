@@ -119,8 +119,7 @@ const buildClientInviteMessage = ({
 };
 
 const toUppercaseField = (value: string) => value.toLocaleUpperCase('it-IT');
-const DEFAULT_PUBLIC_CLIENT_BASE_URL =
-  'https://salon-manager-tjxefsr5j-6rwdtrgntc-3362s-projects.vercel.app';
+const DEFAULT_PUBLIC_CLIENT_BASE_URL = 'https://salon-manager-puce.vercel.app';
 const IS_ANDROID = Platform.OS === 'android';
 const escapeHtml = (value: string) =>
   value

@@ -449,7 +449,7 @@ export function OwnerAccessScreen() {
           <View style={styles.heroCard}>
             <TouchableOpacity
               style={styles.heroBackButton}
-              onPress={() => router.replace('/')}
+              onPress={() => router.replace('/cliente-scanner')}
               activeOpacity={0.88}
             >
               <Ionicons name="chevron-back" size={22} color="#0F172A" />

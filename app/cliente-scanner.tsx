@@ -103,7 +103,11 @@ export default function ClienteScannerScreen() {
   return (
     <View style={styles.screen}>
       <View style={styles.card}>
-        <TouchableOpacity style={styles.backButton} onPress={() => router.replace('/')} activeOpacity={0.9}>
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => router.replace('/cliente')}
+          activeOpacity={0.9}
+        >
           <Ionicons name="chevron-back" size={22} color="#0F172A" />
         </TouchableOpacity>
 

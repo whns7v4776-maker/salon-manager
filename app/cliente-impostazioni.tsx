@@ -213,7 +213,7 @@ export default function ClienteImpostazioniScreen() {
       return;
     }
 
-    router.replace('/');
+    router.replace('/cliente-scanner');
   };
 
   const performFrontendLogout = async () => {

@@ -78,8 +78,7 @@ const EXPO_GO_OWNER_LIVE_REFRESH_INTERVAL_MS = 3000;
 const PORTAL_REMOTE_OVERRIDE_GUARD_MS = 5000;
 const DEADLOCK_ERROR_CODE = '40P01';
 const DEADLOCK_RETRY_DELAYS_MS = [120, 300, 700];
-const DEFAULT_PUBLIC_CLIENT_BASE_URL =
-  'https://salon-manager-tjxefsr5j-6rwdtrgntc-3362s-projects.vercel.app';
+const DEFAULT_PUBLIC_CLIENT_BASE_URL = 'https://salon-manager-puce.vercel.app';
 
 const normalizeAccountEmail = (value?: string | null) => value?.trim().toLowerCase() ?? '';
 const normalizeIdentityText = (value?: string | null) => value?.trim().toLowerCase() ?? '';

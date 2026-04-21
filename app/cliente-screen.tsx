@@ -4413,12 +4413,123 @@ export default function ClienteFrontendScreen() {
     effectiveAvailabilitySettings.guidedSlotsEnabled;
   const guidedSlotsStrategy = effectiveAvailabilitySettings.guidedSlotsStrategy;
   const guidedSlotsVisibility = effectiveAvailabilitySettings.guidedSlotsVisibility;
-  const bookableFrontendTimeSlots = useMemo(
+
+  const orariOccupati = useMemo(
     () =>
-      displayTimeSlots.filter(
-        (slotTime) => !orariNonDisponibili.has(slotTime) && !orariInConflitto.has(slotTime)
+      new Set(
+        displayTimeSlots.filter((slotTime) => {
+          if (!servizio.trim()) {
+            return appuntamentiDelGiorno.some((item) =>
+              doesAppointmentOccupySlot(item, slotTime, effectiveServizi)
+            );
+          }
+
+          return hasFrontendSlotSelectionConflict({
+            dateValue: data,
+            startTime: slotTime,
+            serviceName: servizio,
+            selectedOperatorId: operatoreId || null,
+            operators: effectiveOperatori,
+            appointments: effectiveBlockingAppointments,
+            services: effectiveServizi,
+            settings: effectiveAvailabilitySettings,
+          });
+        })
       ),
-    [displayTimeSlots, orariInConflitto, orariNonDisponibili]
+    [
+      appuntamentiDelGiorno,
+      data,
+      displayTimeSlots,
+      effectiveAvailabilitySettings,
+      effectiveBlockingAppointments,
+      effectiveOperatori,
+      effectiveServizi,
+      hasFrontendSlotSelectionConflict,
+      operatoreId,
+      servizio,
+    ]
+  );
+
+  const orariOccupatiDiretti = useMemo(
+    () =>
+      new Set(
+        displayTimeSlots.filter((slotTime) => {
+          if (!servizio.trim()) {
+            return appuntamentiDelGiorno.some((item) =>
+              doesAppointmentOccupySlot(item, slotTime, effectiveServizi)
+            );
+          }
+
+          return effectiveBlockingAppointments.some((item) => {
+            if ((item.data ?? getTodayDateString()) !== data) {
+              return false;
+            }
+
+            if (!doesAppointmentOccupySlot(item, slotTime, effectiveServizi)) {
+              return false;
+            }
+
+            if (!serviceUsesOperatorScheduling) {
+              return doesExistingFrontendBookingBlockSelectedService({
+                selectedServiceName: servizio,
+                existingServiceName: item.servizio,
+                existingMachineryIds: item.macchinarioIds,
+                services: effectiveServizi,
+              });
+            }
+
+            const { operatorId: existingOperatorId, operatorName: existingOperatorName } =
+              normalizeFrontendOperatorIdentity({
+                operatorId: item.operatoreId,
+                operatorName: item.operatoreNome,
+              });
+
+            if (!existingOperatorId && !existingOperatorName) {
+              return false;
+            }
+
+            return matchesOperatorIdentity({
+              appointmentOperatorId: existingOperatorId,
+              appointmentOperatorName: existingOperatorName,
+              selectedOperatorId: operatoreId || null,
+              selectedOperatorName: operatoreNome || null,
+            });
+          });
+        })
+      ),
+    [
+      appuntamentiDelGiorno,
+      data,
+      displayTimeSlots,
+      doesAppointmentOccupySlot,
+      effectiveBlockingAppointments,
+      effectiveServizi,
+      operatoreId,
+      operatoreNome,
+      serviceUsesOperatorScheduling,
+      servizio,
+    ]
+  );
+  const isFrontendSlotBookable = useCallback(
+    (slotTime: string) =>
+      canChooseTime &&
+      !!servizio.trim() &&
+      !orariNonDisponibili.has(slotTime) &&
+      !orariInConflitto.has(slotTime) &&
+      !orariOccupati.has(slotTime) &&
+      !orariOccupatiDiretti.has(slotTime),
+    [
+      canChooseTime,
+      orariInConflitto,
+      orariNonDisponibili,
+      orariOccupati,
+      orariOccupatiDiretti,
+      servizio,
+    ]
+  );
+  const bookableFrontendTimeSlots = useMemo(
+    () => displayTimeSlots.filter((slotTime) => isFrontendSlotBookable(slotTime)),
+    [displayTimeSlots, isFrontendSlotBookable]
   );
   const guidedRecommendedTimeSlots = useMemo(() => {
     if (!guidedSlotsActive || !bookableFrontendTimeSlots.length || !servizio.trim()) {
@@ -4584,106 +4695,31 @@ export default function ClienteFrontendScreen() {
       : guidedSlotsVisibility === 'recommended_and_all'
         ? true
         : !shouldShowGuidedRecommendations || showAllGuidedSlots;
-  const visibleFrontendTimeSlots = shouldShowOnlyRecommendedSlots
-    ? guidedRecommendedTimeSlots
-    : displayTimeSlots;
+  const visibleExpandedFrontendTimeSlots = useMemo(() => {
+    if (!shouldShowExpandedTimeGrid) {
+      return [];
+    }
 
-  const orariOccupati = useMemo(
-    () =>
-      new Set(
-        displayTimeSlots.filter((slotTime) => {
-          if (!servizio.trim()) {
-            return appuntamentiDelGiorno.some((item) =>
-              doesAppointmentOccupySlot(item, slotTime, effectiveServizi)
-            );
-          }
+    if (!shouldShowGuidedRecommendations) {
+      return displayTimeSlots;
+    }
 
-          return hasFrontendSlotSelectionConflict({
-            dateValue: data,
-            startTime: slotTime,
-            serviceName: servizio,
-            selectedOperatorId: operatoreId || null,
-            operators: effectiveOperatori,
-            appointments: effectiveBlockingAppointments,
-            services: effectiveServizi,
-            settings: effectiveAvailabilitySettings,
-          });
-        })
-      ),
-    [
-      appuntamentiDelGiorno,
-      data,
-      displayTimeSlots,
-      effectiveAvailabilitySettings,
-      effectiveBlockingAppointments,
-      effectiveOperatori,
-      effectiveServizi,
-      hasFrontendSlotSelectionConflict,
-      operatoreId,
-      servizio,
-    ]
-  );
+    if (guidedSlotsVisibility === 'recommended_only') {
+      return [];
+    }
 
-  const orariOccupatiDiretti = useMemo(
-    () =>
-      new Set(
-        displayTimeSlots.filter((slotTime) => {
-          if (!servizio.trim()) {
-            return appuntamentiDelGiorno.some((item) =>
-              doesAppointmentOccupySlot(item, slotTime, effectiveServizi)
-            );
-          }
+    const recommendedSlotSet = new Set(guidedRecommendedTimeSlots);
+    const remainingSlots = displayTimeSlots.filter((slotTime) => !recommendedSlotSet.has(slotTime));
 
-          return effectiveBlockingAppointments.some((item) => {
-            if ((item.data ?? getTodayDateString()) !== data) {
-              return false;
-            }
-
-            if (!doesAppointmentOccupySlot(item, slotTime, effectiveServizi)) {
-              return false;
-            }
-
-            if (!serviceUsesOperatorScheduling) {
-              return doesExistingFrontendBookingBlockSelectedService({
-                selectedServiceName: servizio,
-                existingServiceName: item.servizio,
-                existingMachineryIds: item.macchinarioIds,
-                services: effectiveServizi,
-              });
-            }
-
-            const { operatorId: existingOperatorId, operatorName: existingOperatorName } =
-              normalizeFrontendOperatorIdentity({
-                operatorId: item.operatoreId,
-                operatorName: item.operatoreNome,
-              });
-
-            if (!existingOperatorId && !existingOperatorName) {
-              return false;
-            }
-
-            return matchesOperatorIdentity({
-              appointmentOperatorId: existingOperatorId,
-              appointmentOperatorName: existingOperatorName,
-              selectedOperatorId: operatoreId || null,
-              selectedOperatorName: operatoreNome || null,
-            });
-          });
-        })
-      ),
-    [
-      appuntamentiDelGiorno,
-      data,
-      displayTimeSlots,
-      doesAppointmentOccupySlot,
-      effectiveBlockingAppointments,
-      effectiveServizi,
-      operatoreId,
-      operatoreNome,
-      serviceUsesOperatorScheduling,
-      servizio,
-    ]
-  );
+    return remainingSlots;
+  }, [
+    displayTimeSlots,
+    guidedRecommendedTimeSlots,
+    guidedSlotsVisibility,
+    shouldShowExpandedTimeGrid,
+    shouldShowGuidedRecommendations,
+  ]);
+  const shouldRenderExpandedTimeGrid = visibleExpandedFrontendTimeSlots.length > 0;
   const frontendTimeSlotUnavailableReasonMap = useMemo(() => {
     const map = new Map<
       string,
@@ -4787,11 +4823,8 @@ export default function ClienteFrontendScreen() {
   ]);
 
   const canAnySlotBeBooked = useMemo(
-    () =>
-      displayTimeSlots.some(
-        (slotTime) => !orariNonDisponibili.has(slotTime) && !orariInConflitto.has(slotTime)
-      ),
-    [displayTimeSlots, orariInConflitto, orariNonDisponibili]
+    () => displayTimeSlots.some((slotTime) => isFrontendSlotBookable(slotTime)),
+    [displayTimeSlots, isFrontendSlotBookable]
   );
 
   useEffect(() => {
@@ -6890,7 +6923,7 @@ export default function ClienteFrontendScreen() {
       return;
     }
 
-    router.replace('/');
+    router.replace('/cliente-scanner');
   }, [
     isHomeAutoLoginFlow,
     isRegistered,
@@ -8021,7 +8054,7 @@ export default function ClienteFrontendScreen() {
       return;
     }
 
-    router.replace('/');
+    router.replace('/cliente-scanner');
   };
 
   const openFrontendSettings = useCallback(() => {
@@ -8052,7 +8085,7 @@ export default function ClienteFrontendScreen() {
       return;
     }
 
-    router.replace('/');
+    router.replace('/cliente-scanner');
   }, [router]);
 
   const performFrontendLogout = async () => {
@@ -8440,7 +8473,7 @@ export default function ClienteFrontendScreen() {
     } = {}
   ) => {
     const selected = selectedTimeRange.has(item);
-    const disabled = !canChooseTime || !servizio || orariNonDisponibili.has(item);
+    const disabled = !selected && !isFrontendSlotBookable(item);
     const occupied = servizio.trim() !== '' && orariOccupati.has(item);
     const directlyOccupied = servizio.trim() !== '' && orariOccupatiDiretti.has(item);
     const unavailableReason = frontendTimeSlotUnavailableReasonMap.get(item);
@@ -8591,6 +8624,85 @@ export default function ClienteFrontendScreen() {
                   : overlapBlocked
                     ? 'Si sovrappone'
                     : unavailableReason?.meta ?? 'Disponibile'}
+          </Text>
+        </TouchableOpacity>
+      </View>
+    );
+  };
+
+  const renderGuidedBookingTimeSlot = (item: string) => {
+    const selected = selectedTimeRange.has(item);
+    const disabled = !selected && !isFrontendSlotBookable(item);
+    const unavailableReason = frontendTimeSlotUnavailableReasonMap.get(item);
+    const lunchOverlapCandidate =
+      !!servizio &&
+      doesServiceOverlapLunchBreak({
+        settings: effectiveAvailabilitySettings,
+        startTime: item,
+        durationMinutes: selectedServiceDuration,
+      });
+
+    return (
+      <View
+        key={`guided-${item}`}
+        style={[styles.guidedTimeSlotCard, isWeb && styles.guidedTimeSlotCardWeb]}
+      >
+        <TouchableOpacity
+          style={[
+            styles.guidedTimeChip,
+            isWeb && styles.guidedTimeChipWeb,
+            selected && styles.guidedTimeChipSelected,
+          ]}
+          onPress={() => {
+            if (lunchOverlapCandidate) {
+              Alert.alert(tf('frontend_lunch_overlap_title'), tf('frontend_lunch_overlap_body'));
+              return;
+            }
+            if (selected) {
+              setOra('');
+              return;
+            }
+            if (disabled) return;
+            setOra(item);
+          }}
+          activeOpacity={disabled ? 1 : 0.92}
+          disabled={!selected && disabled}
+        >
+          <View
+            style={[
+              styles.guidedTimeBadge,
+              isWeb && styles.guidedTimeBadgeWeb,
+              selected && styles.guidedTimeBadgeSelected,
+            ]}
+          >
+            <Text
+              style={[
+                styles.guidedTimeBadgeText,
+                isWeb && styles.guidedTimeBadgeTextWeb,
+                selected && styles.guidedTimeBadgeTextSelected,
+              ]}
+            >
+              {selected ? 'Selezionato' : 'Consigliato'}
+            </Text>
+          </View>
+          <Text
+            style={[
+              styles.guidedTimeChipText,
+              isWeb && styles.guidedTimeChipTextWeb,
+            ]}
+          >
+            {item}
+          </Text>
+          <Text
+            style={[
+              styles.guidedTimeMeta,
+              isWeb && styles.guidedTimeMetaWeb,
+              selected && styles.guidedTimeMetaSelected,
+            ]}
+          >
+            {selected
+              ? 'Orario pronto'
+              : unavailableReason?.meta ?? 'Riduce buchi e sovrapposizioni'}
           </Text>
         </TouchableOpacity>
       </View>
@@ -8915,7 +9027,7 @@ export default function ClienteFrontendScreen() {
           </Text>
           <TouchableOpacity
             style={styles.frontendSalonWarningButton}
-            onPress={() => router.replace('/')}
+            onPress={() => router.replace('/cliente-scanner')}
             activeOpacity={0.9}
           >
             <Text style={styles.frontendSalonWarningButtonText}>Vai a Inserisci codice salone</Text>
@@ -9909,57 +10021,98 @@ export default function ClienteFrontendScreen() {
             {canChooseTime ? (
               <View style={styles.frontendBookingTimesWrap}>
                 {shouldShowGuidedRecommendations ? (
-                  <View style={styles.frontendBookingTimesSection}>
-                    <View style={styles.frontendBookingTimesSectionHeader}>
-                      <View style={styles.frontendBookingTimesSectionPill}>
-                        <Text style={styles.frontendBookingTimesSectionPillText}>
-                          Prima scelta
+                  isWeb ? (
+                    <View style={[styles.guidedTimePanel, styles.guidedTimePanelWeb]}>
+                      <View style={[styles.guidedTimeHeader, styles.guidedTimeHeaderWeb]}>
+                        <View style={styles.guidedTimeEyebrowPill}>
+                          <Text style={styles.guidedTimeEyebrowPillText}>Prima scelta</Text>
+                        </View>
+                        <Text style={[styles.guidedTimeTitle, styles.guidedTimeTitleWeb]}>
+                          Orari consigliati
+                        </Text>
+                        <Text style={[styles.guidedTimeHint, styles.guidedTimeHintWeb]}>
+                          Gli slot migliori da mostrare sul frontend web, costruiti solo sugli orari davvero prenotabili.
                         </Text>
                       </View>
-                      <Text style={styles.frontendBookingTimesSectionTitle}>
-                        Orari consigliati
-                      </Text>
-                      <Text style={styles.frontendBookingTimesSectionHint}>
-                        Gli slot migliori per partire subito con una scelta rapida.
-                      </Text>
+                      <View style={[styles.guidedTimeGrid, styles.guidedTimeGridWeb]}>
+                        {guidedRecommendedTimeSlots.map((item) => renderGuidedBookingTimeSlot(item))}
+                      </View>
+                      {guidedSlotsVisibility === 'recommended_first' ? (
+                        <TouchableOpacity
+                          style={[styles.guidedTimeToggleButton, styles.guidedTimeToggleButtonWeb]}
+                          onPress={() => setShowAllGuidedSlots((current) => !current)}
+                          activeOpacity={0.9}
+                        >
+                          <Text
+                            style={[
+                              styles.guidedTimeToggleButtonText,
+                              styles.guidedTimeToggleButtonTextWeb,
+                            ]}
+                          >
+                            {showAllGuidedSlots ? 'Nascondi altri orari' : 'Mostra tutti gli orari'}
+                          </Text>
+                        </TouchableOpacity>
+                      ) : null}
                     </View>
-                    <View
-                      style={[
-                        styles.frontendBookingTimesGrid,
-                        recommendedSlotCount <= 2 && styles.frontendBookingTimesGridRecommendedCompact,
-                      ]}
-                    >
-                      {guidedRecommendedTimeSlots.map((item) =>
-                        renderCompactBookingTimeSlot(item, {
-                          recommended: true,
-                          section: 'recommended',
-                        })
-                      )}
-                    </View>
-                    {guidedSlotsVisibility === 'recommended_first' ? (
-                      <TouchableOpacity
-                        style={styles.frontendBookingTimesToggle}
-                        onPress={() => setShowAllGuidedSlots((current) => !current)}
-                        activeOpacity={0.9}
-                      >
-                        <Text style={styles.frontendBookingTimesToggleText}>
-                          {showAllGuidedSlots ? 'Nascondi altri orari' : 'Mostra tutti gli orari'}
+                  ) : (
+                    <View style={styles.frontendBookingTimesSection}>
+                      <View style={styles.frontendBookingTimesSectionHeader}>
+                        <View style={styles.frontendBookingTimesSectionPill}>
+                          <Text style={styles.frontendBookingTimesSectionPillText}>
+                            Prima scelta
+                          </Text>
+                        </View>
+                        <Text style={styles.frontendBookingTimesSectionTitle}>
+                          Orari consigliati
                         </Text>
-                      </TouchableOpacity>
-                    ) : null}
-                  </View>
+                        <Text style={styles.frontendBookingTimesSectionHint}>
+                          Gli slot migliori per partire subito con una scelta rapida.
+                        </Text>
+                      </View>
+                      <View
+                        style={[
+                          styles.frontendBookingTimesGrid,
+                          recommendedSlotCount <= 2 && styles.frontendBookingTimesGridRecommendedCompact,
+                        ]}
+                      >
+                        {guidedRecommendedTimeSlots.map((item) =>
+                          renderCompactBookingTimeSlot(item, {
+                            recommended: true,
+                            section: 'recommended',
+                          })
+                        )}
+                      </View>
+                      {guidedSlotsVisibility === 'recommended_first' ? (
+                        <TouchableOpacity
+                          style={styles.frontendBookingTimesToggle}
+                          onPress={() => setShowAllGuidedSlots((current) => !current)}
+                          activeOpacity={0.9}
+                        >
+                          <Text style={styles.frontendBookingTimesToggleText}>
+                            {showAllGuidedSlots ? 'Nascondi altri orari' : 'Mostra tutti gli orari'}
+                          </Text>
+                        </TouchableOpacity>
+                      ) : null}
+                    </View>
+                  )
                 ) : null}
 
-                {shouldShowExpandedTimeGrid ? (
+                {shouldRenderExpandedTimeGrid ? (
                   <View style={styles.frontendBookingTimesSection}>
                     <View style={styles.frontendBookingTimesSectionHeader}>
-                      <Text style={styles.frontendBookingTimesSectionTitle}>Tutti gli orari</Text>
+                      <Text style={styles.frontendBookingTimesSectionTitle}>
+                        {shouldShowGuidedRecommendations ? 'Altri orari' : 'Tutti gli orari'}
+                      </Text>
                       <Text style={styles.frontendBookingTimesSectionHint}>
-                        Vista completa degli slot disponibili, ottimizzata per app.
+                        {shouldShowGuidedRecommendations
+                          ? 'Orari disponibili aggiuntivi oltre ai consigliati.'
+                          : isWeb
+                            ? 'Vista completa degli slot disponibili, ottimizzata per web.'
+                            : 'Vista completa degli slot disponibili, ottimizzata per app.'}
                       </Text>
                     </View>
                     <View style={styles.frontendBookingTimesGrid}>
-                      {visibleFrontendTimeSlots.map((item) =>
+                      {visibleExpandedFrontendTimeSlots.map((item) =>
                         renderCompactBookingTimeSlot(item, { section: 'all' })
                       )}
                     </View>
