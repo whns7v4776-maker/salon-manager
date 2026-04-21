@@ -4,37 +4,56 @@ const baseConfig = {
     slug: 'salon-manager',
     version: '1.0.0',
     orientation: 'portrait',
-    icon: './assets/images/icon.png',
+    icon: './assets/images/app-icons/salonpro-final/light_ios_1024_final.png',
     scheme: 'salonmanager',
     userInterfaceStyle: 'automatic',
     ios: {
-      icon: './assets/images/icon.png',
+      icon: {
+        light: './assets/images/app-icons/salonpro-final/light_ios_1024_final.png',
+        dark: './assets/images/app-icons/salonpro-final/dark_ios_1024_final.png',
+      },
       supportsTablet: true,
       bundleIdentifier: 'com.marzix91.salonmanager',
       infoPlist: {
         CFBundleDisplayName: 'SalonPro',
         ITSAppUsesNonExemptEncryption: false,
+        NSCameraUsageDescription:
+          'Usiamo la fotocamera per inquadrare il QR del salone e aprire subito la pagina cliente corretta.',
       },
     },
     android: {
-      icon: './assets/images/icon.png',
+      icon: './assets/images/app-icons/salonpro-final/light_android_512_final.png',
       adaptiveIcon: {
         backgroundColor: '#ffffff',
-        foregroundImage: './assets/images/android-icon-foreground.png',
-        monochromeImage: './assets/images/android-icon-monochrome.png',
+        foregroundImage: './assets/images/app-icons/salonpro-final/light_android_512_final.png',
+        monochromeImage: './assets/images/app-icons/salonpro-final/dark_android_512_final.png',
       },
       softwareKeyboardLayoutMode: 'resize',
       predictiveBackGestureEnabled: false,
       package: 'com.marzix91.salonmanager',
       googleServicesFile: './google-services.json',
+      permissions: ['CAMERA'],
     },
     web: {
       output: 'static',
-      favicon: './assets/images/favicon.png',
+      favicon: './assets/images/app-icons/salonpro-final/light_ios_1024_final.png',
     },
     plugins: [
       'expo-router',
-      'expo-notifications',
+      [
+        'expo-camera',
+        {
+          cameraPermission:
+            'Usiamo la fotocamera per inquadrare il QR del salone e aprire subito la pagina cliente corretta.',
+        },
+      ],
+      [
+        'expo-notifications',
+        {
+          icon: './assets/images/app-icons/salonpro-final/notification_android_96_final.png',
+          color: '#C89B3C',
+        },
+      ],
       [
         'expo-local-authentication',
         {
@@ -45,12 +64,13 @@ const baseConfig = {
       [
         'expo-splash-screen',
         {
-          image: './assets/images/splash-icon.png',
-          imageWidth: 200,
+          image: './assets/images/app-icons/salonpro-final/light_ios_1024_final.png',
+          imageWidth: 240,
           resizeMode: 'contain',
           backgroundColor: '#ffffff',
           dark: {
-            backgroundColor: '#000000',
+            image: './assets/images/app-icons/salonpro-final/dark_ios_1024_final.png',
+            backgroundColor: '#060816',
           },
         },
       ],

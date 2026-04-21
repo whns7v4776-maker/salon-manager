@@ -46,6 +46,7 @@ import {
   buildSalonCapacityOperatorId,
   buildDisplayTimeSlots,
   buildTimeSlots,
+  doesTimeRangeConflictWithAppointment,
   doesServiceFitWithinDaySchedule,
   doesServiceOverlapLunchBreak,
   doesServiceUseOperators,
@@ -79,7 +80,66 @@ const GIORNI_SETTIMANA_IT = ['Dom', 'Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab'];
 const MESI_IT = ['gen', 'feb', 'mar', 'apr', 'mag', 'giu', 'lug', 'ago', 'set', 'ott', 'nov', 'dic'];
 const IS_ANDROID = Platform.OS === 'android';
 const ANDROID_TEXT_BREATHING_ROOM = IS_ANDROID ? 8 : 0;
+const buildUniqueEntityId = (prefix: string) =>
+  `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 const normalizeCustomerNameInput = (value: string) => value.toLocaleUpperCase('it-IT');
+const normalizeAgendaCustomerIdentityText = (value?: string | null) =>
+  (value ?? '').trim().toLowerCase();
+const buildAgendaCustomerIdentityKey = ({
+  fullName,
+  email,
+}: {
+  fullName?: string | null;
+  email?: string | null;
+}) => [normalizeAgendaCustomerIdentityText(fullName), normalizeAgendaCustomerIdentityText(email)].join('::');
+const buildBlockedQuickBookingCustomerIdentityKeys = ({
+  customers,
+  appointments,
+  appointmentDate,
+  appointmentTime,
+}: {
+  customers: Array<{ nome: string; email?: string | null }>;
+  appointments: Array<Pick<AppuntamentoItem, 'data' | 'ora' | 'cliente'>>;
+  appointmentDate: string;
+  appointmentTime: string;
+}) => {
+  const customersByName = new Map<string, Array<{ nome: string; email?: string | null }>>();
+
+  customers.forEach((customer) => {
+    const customerNameKey = normalizeAgendaCustomerIdentityText(customer.nome);
+    if (!customerNameKey) return;
+
+    const current = customersByName.get(customerNameKey) ?? [];
+    current.push(customer);
+    customersByName.set(customerNameKey, current);
+  });
+
+  const blockedCustomerIdentityKeys = new Set<string>();
+  const normalizedAppointmentTime = appointmentTime.trim().slice(0, 5);
+
+  appointments.forEach((appointment) => {
+    const appointmentDateValue = (appointment.data ?? getTodayDateString()).trim();
+    const appointmentTimeValue = appointment.ora.trim().slice(0, 5);
+
+    if (appointmentDateValue !== appointmentDate || appointmentTimeValue !== normalizedAppointmentTime) {
+      return;
+    }
+
+    const matchingCustomers =
+      customersByName.get(normalizeAgendaCustomerIdentityText(appointment.cliente)) ?? [];
+
+    matchingCustomers.forEach((customer) => {
+      blockedCustomerIdentityKeys.add(
+        buildAgendaCustomerIdentityKey({
+          fullName: customer.nome,
+          email: customer.email,
+        })
+      );
+    });
+  });
+
+  return blockedCustomerIdentityKeys;
+};
 const DAY_CARD_WIDTH = IS_ANDROID ? 66 : 56;
 const DAY_CARD_GAP = IS_ANDROID ? -16 : -8;
 const DAY_CARD_FULL_WIDTH = DAY_CARD_WIDTH + DAY_CARD_GAP;
@@ -87,7 +147,8 @@ const WEEK_PLANNER_ROW_HEIGHT = 40;
 const WEEK_PLANNER_DAY_WIDTH = 44;
 const WEEK_PLANNER_ROW_GAP = 1;
 const WEEK_PLANNER_COLUMN_GAP = 0;
-const WEEK_PLANNER_MIN_OPERATOR_LANE_WIDTH = 52;
+const WEEK_PLANNER_MIN_OPERATOR_LANE_WIDTH = 40;
+const WEEK_PLANNER_WIDTH_JITTER_THRESHOLD = 24;
 const SALON_LANE_ROLE_PRIORITY = [
   'barber',
   'hair stylist',
@@ -109,15 +170,58 @@ const SALON_LANE_ROLE_PRIORITY = [
 ];
 
 const extractSalonLaneCapacityKey = (laneKey: string) => {
-  if (!laneKey.startsWith('salon-lane:')) return '';
-  return laneKey.replace(/^salon-lane:/, '').replace(/:\d+$/, '');
+  if (laneKey.startsWith('salon-lane:')) {
+    return laneKey.replace(/^salon-lane:/, '').replace(/:\d+$/, '');
+  }
+
+  if (laneKey.startsWith('orphan-salon-lane:')) {
+    return laneKey.replace(/^orphan-salon-lane:/, '').replace(/:\d+$/, '');
+  }
+
+  return '';
 };
-const WEEK_PLANNER_MIN_OPERATOR_LANE_GAP = 2;
+const buildWeekLaneRoleSortKey = ({
+  operatorId,
+  operatorName,
+  capacityLabel,
+  operators,
+}: {
+  operatorId?: string | null;
+  operatorName?: string | null;
+  capacityLabel?: string | null;
+  operators: Array<{ id: string; nome: string; mestiere?: string | null }>;
+}) => {
+  if (capacityLabel?.trim()) {
+    return normalizeRoleName(capacityLabel);
+  }
+
+  const normalizedOperatorId = operatorId?.trim() ?? '';
+  if (normalizedOperatorId && !isSalonCapacityOperatorId(normalizedOperatorId)) {
+    const matchedOperator = operators.find((item) => item.id.trim() === normalizedOperatorId);
+    if (matchedOperator?.mestiere?.trim()) {
+      return normalizeRoleName(matchedOperator.mestiere);
+    }
+  }
+
+  const normalizedOperatorName = normalizeOperatorNameKey(operatorName);
+  if (normalizedOperatorName) {
+    const matchedOperator = operators.find(
+      (item) => normalizeOperatorNameKey(item.nome) === normalizedOperatorName
+    );
+    if (matchedOperator?.mestiere?.trim()) {
+      return normalizeRoleName(matchedOperator.mestiere);
+    }
+  }
+
+  return '';
+};
+const WEEK_PLANNER_MIN_OPERATOR_LANE_GAP = 1;
 const WEEK_PLANNER_DAY_HEADER_TOTAL_HEIGHT = 39;
 const WEEK_PLANNER_EDGE_BLEED_LEFT = 8;
 const WEEK_PLANNER_EDGE_BLEED_RIGHT = 18;
 const WEEK_PLANNER_RIGHT_CLIP_GUARD = 8;
-const WEEK_PLANNER_TIME_COL_TOTAL = 36;
+const WEEK_PLANNER_TIME_COL_TOTAL = 46;
+const WEEK_PLANNER_LANE_HEADER_HEIGHT = 34;
 const WEEK_DRAG_JITTER_THRESHOLD = 1;
 
 const PALETTE = {
@@ -153,6 +257,7 @@ const PALETTE = {
   ACCENT_INDIGO_BG: '#EEF2FF',
 } as const;
 
+
 const buildAgendaOperatorIdentityKey = ({
   operatorId,
   operatorName,
@@ -171,6 +276,15 @@ const buildAgendaOperatorIdentityKey = ({
   }
 
   return '';
+};
+
+const normalizeAgendaLaneOperatorLabelKey = (value?: string | null) => {
+  const normalizedValue = normalizeOperatorNameKey(value);
+  if (!normalizedValue) {
+    return '';
+  }
+
+  return normalizedValue.split(/\s+/).filter(Boolean)[0] ?? '';
 };
 
 const AGENDA_VIEW_TONES = {
@@ -252,6 +366,22 @@ const shouldWarnAgendaAboutMissingOperatorsForRole = ({
   return distinctRoles.size > 1;
 };
 
+const formatAgendaRoleLabel = (value?: string | null) => {
+  const trimmedValue = (value ?? '').trim();
+  if (!trimmedValue) {
+    return '';
+  }
+
+  return trimmedValue
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word) => {
+      const lowerWord = word.toLocaleLowerCase('it-IT');
+      return lowerWord.charAt(0).toLocaleUpperCase('it-IT') + lowerWord.slice(1);
+    })
+    .join(' ');
+};
+
 type AppuntamentoItem = {
   id: string;
   data?: string;
@@ -260,6 +390,7 @@ type AppuntamentoItem = {
   servizio: string;
   prezzo: number;
   durataMinuti?: number;
+  mestiereRichiesto?: string;
   operatoreId?: string;
   operatoreNome?: string;
   macchinarioIds?: string[];
@@ -297,6 +428,7 @@ type QuickSlotDraft = {
   date: string;
   time: string;
   preferredOperatorId?: string | null;
+  preferredLaneKey?: string | null;
 };
 
 type ServicePickerTarget = 'agenda' | 'quick';
@@ -454,6 +586,15 @@ const buildCenteredDates = (daysBefore: number, daysAfter: number): GiornoPicker
   });
 };
 
+const buildPlannerDateRange = (
+  startDate: string,
+  totalDays: number,
+  appLanguage: AppLanguage
+) =>
+  Array.from({ length: Math.max(1, totalDays) }, (_, offset) =>
+    buildGiornoPicker(addDaysToIso(startDate, offset), appLanguage)
+  );
+
 type AgendaDayPickerProps = {
   giorniDisponibili: GiornoPicker[];
   selectedDate: string;
@@ -603,6 +744,8 @@ const AgendaDayPicker = React.memo(function AgendaDayPicker({
 
   useEffect(() => {
     lastPreviewSelectionRef.current = selectedDate;
+    previewIndexRef.current = null;
+    setPreviewIndex((current) => (current === null ? current : null));
   }, [selectedDate]);
 
   useEffect(() => {
@@ -707,6 +850,8 @@ const AgendaDayPicker = React.memo(function AgendaDayPicker({
         return;
       }
 
+      previewIndexRef.current = null;
+      setPreviewIndex((current) => (current === null ? current : null));
       centerDayInPicker(nextDay.value, false);
     },
     [centerDayInPicker, getNearestIndex, giorniDisponibili, onSelectDateFinal, selectedDate]
@@ -1180,7 +1325,8 @@ const AgendaDayPicker = React.memo(function AgendaDayPicker({
         <View pointerEvents="none" style={styles.dayPickerCenterHighlight} />
         <View pointerEvents="none" style={styles.dayPickerCenterInnerGlow} />
         {selectedDay ? (
-          <HapticTouchable
+          <View
+            pointerEvents="none"
             style={[
               styles.dayPickerCenterCard,
               styles.dayCard,
@@ -1188,13 +1334,6 @@ const AgendaDayPicker = React.memo(function AgendaDayPicker({
               styles.dayCardActiveShadow,
               selectedAvailability?.closed && styles.dayCardClosedSelected,
             ]}
-            onPress={() => handleDayCardPress(selectedDay.value)}
-            onLongPress={() => onDayLongPress(selectedDay.value)}
-            delayLongPress={IS_ANDROID ? 220 : 320}
-            pressRetentionOffset={{ top: 28, left: 28, right: 28, bottom: 28 }}
-            hitSlop={{ top: 10, left: 10, right: 10, bottom: 10 }}
-            longPressHapticType="medium"
-            activeOpacity={0.9}
           >
             {selectedDayPendingCount > 0 ? (
               <View style={styles.dayCardPendingBadge}>
@@ -1267,7 +1406,7 @@ const AgendaDayPicker = React.memo(function AgendaDayPicker({
                 {tApp(appLanguage, 'agenda_selected_short')}
               </Text>
             </View>
-          </HapticTouchable>
+          </View>
         ) : null}
       </View>
     </View>
@@ -1438,6 +1577,18 @@ const getAppointmentUniquenessKey = (
   return [dateValue, item.ora, customerKey, serviceKey, operatorKey, durationKey, priceKey].join('|');
 };
 
+const getAppointmentUniquenessKeyIgnoringOperator = (
+  item: Pick<AppuntamentoItem, 'data' | 'ora' | 'cliente' | 'servizio' | 'durataMinuti' | 'prezzo'>,
+  fallbackDate: string
+) => {
+  const dateValue = item.data ?? fallbackDate;
+  const customerKey = item.cliente.trim().toLowerCase();
+  const serviceKey = item.servizio.trim().toLowerCase();
+  const durationKey = String(item.durataMinuti ?? '');
+  const priceKey = String(item.prezzo ?? '');
+  return [dateValue, item.ora, customerKey, serviceKey, durationKey, priceKey].join('|');
+};
+
 const dedupeAppointments = (items: AppuntamentoItem[], fallbackDate: string) => {
   const seenIds = new Set<string>();
   const seenKeys = new Set<string>();
@@ -1479,6 +1630,7 @@ export default function AgendaScreen() {
     setRichiestePrenotazione,
     availabilitySettings,
     setAvailabilitySettings,
+    updateAvailabilitySettingsPersisted,
     salonWorkspace,
     appLanguage,
     serviceCardColorOverrides,
@@ -2068,6 +2220,18 @@ const resetWeekDrag = useCallback(() => {
     [getTipoAppuntamento]
   );
 
+  const getAppointmentRequiredRoleLabel = useCallback(
+    (appointment: Pick<AppuntamentoItem, 'servizio' | 'mestiereRichiesto'>) =>
+      appointment.mestiereRichiesto?.trim() || getServiceRequiredRoleLabel(appointment.servizio),
+    [getServiceRequiredRoleLabel]
+  );
+
+  const getAppointmentRequiredRole = useCallback(
+    (appointment: Pick<AppuntamentoItem, 'servizio' | 'mestiereRichiesto'>) =>
+      normalizeRoleName(getAppointmentRequiredRoleLabel(appointment)),
+    [getAppointmentRequiredRoleLabel]
+  );
+
   const getServiceRequiredMachineryIds = useCallback(
     (serviceName: string) => {
       void serviceName;
@@ -2106,6 +2270,16 @@ const resetWeekDrag = useCallback(() => {
     [weekBaseSlotInterval, weekEndMinutes, weekStartMinutes]
   );
   const weekStartBoundaryLabel = useMemo(() => minutesToTime(weekStartMinutes), [weekStartMinutes]);
+  const weekEndBoundaryLabel = useMemo(() => minutesToTime(weekEndMinutes), [weekEndMinutes]);
+  const [weekPlannerNow, setWeekPlannerNow] = useState(() => new Date());
+
+  useEffect(() => {
+    const updateNow = () => setWeekPlannerNow(new Date());
+    updateNow();
+
+    const intervalId = setInterval(updateNow, 30 * 1000);
+    return () => clearInterval(intervalId);
+  }, []);
 
   const operatoriCompatibili = useMemo(
     () =>
@@ -2181,36 +2355,75 @@ const resetWeekDrag = useCallback(() => {
     selectedOperatorName?: string | null;
     useOperatorsOverride?: boolean;
   }) => {
+    const selectedOperatorIdValue = selectedOperatorId?.trim() ?? '';
+    const selectedSalonCapacityId = isSalonCapacityOperatorId(selectedOperatorIdValue)
+      ? selectedOperatorIdValue
+      : '';
+    const compatibleOperators =
+      operatori.length > 0 && doesServiceUseOperators(serviceName, servizi)
+        ? getEligibleOperatorsForService({
+            serviceName,
+            services: servizi,
+            operators: operatori,
+            appointmentDate,
+            settings: availabilitySettings,
+          })
+        : [];
     const usesOperatorsForAppointment =
-      useOperatorsOverride ??
-      (operatori.length > 0 && doesServiceUseOperators(serviceName, servizi));
+      useOperatorsOverride ?? (!selectedSalonCapacityId && compatibleOperators.length > 0);
+    const appointmentPool = [
+      ...appuntamenti,
+      ...richiestePrenotazione
+        .filter((item) => item.stato === 'In attesa')
+        .map((item) => ({
+          id: `pending-${item.id}`,
+          data: item.data,
+          ora: item.ora,
+          cliente: `${item.nome} ${item.cognome}`.trim(),
+          servizio: item.servizio,
+          prezzo: item.prezzo,
+          durataMinuti: item.durataMinuti,
+          operatoreId: item.operatoreId,
+          operatoreNome: item.operatoreNome,
+          macchinarioIds: item.macchinarioIds,
+          macchinarioNomi: item.macchinarioNomi,
+        })),
+    ];
 
-    if (!usesOperatorsForAppointment) {
-      return null;
+    if (selectedSalonCapacityId || !usesOperatorsForAppointment) {
+      const requestedSalonCapacityId = buildSalonCapacityOperatorId(serviceName, servizi);
+
+      return (
+        appointmentPool.find((item) => {
+          if ((item.data ?? getTodayDateString()) !== appointmentDate) return false;
+          if (doesAppointmentUseOperatorCapacity(item as AppuntamentoItem)) return false;
+
+          const existingSalonCapacityId =
+            item.operatoreId?.trim() && isSalonCapacityOperatorId(item.operatoreId)
+              ? item.operatoreId.trim()
+              : buildSalonCapacityOperatorId(item.servizio, servizi);
+          const targetSalonCapacityId = selectedSalonCapacityId || requestedSalonCapacityId;
+
+          if (existingSalonCapacityId !== targetSalonCapacityId) {
+            return false;
+          }
+
+          return doesTimeRangeConflictWithAppointment({
+            startTime,
+            durationMinutes: getServiceDuration(serviceName),
+            appointment: item,
+            services: servizi,
+            settings: availabilitySettings,
+          });
+        }) ?? null
+      );
     }
 
     return findConflictingAppointmentShared({
       appointmentDate,
       startTime,
       serviceName,
-      appointments: [
-        ...appuntamenti,
-        ...richiestePrenotazione
-          .filter((item) => item.stato === 'In attesa')
-          .map((item) => ({
-            id: `pending-${item.id}`,
-            data: item.data,
-            ora: item.ora,
-            cliente: `${item.nome} ${item.cognome}`.trim(),
-            servizio: item.servizio,
-            prezzo: item.prezzo,
-            durataMinuti: item.durataMinuti,
-            operatoreId: item.operatoreId,
-            operatoreNome: item.operatoreNome,
-            macchinarioIds: item.macchinarioIds,
-            macchinarioNomi: item.macchinarioNomi,
-          })),
-      ],
+      appointments: appointmentPool,
       services: servizi,
       operatorId: selectedOperatorId,
       operatorName: selectedOperatorName,
@@ -2220,22 +2433,29 @@ const resetWeekDrag = useCallback(() => {
 
   const appuntamentiNormalizzati = useMemo(
     () => {
+      const originalAppointmentsById = new Map(appuntamenti.map((item) => [item.id, item] as const));
       const resolvedAppointments = assignFallbackOperatorsToAppointments({
         appointments: appuntamenti,
         services: servizi,
         operators: operatori,
         settings: availabilitySettings,
+        preserveExplicitOperatorAssignments: true,
       }).map((item) => {
-        const resolvedOperatorId = item.operatoreId?.trim() ?? '';
-        const resolvedOperatorName = item.operatoreNome?.trim() ?? '';
-        const hasSalonCapacityMarker = isSalonCapacityOperatorId(resolvedOperatorId);
+        const originalAppointment = originalAppointmentsById.get(item.id) ?? item;
+        const originalOperatorId = originalAppointment.operatoreId?.trim() ?? '';
+        const originalOperatorName = originalAppointment.operatoreNome?.trim() ?? '';
+        const hasOriginalSalonCapacityMarker = isSalonCapacityOperatorId(originalOperatorId);
+        const hadExplicitOriginalOperator =
+          (!!originalOperatorId && !hasOriginalSalonCapacityMarker) || !!originalOperatorName;
 
         return {
           ...item,
           sourceBadge:
-            (!resolvedOperatorId && !resolvedOperatorName) || hasSalonCapacityMarker
+            (!originalOperatorId && !originalOperatorName) || hasOriginalSalonCapacityMarker
               ? ('salon' as const)
-              : ('operator' as const),
+              : hadExplicitOriginalOperator
+                ? ('operator' as const)
+                : ('salon' as const),
         };
       });
 
@@ -2398,8 +2618,23 @@ const resetWeekDrag = useCallback(() => {
         )
       )
     );
+    const realAppointmentKeysIgnoringOperator = new Set(
+      appuntamentiNormalizzati.map((item) =>
+        getAppointmentUniquenessKeyIgnoringOperator(
+          {
+            data: item.data,
+            ora: item.ora,
+            cliente: item.cliente,
+            servizio: item.servizio,
+            durataMinuti: item.durataMinuti,
+            prezzo: item.prezzo,
+          },
+          todayDate
+        )
+      )
+    );
 
-    const requestBlocksAsAppointments = richiestePrenotazione
+      const requestBlocksAsAppointments = richiestePrenotazione
       .filter((item) => item.stato === 'In attesa' || item.stato === 'Accettata')
       .map((item) => {
         const materializedAppointment = {
@@ -2427,26 +2662,8 @@ const resetWeekDrag = useCallback(() => {
         return {
           item,
           materializedAppointment,
-          uniquenessKey: getAppointmentUniquenessKey(
-            {
-              data: materializedAppointment.data,
-              ora: materializedAppointment.ora,
-              cliente: materializedAppointment.cliente,
-              servizio: materializedAppointment.servizio,
-              operatoreId: materializedAppointment.operatoreId,
-              durataMinuti: materializedAppointment.durataMinuti,
-              prezzo: materializedAppointment.prezzo,
-            },
-            todayDate
-          ),
+          status: item.stato,
         };
-      })
-      .filter(({ item, uniquenessKey }) => {
-        if (item.stato === 'In attesa') {
-          return true;
-        }
-
-        return !realAppointmentKeys.has(uniquenessKey);
       });
 
     const resolvedRequestBlocks = assignFallbackOperatorsToAppointments({
@@ -2457,6 +2674,7 @@ const resetWeekDrag = useCallback(() => {
       services: servizi,
       operators: operatori,
       settings: availabilitySettings,
+      preserveExplicitOperatorAssignments: true,
     });
 
     const resolvedRequestBlockMap = new Map(
@@ -2465,21 +2683,64 @@ const resetWeekDrag = useCallback(() => {
         .map((item) => [item.id, item])
     );
 
-    const requestBlocksWithResolvedLanes = requestBlocksAsAppointments.map(({ materializedAppointment }) => {
-      const resolvedBlock =
-        resolvedRequestBlockMap.get(materializedAppointment.id) ?? materializedAppointment;
-      const resolvedOperatorId = resolvedBlock.operatoreId?.trim() ?? '';
-      const resolvedOperatorName = resolvedBlock.operatoreNome?.trim() ?? '';
-      const hasSalonCapacityMarker = isSalonCapacityOperatorId(resolvedOperatorId);
+    const requestBlocksWithResolvedLanes = requestBlocksAsAppointments
+      .map(({ materializedAppointment, status }) => {
+        const resolvedBlock =
+          resolvedRequestBlockMap.get(materializedAppointment.id) ?? materializedAppointment;
+        const originalOperatorId = materializedAppointment.operatoreId?.trim() ?? '';
+        const originalOperatorName = materializedAppointment.operatoreNome?.trim() ?? '';
+        const hasOriginalSalonCapacityMarker = isSalonCapacityOperatorId(originalOperatorId);
+        const hadExplicitOriginalOperator =
+          (!!originalOperatorId && !hasOriginalSalonCapacityMarker) || !!originalOperatorName;
 
-      return {
-        ...resolvedBlock,
-        sourceBadge:
-          (!resolvedOperatorId && !resolvedOperatorName) || hasSalonCapacityMarker
-            ? ('salon' as const)
-            : ('operator' as const),
-      };
-    });
+        return {
+          status,
+          resolvedBlock: {
+            ...resolvedBlock,
+            sourceBadge:
+              (!originalOperatorId && !originalOperatorName) || hasOriginalSalonCapacityMarker
+                ? ('salon' as const)
+                : hadExplicitOriginalOperator
+                  ? ('operator' as const)
+                  : ('salon' as const),
+          },
+        };
+      })
+      .filter(({ status, resolvedBlock }) => {
+        if (status === 'In attesa') {
+          return true;
+        }
+
+        const uniquenessKey = getAppointmentUniquenessKey(
+          {
+            data: resolvedBlock.data,
+            ora: resolvedBlock.ora,
+            cliente: resolvedBlock.cliente,
+            servizio: resolvedBlock.servizio,
+            operatoreId: resolvedBlock.operatoreId,
+            durataMinuti: resolvedBlock.durataMinuti,
+            prezzo: resolvedBlock.prezzo,
+          },
+          todayDate
+        );
+        const uniquenessKeyIgnoringOperator = getAppointmentUniquenessKeyIgnoringOperator(
+          {
+            data: resolvedBlock.data,
+            ora: resolvedBlock.ora,
+            cliente: resolvedBlock.cliente,
+            servizio: resolvedBlock.servizio,
+            durataMinuti: resolvedBlock.durataMinuti,
+            prezzo: resolvedBlock.prezzo,
+          },
+          todayDate
+        );
+
+        return (
+          !realAppointmentKeys.has(uniquenessKey) &&
+          !realAppointmentKeysIgnoringOperator.has(uniquenessKeyIgnoringOperator)
+        );
+      })
+      .map(({ resolvedBlock }) => resolvedBlock);
 
     return [...appuntamentiNormalizzati, ...requestBlocksWithResolvedLanes].reduce<
       Record<string, AppuntamentoItem[]>
@@ -2563,7 +2824,7 @@ const resetWeekDrag = useCallback(() => {
 
   const getWeekOperatorLaneKey = useCallback((item: AppuntamentoItem) => {
     if (item.sourceBadge === 'salon') {
-      return item.operatoreId?.trim() || buildSalonCapacityOperatorId(item.servizio, servizi);
+      return buildSalonCapacityOperatorId(item.servizio, servizi);
     }
     const operatorIdKey = item.operatoreId?.trim();
     if (operatorIdKey) {
@@ -2594,32 +2855,54 @@ const resetWeekDrag = useCallback(() => {
     [doesServiceUseOperators, servizi]
   );
 
-  const weekOperatorLaneLayoutByDate = useMemo(() => {
+  const buildWeekOperatorLaneLayoutForDates = useCallback((days: GiornoPicker[]) => {
+    const activeServiceRoleKeys = Array.from(
+      new Set(
+        servizi
+          .map((item) => normalizeRoleName(item.mestiereRichiesto ?? ''))
+          .filter(Boolean)
+      )
+    );
+    const hasMultipleActiveServiceRoles = activeServiceRoleKeys.length > 1;
+    const activeServiceRoleKeySet = new Set(activeServiceRoleKeys);
     const orderedSalonCapacityKeys = Array.from(
       new Set(
         servizi
-          .map((item) => {
-            const normalizedRole = normalizeRoleName(item.mestiereRichiesto ?? '');
-            if (normalizedRole && hasConfiguredAgendaOperatorsForRole(normalizedRole, operatori)) {
-              return '';
-            }
-            return normalizedRole || buildSalonCapacityOperatorId(item.nome, servizi);
-          })
+          .map((item) => buildSalonCapacityOperatorId(item.nome, servizi))
           .filter(Boolean)
       )
     );
     const salonCapacityOrder = new Map(
       orderedSalonCapacityKeys.map((key, index) => [key, index] as const)
     );
+    const salonCapacityMetaByKey = new Map(
+      orderedSalonCapacityKeys.map((key) => {
+        const matchedService = servizi.find(
+          (item) => buildSalonCapacityOperatorId(item.nome, servizi) === key
+        );
+
+        return [
+          key,
+          matchedService?.mestiereRichiesto?.trim() ||
+            matchedService?.nome?.trim() ||
+            'Corsia salone',
+        ] as const;
+      })
+    );
     const salonRolePriority = new Map(
       SALON_LANE_ROLE_PRIORITY.map((role, index) => [role, index] as const)
     );
 
-    return weekDates.reduce<
+    return days.reduce<
       Record<
         string,
         {
-          lanes: Array<{ key: string; label: string; operatorId?: string | null }>;
+          lanes: Array<{
+            key: string;
+            label: string;
+            operatorId?: string | null;
+            metaLabel?: string;
+          }>;
           appointmentLaneKeys: Record<string, string>;
         }
       >
@@ -2635,6 +2918,7 @@ const resetWeekDrag = useCallback(() => {
           key: string;
           label: string;
           operatorId?: string | null;
+          metaLabel?: string;
           firstTime: string;
         }
       >();
@@ -2658,27 +2942,158 @@ const resetWeekDrag = useCallback(() => {
               key: laneKey,
               label: firstOperatorWord.toUpperCase(),
               operatorId: item.operatoreId?.trim() || null,
+              metaLabel: getAppointmentRequiredRole(item) || 'Operatore',
               firstTime: item.ora,
             });
           }
         });
 
-      operatori
+      const availableOperatorsForDay = operatori
         .filter((item) => isOperatorAvailableOnDate(item, day.value, availabilitySettings))
-        .forEach((item) => {
-          const laneKey = `operator-id:${item.id}`;
-          if (operatorLaneMap.has(laneKey)) {
-            return;
-          }
+        .filter((item) => {
+          const normalizedRole = normalizeRoleName(item.mestiere ?? '');
+          return !normalizedRole || activeServiceRoleKeySet.has(normalizedRole);
+        });
+      const activeOperatorCountByRole = new Map<string, number>();
+      const activeOperatorIdSet = new Set<string>();
 
+      availableOperatorsForDay.forEach((item) => {
+        const normalizedRole = normalizeRoleName(item.mestiere ?? '');
+        activeOperatorIdSet.add(item.id.trim());
+        if (!normalizedRole) {
+          return;
+        }
+
+        activeOperatorCountByRole.set(
+          normalizedRole,
+          (activeOperatorCountByRole.get(normalizedRole) ?? 0) + 1
+        );
+      });
+
+      availableOperatorsForDay.forEach((item) => {
+          const laneKey = `operator-id:${item.id}`;
           const firstOperatorWord = item.nome.trim().split(/\s+/).filter(Boolean)[0] || item.nome.trim();
+          const normalizedOperatorLaneLabelKey = normalizeAgendaLaneOperatorLabelKey(item.nome);
+          const normalizedOperatorRole = normalizeRoleName(item.mestiere ?? '');
+          const canonicalExistingLane = operatorLaneMap.get(laneKey) ?? null;
+          const matchingHistoricalLanes = Array.from(operatorLaneMap.values()).filter((lane) => {
+            const normalizedLaneLabelKey = normalizeAgendaLaneOperatorLabelKey(lane.label);
+            const normalizedLaneRole = normalizeRoleName(lane.metaLabel ?? '');
+
+            if (!normalizedOperatorLaneLabelKey || normalizedLaneLabelKey !== normalizedOperatorLaneLabelKey) {
+              return false;
+            }
+
+            if (!normalizedOperatorRole || !normalizedLaneRole) {
+              return true;
+            }
+
+            return normalizedLaneRole === normalizedOperatorRole;
+          });
+
+          const duplicateHistoricalLanes = matchingHistoricalLanes.filter((lane) => lane.key !== laneKey);
+          let mergedFirstTime = canonicalExistingLane?.firstTime ?? '99:99';
+
+          duplicateHistoricalLanes.forEach((lane) => {
+            if (lane.firstTime.localeCompare(mergedFirstTime) < 0) {
+              mergedFirstTime = lane.firstTime;
+            }
+
+            Object.keys(appointmentLaneKeys).forEach((appointmentId) => {
+              if (appointmentLaneKeys[appointmentId] === lane.key) {
+                appointmentLaneKeys[appointmentId] = laneKey;
+              }
+            });
+
+            operatorLaneMap.delete(lane.key);
+          });
+
           operatorLaneMap.set(laneKey, {
             key: laneKey,
             label: firstOperatorWord.toUpperCase(),
             operatorId: item.id,
-            firstTime: '99:99',
+            metaLabel:
+              item.mestiere?.trim() ||
+              canonicalExistingLane?.metaLabel ||
+              duplicateHistoricalLanes[0]?.metaLabel ||
+              'Operatore',
+            firstTime: mergedFirstTime,
           });
         });
+
+      const singleOperatorLaneByRole = new Map<
+        string,
+        {
+          laneKey: string;
+          firstTime: string;
+        }
+      >();
+
+      Array.from(operatorLaneMap.values()).forEach((lane) => {
+        const normalizedRole = normalizeRoleName(lane.metaLabel ?? '');
+        const normalizedOperatorId = lane.operatorId?.trim() ?? '';
+
+        if (!normalizedRole || !normalizedOperatorId || isSalonCapacityOperatorId(normalizedOperatorId)) {
+          return;
+        }
+
+        const sameRoleLanes = Array.from(operatorLaneMap.values()).filter((candidate) => {
+          const candidateRole = normalizeRoleName(candidate.metaLabel ?? '');
+          const candidateOperatorId = candidate.operatorId?.trim() ?? '';
+          return (
+            candidateRole === normalizedRole &&
+            !!candidateOperatorId &&
+            !isSalonCapacityOperatorId(candidateOperatorId)
+          );
+        });
+
+        if (sameRoleLanes.length !== 1) {
+          return;
+        }
+
+        singleOperatorLaneByRole.set(normalizedRole, {
+          laneKey: lane.key,
+          firstTime: lane.firstTime,
+        });
+      });
+
+      const hasSingleRealOperatorLaneForRole = (roleLabel?: string | null) => {
+        const normalizedRole = normalizeRoleName(roleLabel ?? '');
+        if (!normalizedRole) {
+          return false;
+        }
+
+        return singleOperatorLaneByRole.has(normalizedRole);
+      };
+      const hasAnyActiveOperatorLaneForRole = (roleLabel?: string | null) => {
+        const normalizedRole = normalizeRoleName(roleLabel ?? '');
+        if (!normalizedRole) {
+          return false;
+        }
+
+        return (activeOperatorCountByRole.get(normalizedRole) ?? 0) > 0;
+      };
+      const getActiveOperatorLanesForRole = (roleLabel?: string | null) => {
+        const normalizedRole = normalizeRoleName(roleLabel ?? '');
+        if (!normalizedRole) {
+          return [] as Array<{
+            key: string;
+            label: string;
+            operatorId?: string | null;
+            metaLabel?: string;
+            firstTime: string;
+          }>;
+        }
+
+        return Array.from(operatorLaneMap.values()).filter((lane) => {
+          const normalizedOperatorId = lane.operatorId?.trim() ?? '';
+          if (!normalizedOperatorId || !activeOperatorIdSet.has(normalizedOperatorId)) {
+            return false;
+          }
+
+          return normalizeRoleName(lane.metaLabel ?? '') === normalizedRole;
+        });
+      };
 
       const salonAppointments = laneSource
         .filter((item) => item.sourceBadge === 'salon')
@@ -2693,7 +3108,7 @@ const resetWeekDrag = useCallback(() => {
         {
           key: string;
           label: string;
-          operatorId: null;
+          operatorId: string | null;
           capacityKey: string;
           capacityLabel: string;
           firstTime: string;
@@ -2704,11 +3119,54 @@ const resetWeekDrag = useCallback(() => {
       salonAppointments.forEach((item) => {
         const appointmentStartMinutes = timeToMinutes(item.ora);
         const appointmentEndMinutes = timeToMinutes(getAppointmentEndTime(item));
-        const capacityKey = item.operatoreId?.trim() || buildSalonCapacityOperatorId(item.servizio, servizi);
+        const capacityKey = buildSalonCapacityOperatorId(item.servizio, servizi);
         const capacityLabel =
-          getServiceRequiredRole(item.servizio) ||
+          getAppointmentRequiredRole(item) ||
           item.servizio.trim().toLowerCase() ||
           capacityKey;
+        const normalizedCapacityRole = normalizeRoleName(capacityLabel);
+        const singleOperatorLane = singleOperatorLaneByRole.get(
+          normalizedCapacityRole
+        );
+        const resolvedActiveOperatorId = item.operatoreId?.trim() ?? '';
+        const activeRoleOperatorLanes = getActiveOperatorLanesForRole(capacityLabel);
+
+        if (activeRoleOperatorLanes.length > 0) {
+          const resolvedOperatorLane =
+            resolvedActiveOperatorId && !isSalonCapacityOperatorId(resolvedActiveOperatorId)
+              ? activeRoleOperatorLanes.find(
+                  (lane) => (lane.operatorId?.trim() ?? '') === resolvedActiveOperatorId
+                ) ?? null
+              : null;
+          const fallbackSingleActiveLane =
+            activeRoleOperatorLanes.length === 1 ? activeRoleOperatorLanes[0] : null;
+          const targetActiveLane = resolvedOperatorLane ?? fallbackSingleActiveLane;
+
+          if (targetActiveLane) {
+            appointmentLaneKeys[item.id] = targetActiveLane.key;
+            const existingLane = operatorLaneMap.get(targetActiveLane.key);
+            if (existingLane && item.ora.localeCompare(existingLane.firstTime) < 0) {
+              operatorLaneMap.set(targetActiveLane.key, {
+                ...existingLane,
+                firstTime: item.ora,
+              });
+            }
+            return;
+          }
+        }
+
+        if (singleOperatorLane) {
+          appointmentLaneKeys[item.id] = singleOperatorLane.laneKey;
+          const existingLane = operatorLaneMap.get(singleOperatorLane.laneKey);
+          if (existingLane && item.ora.localeCompare(existingLane.firstTime) < 0) {
+            operatorLaneMap.set(singleOperatorLane.laneKey, {
+              ...existingLane,
+              firstTime: item.ora,
+            });
+          }
+          return;
+        }
+
         const reusableLane = Array.from(salonLaneMap.values())
           .sort((first, second) => first.key.localeCompare(second.key))
           .find(
@@ -2726,18 +3184,51 @@ const resetWeekDrag = useCallback(() => {
         }
 
         const laneIndex = salonLaneMap.size;
-        const laneKey = `salon-lane:${capacityKey}:${laneIndex}`;
+        const laneKey = hasAnyActiveOperatorLaneForRole(capacityLabel)
+          ? `orphan-salon-lane:${capacityKey}:${laneIndex}`
+          : `salon-lane:${capacityKey}:${laneIndex}`;
         appointmentLaneKeys[item.id] = laneKey;
         salonLaneMap.set(laneKey, {
           key: laneKey,
           label: 'SAL.',
-          operatorId: null,
+          operatorId: capacityKey,
           capacityKey,
           capacityLabel,
           firstTime: item.ora,
           lastEndMinutes: appointmentEndMinutes,
         });
       });
+
+      if (hasMultipleActiveServiceRoles) {
+        orderedSalonCapacityKeys.forEach((capacityKey) => {
+          const capacityLabel = salonCapacityMetaByKey.get(capacityKey) || 'Corsia salone';
+          if (
+            hasSingleRealOperatorLaneForRole(capacityLabel) ||
+            hasAnyActiveOperatorLaneForRole(capacityLabel)
+          ) {
+            return;
+          }
+
+          const alreadyPresent = Array.from(salonLaneMap.values()).some(
+            (lane) => lane.capacityKey === capacityKey
+          );
+
+          if (alreadyPresent) {
+            return;
+          }
+
+          const laneIndex = salonLaneMap.size;
+          salonLaneMap.set(`salon-lane:${capacityKey}:${laneIndex}`, {
+            key: `salon-lane:${capacityKey}:${laneIndex}`,
+            label: 'SAL.',
+            operatorId: capacityKey,
+            capacityKey,
+            capacityLabel,
+            firstTime: '99:99',
+            lastEndMinutes: -1,
+          });
+        });
+      }
 
       const lanes = [
         ...Array.from(operatorLaneMap.values()),
@@ -2747,14 +3238,49 @@ const resetWeekDrag = useCallback(() => {
           label,
           operatorId,
           firstTime,
-          capacityLabel,
+          metaLabel: capacityLabel,
         })
         ),
         
       ]
         .sort((first, second) => {
-          const firstIsSalonLane = first.key.startsWith('salon-lane:');
-          const secondIsSalonLane = second.key.startsWith('salon-lane:');
+          const firstCapacityLabel =
+            'metaLabel' in first && typeof first.metaLabel === 'string'
+              ? first.metaLabel
+              : '';
+          const secondCapacityLabel =
+            'metaLabel' in second && typeof second.metaLabel === 'string'
+              ? second.metaLabel
+              : '';
+          const firstRoleKey = buildWeekLaneRoleSortKey({
+            operatorId: first.operatorId,
+            operatorName: first.label,
+            capacityLabel: firstCapacityLabel,
+            operators: operatori,
+          });
+          const secondRoleKey = buildWeekLaneRoleSortKey({
+            operatorId: second.operatorId,
+            operatorName: second.label,
+            capacityLabel: secondCapacityLabel,
+            operators: operatori,
+          });
+          const firstRolePriority =
+            salonRolePriority.get(firstRoleKey) ?? Number.MAX_SAFE_INTEGER;
+          const secondRolePriority =
+            salonRolePriority.get(secondRoleKey) ?? Number.MAX_SAFE_INTEGER;
+
+          if (firstRolePriority !== secondRolePriority) {
+            return firstRolePriority - secondRolePriority;
+          }
+
+          if (firstRoleKey !== secondRoleKey) {
+            return firstRoleKey.localeCompare(secondRoleKey);
+          }
+
+          const firstIsSalonLane =
+            first.key.startsWith('salon-lane:') || first.key.startsWith('orphan-salon-lane:');
+          const secondIsSalonLane =
+            second.key.startsWith('salon-lane:') || second.key.startsWith('orphan-salon-lane:');
 
           if (firstIsSalonLane && secondIsSalonLane) {
             const firstCapacityKey = extractSalonLaneCapacityKey(first.key) || first.key;
@@ -2770,14 +3296,6 @@ const resetWeekDrag = useCallback(() => {
               return firstConfiguredOrder - secondConfiguredOrder;
             }
 
-            const firstCapacityLabel =
-              'capacityLabel' in first && typeof first.capacityLabel === 'string'
-                ? first.capacityLabel
-                : '';
-            const secondCapacityLabel =
-              'capacityLabel' in second && typeof second.capacityLabel === 'string'
-                ? second.capacityLabel
-                : '';
             const firstRolePriority =
               salonRolePriority.get(normalizeRoleName(firstCapacityLabel)) ?? Number.MAX_SAFE_INTEGER;
             const secondRolePriority =
@@ -2795,19 +3313,20 @@ const resetWeekDrag = useCallback(() => {
           if (timeCompare !== 0) return timeCompare;
           return first.label.localeCompare(second.label);
         })
-        .map(({ key, label, operatorId }) => ({ key, label, operatorId }));
+        .map(({ key, label, operatorId, metaLabel }) => ({ key, label, operatorId, metaLabel }));
 
-      const lanesWithAppointments = new Set(Object.values(appointmentLaneKeys));
       const shouldAppendExtraOpenLane =
-        lanes.length >= 1 &&
-        lanes.every((lane) => lanesWithAppointments.has(lane.key)) &&
-        (operatorLaneMap.size > 1 || orderedSalonCapacityKeys.length > 1 || lanes.length > 1);
+        Array.from(salonLaneMap.values()).some((lane) => !lane.key.startsWith('orphan-salon-lane:')) &&
+        (lanes.length >= 1 ||
+          availableOperatorsForDay.length > 0 ||
+          activeServiceRoleKeySet.size > 0);
 
       if (shouldAppendExtraOpenLane) {
         lanes.push({
           key: `salon-lane:auto-${lanes.length}`,
           label: 'SAL.',
           operatorId: null,
+          metaLabel: 'Corsia salone',
         });
       }
 
@@ -2821,11 +3340,101 @@ const resetWeekDrag = useCallback(() => {
     availabilitySettings,
     blockingAppointmentsByDate,
     getAppointmentEndTime,
+    getAppointmentRequiredRole,
     getWeekOperatorLaneKey,
     operatori,
     servizi,
-    weekDates,
   ]);
+
+  const weekManualVisibleDays = useMemo(
+    () => Math.max(1, Math.min(7, availabilitySettings.weekVisibleDays || 7)),
+    [availabilitySettings.weekVisibleDays]
+  );
+
+  const weekAutoEvaluationDates = useMemo(() => {
+    return buildPlannerDateRange(data, weekManualVisibleDays, appLanguage);
+  }, [appLanguage, data, weekManualVisibleDays]);
+
+  const weekOperatorLaneLayoutByDate = useMemo(() => {
+    const uniqueDates = Array.from(
+      new Map(
+        [...weekDates, ...weekAutoEvaluationDates].map((day) => [day.value, day] as const)
+      ).values()
+    );
+
+    return buildWeekOperatorLaneLayoutForDates(uniqueDates);
+  }, [buildWeekOperatorLaneLayoutForDates, weekAutoEvaluationDates, weekDates]);
+
+  const getWeekPlannerLaneDisplayInfo = useCallback(
+    (lane: { key: string; label: string; operatorId?: string | null; metaLabel?: string }) => {
+      const normalizedOperatorId = lane.operatorId?.trim() ?? '';
+
+      if (normalizedOperatorId && !isSalonCapacityOperatorId(normalizedOperatorId)) {
+        const normalizedLaneName = normalizeAgendaLaneOperatorLabelKey(lane.label);
+        const normalizedLaneRole = normalizeRoleName(lane.metaLabel ?? '');
+        const matchedOperator =
+          operatori.find((item) => item.id.trim() === normalizedOperatorId) ??
+          operatori.find((item) => {
+            if (!normalizedLaneName) return false;
+            if (normalizeAgendaLaneOperatorLabelKey(item.nome) !== normalizedLaneName) return false;
+            if (!normalizedLaneRole) return true;
+            return normalizeRoleName(item.mestiere ?? '') === normalizedLaneRole;
+          }) ??
+          null;
+
+        return {
+          label: matchedOperator?.nome?.trim() || lane.label || 'Operatore',
+          meta: matchedOperator?.mestiere?.trim() || lane.metaLabel || 'Operatore',
+          isSalonLane: false,
+        };
+      }
+
+      const capacityKey =
+        extractSalonLaneCapacityKey(lane.key) ||
+        (normalizedOperatorId && isSalonCapacityOperatorId(normalizedOperatorId)
+          ? normalizedOperatorId
+          : '');
+      const matchedService = capacityKey
+        ? servizi.find((item) => buildSalonCapacityOperatorId(item.nome, servizi) === capacityKey)
+        : null;
+      const salonRoleLabel =
+        matchedService?.mestiereRichiesto?.trim() ||
+        matchedService?.nome?.trim() ||
+        'Corsia salone';
+
+      return {
+        label: lane.label || 'SAL.',
+        meta: formatAgendaRoleLabel(salonRoleLabel),
+        isSalonLane: true,
+      };
+    },
+    [operatori, servizi]
+  );
+
+  const isWeekPlannerHistoricalOperatorLaneDisabled = useCallback(
+    (lane: { key: string; label: string; operatorId?: string | null; metaLabel?: string }) => {
+      const normalizedOperatorId = lane.operatorId?.trim() ?? '';
+      if (!normalizedOperatorId || isSalonCapacityOperatorId(normalizedOperatorId)) {
+        return false;
+      }
+
+      const normalizedLaneName = normalizeOperatorNameKey(lane.label);
+      const normalizedLaneLabelKey = normalizeAgendaLaneOperatorLabelKey(lane.label);
+      const normalizedLaneRole = normalizeRoleName(lane.metaLabel ?? '');
+
+      return !operatori.some((item) => {
+        if (item.id.trim() === normalizedOperatorId) {
+          return true;
+        }
+
+        if (!normalizedLaneLabelKey && !normalizedLaneName) return false;
+        if (normalizeAgendaLaneOperatorLabelKey(item.nome) !== normalizedLaneLabelKey) return false;
+        if (!normalizedLaneRole) return true;
+        return normalizeRoleName(item.mestiere ?? '') === normalizedLaneRole;
+      });
+    },
+    [operatori]
+  );
 
   const weekDenseOperatorModeByDate = useMemo(
     () =>
@@ -3144,11 +3753,11 @@ const resetWeekDrag = useCallback(() => {
 
   const weekMaxLaneCount = useMemo(
     () =>
-      weekDates.reduce((maxCount, day) => {
+      weekAutoEvaluationDates.reduce((maxCount, day) => {
         const laneCount = weekOperatorLaneLayoutByDate[day.value]?.lanes.length ?? 0;
         return Math.max(maxCount, laneCount);
       }, 0),
-    [weekDates, weekOperatorLaneLayoutByDate]
+    [weekAutoEvaluationDates, weekOperatorLaneLayoutByDate]
   );
 
   const weekAutoPlannerDays = useMemo(() => {
@@ -3175,9 +3784,13 @@ const resetWeekDrag = useCallback(() => {
   }, [weekMaxLaneCount]);
 
   const weekEffectiveVisibleDays = useMemo(() => {
-    const manualDays = Math.max(1, Math.min(7, availabilitySettings.weekVisibleDays || 7));
+    const manualDays = weekManualVisibleDays;
     const autoDays =
       weekAutoPlannerDays != null ? Math.max(1, Math.min(manualDays, weekAutoPlannerDays)) : manualDays;
+
+    if (Platform.OS !== 'web') {
+      return autoDays;
+    }
 
     if (autoDays <= 1 || plannerContainerWidth <= 0) {
       return autoDays;
@@ -3201,30 +3814,47 @@ const resetWeekDrag = useCallback(() => {
 
     return guardedDays;
   }, [
-    availabilitySettings.weekVisibleDays,
     plannerContainerWidth,
+    weekManualVisibleDays,
     weekAutoPlannerDays,
     weekMinimumSafeColumnWidth,
   ]);
 
+  useEffect(() => {
+    weekHorizontalScrollPosRef.current = 0;
+    weekHorizontalScrollLockXRef.current = 0;
+    setIsWeekPlannerHorizontalScrolling(false);
+
+    requestAnimationFrame(() => {
+      weekPlannerHorizontalRef.current?.scrollTo?.({ x: 0, animated: false });
+      requestAnimationFrame(() => {
+        updateWeekPlannerTableOrigin();
+      });
+    });
+  }, [data, updateWeekPlannerTableOrigin, weekEffectiveVisibleDays]);
+
   const weekPlannerDaysBadgeLabel = useMemo(() => {
-    if (weekAutoPlannerDays != null) {
+    const shouldShowAutoBadge =
+      Platform.OS === 'web'
+        ? weekEffectiveVisibleDays !== weekManualVisibleDays
+        : weekAutoPlannerDays != null;
+
+    if (shouldShowAutoBadge) {
       return `${weekEffectiveVisibleDays}g auto`;
     }
 
     return `${weekEffectiveVisibleDays}g`;
   }, [
-    weekAutoPlannerDays,
     weekEffectiveVisibleDays,
+    weekManualVisibleDays,
+    weekAutoPlannerDays,
   ]);
 
   const weekVisibleDates = useMemo(
     () => {
       const desiredDays = weekEffectiveVisibleDays;
       const windowStartDate = desiredDays === 7 ? weekStart : data;
-      return Array.from({ length: desiredDays }, (_, offset) =>
-        buildGiornoPicker(addDaysToIso(windowStartDate, offset), appLanguage)
-      );
+      return buildPlannerDateRange(windowStartDate, desiredDays, appLanguage);
     },
     [
       appLanguage,
@@ -3232,6 +3862,19 @@ const resetWeekDrag = useCallback(() => {
       weekEffectiveVisibleDays,
       weekStart,
     ]
+  );
+
+  const weekPlannerHasLaneHeaders = useMemo(
+    () =>
+      weekVisibleDates.some(
+        (day) => (weekOperatorLaneLayoutByDate[day.value]?.lanes.length ?? 0) >= 2
+      ),
+    [weekOperatorLaneLayoutByDate, weekVisibleDates]
+  );
+
+  const weekPlannerShouldReserveLaneHeaderSpace = useMemo(
+    () => weekVisibleDates.length >= 2 && weekPlannerHasLaneHeaders,
+    [weekPlannerHasLaneHeaders, weekVisibleDates.length]
   );
 
   const weekRangeLabel = useMemo(() => {
@@ -3257,9 +3900,101 @@ const resetWeekDrag = useCallback(() => {
     return Math.max(1, dynamicWidth);
   }, [plannerContainerWidth, weekVisibleDates.length]);
 
+  const weekDayColumnWidthsByDate = useMemo(() => {
+    const widths: Record<string, number> = {};
+
+    weekVisibleDates.forEach((day) => {
+      const laneCount = weekOperatorLaneLayoutByDate[day.value]?.lanes.length ?? 0;
+      const useOperatorLaneMode = laneCount >= 2;
+      const operatorLaneGap = useOperatorLaneMode ? WEEK_PLANNER_MIN_OPERATOR_LANE_GAP : 0;
+      const operatorLaneWidth = useOperatorLaneMode
+        ? Math.max(
+            WEEK_PLANNER_MIN_OPERATOR_LANE_WIDTH,
+            (weekVisibleColWidth - operatorLaneGap * (laneCount - 1)) / laneCount
+          )
+        : weekVisibleColWidth;
+
+      widths[day.value] = useOperatorLaneMode
+        ? Math.max(
+            weekVisibleColWidth,
+            laneCount * operatorLaneWidth + Math.max(0, laneCount - 1) * operatorLaneGap
+          )
+        : weekVisibleColWidth;
+    });
+
+    return widths;
+  }, [weekOperatorLaneLayoutByDate, weekVisibleColWidth, weekVisibleDates]);
+
+  const weekPlannerHasHorizontalOverflow = useMemo(() => {
+    if (plannerContainerWidth <= 0 || weekVisibleDates.length === 0) return false;
+
+    const totalGridWidth = weekVisibleDates.reduce((total, day, index) => {
+      const dayWidth = weekDayColumnWidthsByDate[day.value] ?? weekVisibleColWidth;
+      const gap = index === weekVisibleDates.length - 1 ? 0 : WEEK_PLANNER_COLUMN_GAP;
+      return total + dayWidth + gap;
+    }, 0);
+
+    const availableGridWidth =
+      plannerContainerWidth +
+      WEEK_PLANNER_EDGE_BLEED_LEFT +
+      WEEK_PLANNER_EDGE_BLEED_RIGHT -
+      WEEK_PLANNER_TIME_COL_TOTAL -
+      WEEK_PLANNER_RIGHT_CLIP_GUARD;
+
+    return totalGridWidth > availableGridWidth + 6;
+  }, [
+    plannerContainerWidth,
+    weekDayColumnWidthsByDate,
+    weekVisibleColWidth,
+    weekVisibleDates,
+  ]);
+
   React.useEffect(() => {
     weekVisibleColWidthRef.current = weekVisibleColWidth;
   }, [weekVisibleColWidth]);
+
+  const weekPlannerCurrentTimeIndicator = useMemo(() => {
+    const currentDateIso = [
+      weekPlannerNow.getFullYear(),
+      String(weekPlannerNow.getMonth() + 1).padStart(2, '0'),
+      String(weekPlannerNow.getDate()).padStart(2, '0'),
+    ].join('-');
+
+    const currentDayIndex = weekVisibleDates.findIndex((day) => day.value === currentDateIso);
+    if (currentDayIndex < 0) return null;
+
+    const minutesNow = weekPlannerNow.getHours() * 60 + weekPlannerNow.getMinutes();
+    if (minutesNow < weekStartMinutes || minutesNow > weekEndMinutes) return null;
+
+    const dayAvailability = getDateAvailabilityInfo(availabilitySettings, currentDateIso);
+    if (dayAvailability.closed) return null;
+
+    const slotMinutes = weekTimeSlots.map((slot) => timeToMinutes(slot));
+    if (slotMinutes.length === 0) return null;
+
+    const rowStep = WEEK_PLANNER_ROW_HEIGHT + WEEK_PLANNER_ROW_GAP;
+    const weekPlannerTimeGridStartOffset =
+      WEEK_PLANNER_DAY_HEADER_TOTAL_HEIGHT +
+      (weekPlannerHasLaneHeaders ? WEEK_PLANNER_LANE_HEADER_HEIGHT : 0);
+    const minutesFromStart = Math.max(0, minutesNow - weekStartMinutes);
+    const totalProgress = minutesFromStart / Math.max(1, weekBaseSlotInterval);
+    const topOffset = weekPlannerTimeGridStartOffset + totalProgress * rowStep - 3;
+    return {
+      top: topOffset,
+      timeLabel: `${String(weekPlannerNow.getHours()).padStart(2, '0')}:${String(
+        weekPlannerNow.getMinutes()
+      ).padStart(2, '0')}`,
+    };
+  }, [
+    availabilitySettings,
+    weekBaseSlotInterval,
+    weekEndMinutes,
+    weekPlannerHasLaneHeaders,
+    weekPlannerNow,
+    weekStartMinutes,
+    weekVisibleDates,
+    weekTimeSlots,
+  ]);
 
   const agendaViewCards = useMemo(
     () => [
@@ -3403,6 +4138,11 @@ const resetWeekDrag = useCallback(() => {
       const appointmentsForDate = blockingAppointmentsByDate[dateValue] ?? [];
       const serviceStart = timeToMinutes(startTime);
       const serviceEnd = serviceStart + getServiceDuration(serviceName);
+      const selectedOperator = selectedOperatorId?.trim() ?? '';
+      const selectedSalonCapacityId = isSalonCapacityOperatorId(selectedOperator)
+        ? selectedOperator
+        : '';
+      const requestedSalonCapacityId = buildSalonCapacityOperatorId(serviceName, servizi);
       const overlappingAppointments = appointmentsForDate.filter((item) => {
         const existingStart = timeToMinutes(item.ora);
         const existingEnd =
@@ -3440,31 +4180,56 @@ const resetWeekDrag = useCallback(() => {
         }
       }
 
+      if (selectedSalonCapacityId && selectedSalonCapacityId !== requestedSalonCapacityId) {
+        return 0;
+      }
+
+      const compatibleOperators =
+        operatori.length > 0 && doesServiceUseOperators(serviceName, servizi)
+          ? getEligibleOperatorsForService({
+              serviceName,
+              services: servizi,
+              operators: operatori,
+              appointmentDate: dateValue,
+              settings: availabilitySettings,
+            })
+          : [];
       const usesOperatorsForService =
-        operatori.length > 0 && doesServiceUseOperators(serviceName, servizi);
+        !selectedSalonCapacityId && compatibleOperators.length > 0;
       const relevantOverlappingAppointments = overlappingAppointments.filter((item) =>
         usesOperatorsForService
           ? doesAppointmentUseOperatorCapacity(item)
           : !doesAppointmentUseOperatorCapacity(item)
       );
 
-      if (!usesOperatorsForService) {
-        return 1;
+      if (selectedSalonCapacityId) {
+        const sameCapacityOverlaps = relevantOverlappingAppointments.filter((item) => {
+          const existingCapacityId =
+            item.operatoreId?.trim() && isSalonCapacityOperatorId(item.operatoreId)
+              ? item.operatoreId.trim()
+              : buildSalonCapacityOperatorId(item.servizio, servizi);
+          return existingCapacityId === selectedSalonCapacityId;
+        });
+
+        return sameCapacityOverlaps.length > 0 ? 0 : 1;
       }
 
-      const compatibleOperators = getEligibleOperatorsForService({
-        serviceName,
-        services: servizi,
-        operators: operatori,
-        appointmentDate: dateValue,
-        settings: availabilitySettings,
-      });
+      if (!usesOperatorsForService) {
+        const sameCapacityOverlaps = relevantOverlappingAppointments.filter((item) => {
+          const existingCapacityId =
+            item.operatoreId?.trim() && isSalonCapacityOperatorId(item.operatoreId)
+              ? item.operatoreId.trim()
+              : buildSalonCapacityOperatorId(item.servizio, servizi);
+          return existingCapacityId === requestedSalonCapacityId;
+        });
+
+        return sameCapacityOverlaps.length > 0 ? 0 : 1;
+      }
 
       if (compatibleOperators.length === 0) {
         return 0;
       }
 
-      const selectedOperator = selectedOperatorId?.trim() ?? '';
       const selectedOperatorNameKey = normalizeOperatorNameKey(selectedOperatorName);
       if (selectedOperator) {
         const isSelectedOperatorAvailable = compatibleOperators.some(
@@ -3719,16 +4484,47 @@ const resetWeekDrag = useCallback(() => {
     [servizi, servizio]
   );
 
-  const quickBookingCustomerOptions = useMemo(() => clienti.slice(0, 40), [clienti]);
+  const blockedQuickBookingCustomerIdentityKeys = useMemo(() => {
+    if (!quickSlotDraft) {
+      return new Set<string>();
+    }
+
+    return buildBlockedQuickBookingCustomerIdentityKeys({
+      customers: clienti,
+      appointments: appuntamentiNormalizzati,
+      appointmentDate: quickSlotDraft.date,
+      appointmentTime: quickSlotDraft.time,
+    });
+  }, [clienti, appuntamentiNormalizzati, quickSlotDraft]);
+
+  const quickBookingVisibleCustomers = useMemo(
+    () =>
+      clienti.filter(
+        (item) =>
+          !blockedQuickBookingCustomerIdentityKeys.has(
+            buildAgendaCustomerIdentityKey({
+              fullName: item.nome,
+              email: item.email,
+            })
+          )
+      ),
+    [blockedQuickBookingCustomerIdentityKeys, clienti]
+  );
+
+  const quickBookingCustomerOptions = useMemo(
+    () => quickBookingVisibleCustomers.slice(0, 40),
+    [quickBookingVisibleCustomers]
+  );
 
   const quickBookingSearchResults = useMemo(() => {
     const query = quickCustomerSearchQuery.trim().toLowerCase();
+    const searchableCustomers = quickBookingVisibleCustomers;
 
     if (!query) {
-      return clienti.slice(0, 20);
+      return searchableCustomers.slice(0, 20);
     }
 
-    return clienti
+    return searchableCustomers
       .map((item) => {
         const name = item.nome.trim().toLowerCase();
         const phone = item.telefono.trim().toLowerCase();
@@ -3757,12 +4553,21 @@ const resetWeekDrag = useCallback(() => {
         return first.item.nome.localeCompare(second.item.nome, 'it', { sensitivity: 'base' });
       })
       .map((entry) => entry.item);
-  }, [clienti, quickCustomerSearchQuery]);
+  }, [quickBookingVisibleCustomers, quickCustomerSearchQuery]);
 
   const selectedQuickCustomer = useMemo(
     () => clienti.find((item) => item.id === quickBookingCustomerId) ?? null,
     [clienti, quickBookingCustomerId]
   );
+
+  useEffect(() => {
+    if (!quickBookingCustomerId) return;
+    if (quickBookingVisibleCustomers.some((item) => item.id === quickBookingCustomerId)) {
+      return;
+    }
+
+    setQuickBookingCustomerId('');
+  }, [quickBookingCustomerId, quickBookingVisibleCustomers]);
 
   const sortServicesForQuickBooking = useCallback(
     (items: typeof servizi) =>
@@ -3789,6 +4594,103 @@ const resetWeekDrag = useCallback(() => {
     return sortServicesForQuickBooking(servizi);
   }, [quickSlotDraft, servizi, sortServicesForQuickBooking]);
 
+  const quickBookingPreferredSalonCapacityId = useMemo(
+    () =>
+      isSalonCapacityOperatorId(quickSlotDraft?.preferredOperatorId)
+        ? quickSlotDraft?.preferredOperatorId ?? null
+        : null,
+    [quickSlotDraft]
+  );
+
+  const quickBookingPreferredOperatorId = useMemo(() => {
+    const preferredOperatorId = quickSlotDraft?.preferredOperatorId?.trim() ?? '';
+    if (!preferredOperatorId || isSalonCapacityOperatorId(preferredOperatorId)) {
+      return null;
+    }
+    return preferredOperatorId;
+  }, [quickSlotDraft]);
+
+  const quickBookingPreferredOperator = useMemo(() => {
+    if (!quickBookingPreferredOperatorId) {
+      return null;
+    }
+
+    return (
+      operatori.find((item) => item.id.trim() === quickBookingPreferredOperatorId) ?? null
+    );
+  }, [operatori, quickBookingPreferredOperatorId]);
+
+  const quickBookingExistingSalonCapacityIds = useMemo(() => {
+    if (!quickSlotDraft) {
+      return new Set<string>();
+    }
+
+    return new Set(
+      (weekOperatorLaneLayoutByDate[quickSlotDraft.date]?.lanes ?? [])
+        .filter((lane) => lane.key.startsWith('salon-lane:'))
+        .map((lane) => lane.operatorId?.trim() ?? '')
+        .filter((laneOperatorId) => isSalonCapacityOperatorId(laneOperatorId))
+    );
+  }, [quickSlotDraft, weekOperatorLaneLayoutByDate]);
+
+  const isQuickBookingExtraSalonLane = useMemo(
+    () => !!quickSlotDraft?.preferredLaneKey?.startsWith('salon-lane:auto-'),
+    [quickSlotDraft]
+  );
+
+  const getQuickBookingServiceLaneRestrictionReason = useCallback(
+    (serviceItem: (typeof servizi)[number]) => {
+      if (!quickSlotDraft) {
+        return '';
+      }
+
+      const serviceCapacityId = buildSalonCapacityOperatorId(serviceItem.nome, servizi);
+
+      if (
+        quickBookingPreferredSalonCapacityId &&
+        serviceCapacityId !== quickBookingPreferredSalonCapacityId
+      ) {
+        return 'Mestiere diverso';
+      }
+
+      if (quickBookingPreferredOperatorId) {
+        const serviceCompatibleOperators = getEligibleOperatorsForService({
+          serviceName: serviceItem.nome,
+          services: servizi,
+          operators: operatori,
+          appointmentDate: quickSlotDraft.date,
+          settings: availabilitySettings,
+        });
+
+        if (
+          serviceCompatibleOperators.length > 0 &&
+          !serviceCompatibleOperators.some((operator) => operator.id.trim() === quickBookingPreferredOperatorId)
+        ) {
+          return 'Operatore diverso';
+        }
+      }
+
+      if (
+        isQuickBookingExtraSalonLane &&
+        quickBookingExistingSalonCapacityIds.has(serviceCapacityId)
+      ) {
+        return 'Ramo gia presente';
+      }
+
+      return '';
+    },
+    [
+      availabilitySettings,
+      isQuickBookingExtraSalonLane,
+      quickBookingExistingSalonCapacityIds,
+      quickBookingPreferredOperatorId,
+      quickBookingPreferredSalonCapacityId,
+      quickSlotDraft,
+      operatori,
+      servizi,
+    ]
+  );
+
   const quickBookingAvailableServiceIds = useMemo(() => {
     if (!quickSlotDraft) {
       return new Set(servizi.map((item) => item.id));
@@ -3796,17 +4698,21 @@ const resetWeekDrag = useCallback(() => {
 
     return new Set(
       servizi
-        .filter((item) =>
-          canScheduleServiceAtSlot({
+        .filter((item) => {
+          if (getQuickBookingServiceLaneRestrictionReason(item)) {
+            return false;
+          }
+
+          return canScheduleServiceAtSlot({
             dateValue: quickSlotDraft.date,
             startTime: quickSlotDraft.time,
             serviceName: item.nome,
-            selectedOperatorId: null,
-          })
-        )
+            selectedOperatorId: quickSlotDraft.preferredOperatorId ?? null,
+          });
+        })
         .map((item) => item.id)
     );
-  }, [canScheduleServiceAtSlot, quickSlotDraft, servizi]);
+  }, [canScheduleServiceAtSlot, getQuickBookingServiceLaneRestrictionReason, quickSlotDraft, servizi]);
 
   const getQuickBookingServiceUnavailableReason = useCallback(
     (serviceItem: (typeof servizi)[number]) => {
@@ -3816,6 +4722,11 @@ const resetWeekDrag = useCallback(() => {
 
       const { date: dateValue, time: startTime } = quickSlotDraft;
       const serviceName = serviceItem.nome;
+      const laneRestrictionReason = getQuickBookingServiceLaneRestrictionReason(serviceItem);
+
+      if (laneRestrictionReason) {
+        return laneRestrictionReason;
+      }
 
       if (!serviceName.trim()) {
         return 'Servizio KO';
@@ -3895,7 +4806,7 @@ const resetWeekDrag = useCallback(() => {
           dateValue,
           startTime,
           serviceName,
-          selectedOperatorId: null,
+          selectedOperatorId: quickSlotDraft.preferredOperatorId ?? null,
           selectedOperatorName: null,
         }) <= 0
       ) {
@@ -3907,6 +4818,7 @@ const resetWeekDrag = useCallback(() => {
     [
       activeMachineryMap,
       availabilitySettings,
+      getQuickBookingServiceLaneRestrictionReason,
       getServiceDuration,
       getServiceRequiredMachineryIds,
       getSlotAvailableCount,
@@ -4090,7 +5002,7 @@ const resetWeekDrag = useCallback(() => {
   );
 
   const getAgendaServiceAccent = useCallback(
-    (serviceName: string) => {
+    (serviceName: string, roleNameOverride?: string | null) => {
       const matchedService = servizi.find(
         (item) => item.nome.trim().toLowerCase() === serviceName.trim().toLowerCase()
       );
@@ -4098,7 +5010,7 @@ const resetWeekDrag = useCallback(() => {
       return resolveServiceAccent({
         serviceId: matchedService?.id,
         serviceName,
-        roleName: matchedService?.mestiereRichiesto,
+        roleName: roleNameOverride?.trim() || matchedService?.mestiereRichiesto,
         serviceColorOverrides: serviceCardColorOverrides,
         roleColorOverrides: roleCardColorOverrides,
       });
@@ -5015,7 +5927,7 @@ const completeWeekDrag = useCallback(() => {
   }, []);
 
   const getWeekAppointmentTone = useCallback((appointment: AppuntamentoItem) => {
-    const accent = getAgendaServiceAccent(appointment.servizio);
+    const accent = getAgendaServiceAccent(appointment.servizio, appointment.mestiereRichiesto);
     return {
       bg: accent.bg,
       border: accent.border,
@@ -5061,8 +5973,42 @@ const completeWeekDrag = useCallback(() => {
     [operatorPhotoIndex]
   );
 
+  const getEffectiveWeekAppointmentSourceBadge = useCallback(
+    (appointment: AppuntamentoItem) => {
+      if (appointment.sourceBadge === 'operator') {
+        return 'operator' as const;
+      }
+
+      if (appointment.sourceBadge !== 'salon') {
+        return null;
+      }
+
+      const normalizedOperatorId = appointment.operatoreId?.trim() ?? '';
+      if (
+        normalizedOperatorId &&
+        !isSalonCapacityOperatorId(normalizedOperatorId) &&
+        operatori.some((item) => item.id.trim() === normalizedOperatorId)
+      ) {
+        return 'operator' as const;
+      }
+
+      const normalizedOperatorName = normalizeOperatorNameKey(appointment.operatoreNome);
+      if (
+        normalizedOperatorName &&
+        operatori.some((item) => normalizeOperatorNameKey(item.nome) === normalizedOperatorName)
+      ) {
+        return 'operator' as const;
+      }
+
+      return 'salon' as const;
+    },
+    [operatori]
+  );
+
   const renderWeekAppointmentSourceBadge = useCallback((appointment: AppuntamentoItem) => {
-    if (appointment.sourceBadge === 'salon') {
+    const effectiveSourceBadge = getEffectiveWeekAppointmentSourceBadge(appointment);
+
+    if (effectiveSourceBadge === 'salon') {
       return (
         <View style={styles.weekAppointmentSourceBadgeWrap}>
           <View style={[styles.weekAppointmentSourceBadge, styles.weekAppointmentSourceBadgeSalon]}>
@@ -5072,7 +6018,7 @@ const completeWeekDrag = useCallback(() => {
       );
     }
 
-    if (appointment.sourceBadge === 'operator') {
+    if (effectiveSourceBadge === 'operator') {
       const operatorPhotoUri = getAppointmentOperatorPhotoUri(appointment);
       return (
         <View style={styles.weekAppointmentSourceBadgeWrap}>
@@ -5094,7 +6040,7 @@ const completeWeekDrag = useCallback(() => {
     }
 
     return null;
-  }, [getAppointmentOperatorPhotoUri]);
+  }, [getAppointmentOperatorPhotoUri, getEffectiveWeekAppointmentSourceBadge]);
 
   const renderWeekAppointmentContent = useCallback(
     (
@@ -5105,26 +6051,42 @@ const completeWeekDrag = useCallback(() => {
     ) => {
       const appointmentEndTime = getAppointmentEndTime(appointment);
       const appointmentTone = getWeekAppointmentTone(appointment);
+      const effectiveSourceBadge = getEffectiveWeekAppointmentSourceBadge(appointment);
       const effectiveBlockWidth = blockWidthOverride ?? weekVisibleColWidth;
       const safeWidth = Math.max(effectiveBlockWidth, 36);
       const safeHeight = Math.max(blockHeight, 28);
       const isLaneMode = contentMode === 'lane';
-      const hasSourceBadge = !!appointment.sourceBadge;
-      const topInset = hasSourceBadge ? (safeHeight <= 44 ? 18 : 24) : 0;
+      const hasSourceBadge = !!effectiveSourceBadge;
+      const shortDurationSlot = safeHeight <= 74;
+      const topInset = hasSourceBadge
+        ? shortDurationSlot
+          ? 28
+          : safeHeight <= 44
+            ? 18
+            : 24
+        : 0;
       const contentHeight = Math.max(safeHeight - topInset - (isLaneMode ? 3 : 6), 18);
       const contentWidth = Math.max(safeWidth - (isLaneMode ? 4 : 8), 24);
       const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
       const compactSlot = safeHeight <= 46 || safeWidth <= 54;
       const veryCompactSlot = safeHeight <= 34 || safeWidth <= 42;
       const clientLabel = appointment.cliente.trim().toUpperCase();
-      const roleLabel = getServiceRequiredRole(appointment.servizio).trim().toUpperCase();
+      const roleLabel = getAppointmentRequiredRoleLabel(appointment).trim().toUpperCase();
       const serviceLabel = appointment.servizio.trim().toUpperCase();
+      const operatorLabel = appointment.operatoreNome?.trim()
+        ? `OPER. ${appointment.operatoreNome.trim().toUpperCase()}`
+        : '';
       const timeLabel = `${appointment.ora} ${appointmentEndTime}`;
       const roleTone = getServiceAccentByMeta({
         serviceName: appointment.servizio,
         roleName: roleLabel,
       });
       const detailLines = [
+        {
+          key: 'operator',
+          text: effectiveSourceBadge === 'operator' ? operatorLabel : '',
+          kind: 'operator' as const,
+        },
         { key: 'time', text: timeLabel, kind: 'time' as const },
         { key: 'client', text: clientLabel, kind: 'client' as const },
         { key: 'service', text: serviceLabel, kind: 'service' as const },
@@ -5135,7 +6097,9 @@ const completeWeekDrag = useCallback(() => {
         },
       ].filter((item) => item.text);
 
-      const visibleLines = detailLines;
+      const visibleLines = shortDurationSlot
+        ? detailLines.filter((item) => item.kind === 'client' || item.kind === 'service')
+        : detailLines;
       const visibleCount = visibleLines.length;
       const verticalGap = clamp(contentHeight * 0.022, 0.5, isLaneMode ? 3 : 7);
       const usableHeight = Math.max(contentHeight - verticalGap * Math.max(0, visibleCount - 1), 12);
@@ -5207,9 +6171,11 @@ const completeWeekDrag = useCallback(() => {
               styles.weekAppointmentUniversalLine,
               item.kind === 'time' && styles.weekAppointmentUniversalTime,
               item.kind === 'client' && styles.weekAppointmentUniversalClient,
+              item.kind === 'operator' && styles.weekAppointmentUniversalOperator,
               item.kind === 'meta' && styles.weekAppointmentUniversalMeta,
               item.kind === 'service' && styles.weekAppointmentUniversalService,
               dynamic,
+              item.kind === 'operator' && { color: '#315ea8' },
               item.kind === 'service' && { color: appointmentTone.text },
               item.kind === 'meta' && { color: roleTone.text },
               extraStyle,
@@ -5232,9 +6198,10 @@ const completeWeekDrag = useCallback(() => {
             styles.weekAppointmentUniversalVertical,
             isLaneMode && styles.weekAppointmentUniversalPressableLane,
           ]}
+          pointerEvents="none"
         >
           {hasSourceBadge ? renderWeekAppointmentSourceBadge(appointment) : null}
-          <View style={styles.weekAppointmentUniversalStack}>
+          <View style={styles.weekAppointmentUniversalStack} pointerEvents="none">
             {visibleLines.map((item, index) =>
               renderLine(item, index, {
                 marginTop: index === 0 ? 0 : verticalGap,
@@ -5246,6 +6213,7 @@ const completeWeekDrag = useCallback(() => {
     },
     [
       getAppointmentEndTime,
+      getEffectiveWeekAppointmentSourceBadge,
       getServiceRequiredRole,
       getWeekAppointmentTone,
       getServiceAccentByMeta,
@@ -5332,6 +6300,9 @@ const completeWeekDrag = useCallback(() => {
 
   const quickBookingCompatibleOperators = useMemo(() => {
     if (!quickSlotDraft || !selectedQuickService) return [];
+    if (isSalonCapacityOperatorId(quickSlotDraft.preferredOperatorId)) {
+      return [];
+    }
 
     return getEligibleOperatorsForService({
       serviceName: selectedQuickService.nome,
@@ -5358,6 +6329,7 @@ const completeWeekDrag = useCallback(() => {
 
   const quickBookingUsesOperators =
     !!selectedQuickService &&
+    !isSalonCapacityOperatorId(quickSlotDraft?.preferredOperatorId) &&
     operatori.length > 0 &&
     doesServiceUseOperators(selectedQuickService.nome, servizi) &&
     quickBookingCompatibleOperators.length > 0;
@@ -5365,21 +6337,27 @@ const completeWeekDrag = useCallback(() => {
   const selectedQuickBookingOperator = useMemo(
     () =>
       quickBookingCompatibleOperators.find((item) => item.id === quickBookingOperatorId) ??
+      quickBookingCompatibleOperators.find((item) => item.id === quickBookingPreferredOperatorId) ??
       (quickBookingCompatibleOperators.length === 1 ? quickBookingCompatibleOperators[0] : undefined),
-    [quickBookingCompatibleOperators, quickBookingOperatorId]
+    [quickBookingCompatibleOperators, quickBookingOperatorId, quickBookingPreferredOperatorId]
   );
 
   const quickBookingCanConfirm = useMemo(() => {
     if (!quickSlotDraft || !selectedQuickService || !selectedQuickCustomer) return false;
+    if (getQuickBookingServiceLaneRestrictionReason(selectedQuickService)) return false;
+    const preferredSalonCapacityId = isSalonCapacityOperatorId(quickSlotDraft.preferredOperatorId)
+      ? quickSlotDraft.preferredOperatorId
+      : null;
 
     return canScheduleServiceAtSlot({
       dateValue: quickSlotDraft.date,
       startTime: quickSlotDraft.time,
       serviceName: selectedQuickService.nome,
-      selectedOperatorId: selectedQuickBookingOperator?.id ?? null,
+      selectedOperatorId: selectedQuickBookingOperator?.id ?? preferredSalonCapacityId,
     });
   }, [
     canScheduleServiceAtSlot,
+    getQuickBookingServiceLaneRestrictionReason,
     quickSlotDraft,
     selectedQuickBookingOperator,
     selectedQuickCustomer,
@@ -5394,19 +6372,26 @@ const completeWeekDrag = useCallback(() => {
 
     const nextOperator =
       quickBookingCompatibleOperators.find((item) => item.id === quickBookingOperatorId) ??
+      quickBookingCompatibleOperators.find((item) => item.id === quickBookingPreferredOperatorId) ??
       quickBookingCompatibleOperators[0];
 
     if (nextOperator && nextOperator.id !== quickBookingOperatorId) {
       setQuickBookingOperatorId(nextOperator.id);
     }
-  }, [quickBookingCompatibleOperators, quickBookingOperatorId, quickBookingUsesOperators]);
+  }, [
+    quickBookingCompatibleOperators,
+    quickBookingOperatorId,
+    quickBookingPreferredOperatorId,
+    quickBookingUsesOperators,
+  ]);
 
   const openQuickSlotModal = useCallback(
-    (dateValue: string, slotTime: string, _operatorIdValue?: string | null) => {
+    (dateValue: string, slotTime: string, operatorIdValue?: string | null, laneKeyValue?: string | null) => {
       setQuickSlotDraft({
         date: dateValue,
         time: slotTime,
-        preferredOperatorId: null,
+        preferredOperatorId: operatorIdValue ?? null,
+        preferredLaneKey: laneKeyValue ?? null,
       });
       setQuickBookingServiceId('');
       setQuickBookingCustomerId('');
@@ -5729,8 +6714,37 @@ const completeWeekDrag = useCallback(() => {
       machineryIdsValue?: string[];
       machineryNamesValue?: string[];
     }) => {
+      const normalizedCustomerName = customerName.trim();
+      const normalizedOperatorIdValue = operatorIdValue?.trim() ?? '';
       const usesOperatorSchedulingForAppointment =
-        operatori.length > 0 && doesServiceUseOperators(serviceName.trim(), servizi);
+        !isSalonCapacityOperatorId(normalizedOperatorIdValue) &&
+        getEligibleOperatorsForService({
+          serviceName: serviceName.trim(),
+          services: servizi,
+          operators: operatori,
+          appointmentDate: dateValue,
+          settings: availabilitySettings,
+        }).length > 0;
+
+      const customerOverlapConflict = appuntamenti.find((item) => {
+        if ((item.data ?? todayDate) !== dateValue) return false;
+        if (item.cliente.trim().toLowerCase() !== normalizedCustomerName.toLowerCase()) return false;
+
+        return doesTimeRangeConflictWithAppointment({
+          startTime: timeValue,
+          durationMinutes: getServiceDuration(serviceName.trim()),
+          appointment: item,
+          services: servizi,
+          settings: availabilitySettings,
+        });
+      });
+
+      if (customerOverlapConflict) {
+        return {
+          ok: false,
+          error: `Il cliente ${customerOverlapConflict.cliente} ha gia un appuntamento che si accavalla alle ${customerOverlapConflict.ora}.`,
+        };
+      }
 
       const hardConflict = findConflictingAppointment({
         appointmentDate: dateValue,
@@ -5794,7 +6808,6 @@ const completeWeekDrag = useCallback(() => {
         }
       }
 
-      const normalizedCustomerName = customerName.trim();
       const clienteRegistrato =
         customerRecord ??
         clienti.find(
@@ -6023,7 +7036,7 @@ const completeWeekDrag = useCallback(() => {
     const finalizeServiceSave = () => {
       const nextServiceName = agendaServiceNameInput.trim();
       const nextServicePriceLabel = nextPrice.toFixed(2);
-      const nextServiceId = `servizio-${Date.now()}`;
+      const nextServiceId = buildUniqueEntityId('servizio');
       const nextServiceRole = agendaServiceRoleInput.trim();
       const nextService = {
         id: nextServiceId,
@@ -6139,12 +7152,22 @@ const completeWeekDrag = useCallback(() => {
       return;
     }
 
+    const laneRestrictionReason = getQuickBookingServiceLaneRestrictionReason(selectedQuickService);
+    if (laneRestrictionReason) {
+      Alert.alert('Servizio non selezionabile', laneRestrictionReason);
+      return;
+    }
+
+    const preferredSalonCapacityId = isSalonCapacityOperatorId(quickSlotDraft.preferredOperatorId)
+      ? quickSlotDraft.preferredOperatorId
+      : null;
+
     if (
       !canScheduleServiceAtSlot({
         dateValue: quickSlotDraft.date,
         startTime: quickSlotDraft.time,
         serviceName: selectedQuickService.nome,
-        selectedOperatorId: selectedQuickBookingOperator?.id ?? null,
+        selectedOperatorId: selectedQuickBookingOperator?.id ?? preferredSalonCapacityId,
       })
     ) {
       Alert.alert(
@@ -6165,7 +7188,7 @@ const completeWeekDrag = useCallback(() => {
         customerRecord: selectedQuickCustomer,
         serviceName: selectedQuickService.nome,
         priceValue: selectedQuickService.prezzo,
-        operatorIdValue: selectedQuickBookingOperator?.id,
+        operatorIdValue: selectedQuickBookingOperator?.id ?? preferredSalonCapacityId ?? undefined,
         operatorNameValue: selectedQuickBookingOperator?.nome,
         machineryIdsValue: requiredMachineryIds,
         machineryNamesValue: requiredMachineryIds
@@ -6191,6 +7214,7 @@ const completeWeekDrag = useCallback(() => {
     canScheduleServiceAtSlot,
     closeQuickSlotModal,
     commitAppointmentRecord,
+    getQuickBookingServiceLaneRestrictionReason,
     getServiceRequiredMachineryIds,
     quickSlotDraft,
     selectedQuickBookingOperator,
@@ -6575,6 +7599,10 @@ const completeWeekDrag = useCallback(() => {
       return;
     }
 
+    weekHorizontalScrollPosRef.current = 0;
+    weekHorizontalScrollLockXRef.current = 0;
+    weekPlannerHorizontalRef.current?.scrollTo?.({ x: 0, animated: false });
+
     Keyboard.dismiss();
     resetWeekDrag();
     setWeekSwapPreview(null);
@@ -6592,7 +7620,6 @@ const completeWeekDrag = useCallback(() => {
       );
 
     const applyDateSelection = () => {
-      setWeekInteractionEpoch((current) => current + 1);
       setData(nextDate);
       setCalendarMonth(nextDate);
       setCampoAttivo(null);
@@ -6649,10 +7676,6 @@ const completeWeekDrag = useCallback(() => {
         requestAnimationFrame(() => {
           centerAgendaDayInPicker(nextDate, false);
         });
-        requestAnimationFrame(() => {
-          dayPickerPreviewIndexRef.current = null;
-          setDayPickerPreviewIndex(null);
-        });
         return;
       }
 
@@ -6667,10 +7690,6 @@ const completeWeekDrag = useCallback(() => {
 
       requestAnimationFrame(() => {
         centerAgendaDayInPicker(nextDate, false);
-      });
-      requestAnimationFrame(() => {
-        dayPickerPreviewIndexRef.current = null;
-        setDayPickerPreviewIndex(null);
       });
     },
     [centerAgendaDayInPicker, giorniDisponibili, handleSelectDate]
@@ -6713,7 +7732,7 @@ const completeWeekDrag = useCallback(() => {
       return;
     }
 
-    setAvailabilitySettings((current) => ({
+    void updateAvailabilitySettingsPersisted((current) => ({
       ...current,
       dateOverrides: nextOverride
         ? [
@@ -6731,6 +7750,36 @@ const completeWeekDrag = useCallback(() => {
     const dialogBody = availability.closed
       ? 'Questo giorno risulta chiuso o bloccato. Vuoi sbloccarlo?'
       : 'Questo giorno risulta disponibile. Vuoi bloccarlo?';
+
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      if (availability.closed) {
+        const confirmed = window.confirm(
+          `${formatDateLongLocalized(dateValue, appLanguage)}\n\n${dialogBody}`
+        );
+        if (confirmed) {
+          upsertDateOverride(dateValue, { forceOpen: true });
+        }
+        return;
+      }
+
+      const shouldBlockDay = window.confirm(
+        `${formatDateLongLocalized(dateValue, appLanguage)}\n\n${dialogBody}`
+      );
+      if (shouldBlockDay) {
+        upsertDateOverride(dateValue, { closed: true });
+        return;
+      }
+
+      if (override) {
+        const shouldRestoreAutomatic = window.confirm(
+          `${formatDateLongLocalized(dateValue, appLanguage)}\n\nVuoi ripristinare la programmazione automatica di questo giorno?`
+        );
+        if (shouldRestoreAutomatic) {
+          upsertDateOverride(dateValue, null);
+        }
+      }
+      return;
+    }
 
     Alert.alert(
       formatDateLongLocalized(dateValue, appLanguage),
@@ -6943,6 +7992,27 @@ const completeWeekDrag = useCallback(() => {
         `Questo appuntamento si accavalla con ${hardConflict.cliente} alle ${hardConflict.ora}.\n\nSe inizi alle ${ora}, ${servizio} finisce alle ${minutesToTime(
           timeToMinutes(ora) + getServiceDuration(servizio.trim())
         )}. Scegli un altro orario.`
+      );
+      return;
+    }
+
+    const customerOverlapConflict = appuntamenti.find((item) => {
+      if ((item.data ?? todayDate) !== data) return false;
+      if (item.cliente.trim().toLowerCase() !== cliente.trim().toLowerCase()) return false;
+
+      return doesTimeRangeConflictWithAppointment({
+        startTime: ora,
+        durationMinutes: getServiceDuration(servizio.trim()),
+        appointment: item,
+        services: servizi,
+        settings: availabilitySettings,
+      });
+    });
+
+    if (customerOverlapConflict) {
+      Alert.alert(
+        'Cliente gia occupato',
+        `Il cliente ${customerOverlapConflict.cliente} ha gia un appuntamento che si accavalla alle ${customerOverlapConflict.ora}.\n\nScegli un altro orario nella stessa giornata.`
       );
       return;
     }
@@ -7631,7 +8701,7 @@ const completeWeekDrag = useCallback(() => {
     );
   };
 
-  const weekPlannerPanel = useMemo(() => (
+  const weekPlannerPanel = (
     <>
       <View style={styles.weekPlannerInlineNavRow}>
         <View style={styles.weekPlannerNavSide}>
@@ -7640,7 +8710,10 @@ const completeWeekDrag = useCallback(() => {
             onPress={() => {
               Keyboard.dismiss();
               const desiredDays = weekEffectiveVisibleDays;
-              handleSelectDate(addDaysToIso(data, desiredDays === 7 ? -7 : -1), { scrollToClient: false });
+              handleSelectDate(
+                addDaysToIso(data, desiredDays === 7 ? -7 : -1),
+                { scrollToClient: false }
+              );
             }}
             activeOpacity={0.85}
           >
@@ -7651,45 +8724,14 @@ const completeWeekDrag = useCallback(() => {
         <View style={styles.weekPlannerHeaderCenter}>
           <View style={styles.weekPlannerHeaderTextWrap}>
             <Text style={styles.weekPlannerTitle}>{weekRangeLabel}</Text>
-            <Text style={styles.weekPlannerSubtitle}>
-              Tocca + per prenotare · nei giorni con piu operatori usa Modifica · per eliminare trascina slot fuori tabella
-            </Text>
-          </View>
-
-          <View style={styles.weekPlannerLegendRow}>
-            <View style={styles.weekLegendItem}>
-              <View style={[styles.weekLegendDot, styles.weekLegendDotAvailable]} />
-              <Text
-                style={styles.weekLegendText}
-                numberOfLines={1}
-                adjustsFontSizeToFit
-                minimumFontScale={0.76}
-              >
-                Libero
-              </Text>
-            </View>
-            <View style={styles.weekLegendItem}>
-              <View style={[styles.weekLegendDot, styles.weekLegendDotBooked]} />
-              <Text
-                style={styles.weekLegendText}
-                numberOfLines={1}
-                adjustsFontSizeToFit
-                minimumFontScale={0.72}
-              >
-                Prenotato
-              </Text>
-            </View>
-            <View style={styles.weekLegendItem}>
-              <View style={[styles.weekLegendDot, styles.weekLegendDotBlocked]} />
-              <Text
-                style={styles.weekLegendText}
-                numberOfLines={1}
-                adjustsFontSizeToFit
-                minimumFontScale={0.56}
-              >
-                Limite prenotazioni
-              </Text>
-            </View>
+            {weekPlannerHasHorizontalOverflow ? (
+              <View style={styles.weekPlannerHorizontalScrollHintInline}>
+                <View style={styles.weekPlannerHorizontalScrollHintChip}>
+                  <Text style={styles.weekPlannerHorizontalScrollHintText}>Scorri a destra</Text>
+                  <Ionicons name="arrow-forward" size={13} color="#475569" />
+                </View>
+              </View>
+            ) : null}
           </View>
         </View>
 
@@ -7699,7 +8741,10 @@ const completeWeekDrag = useCallback(() => {
             onPress={() => {
               Keyboard.dismiss();
               const desiredDays = weekEffectiveVisibleDays;
-              handleSelectDate(addDaysToIso(data, desiredDays === 7 ? 7 : 1), { scrollToClient: false });
+              handleSelectDate(
+                addDaysToIso(data, desiredDays === 7 ? 7 : 1),
+                { scrollToClient: false }
+              );
             }}
             activeOpacity={0.85}
           >
@@ -7707,64 +8752,115 @@ const completeWeekDrag = useCallback(() => {
           </HapticTouchable>
         </View>
       </View>
-
       <View
         ref={weekPlannerOverlayHostRef}
         style={styles.weekPlannerOverlayHost}
         onLayout={(e) => {
-          setPlannerContainerWidth(e.nativeEvent.layout.width);
+          const nextWidth = e.nativeEvent.layout.width;
+          setPlannerContainerWidth((current) => {
+            if (nextWidth <= 0) return current;
+            if (current <= 0) return nextWidth;
+            return Math.abs(nextWidth - current) >= WEEK_PLANNER_WIDTH_JITTER_THRESHOLD
+              ? nextWidth
+              : current;
+          });
           requestAnimationFrame(updateWeekPlannerTableOrigin);
         }}
       >
         <View
           ref={weekPlannerTableShellRef}
-          style={styles.weekPlannerTableShell}
+          style={[
+            styles.weekPlannerTableShell,
+            weekPlannerHasHorizontalOverflow && styles.weekPlannerTableShellOverflow,
+          ]}
         >
-          <View style={styles.weekPlannerTimeColumn}>
-          <View style={styles.weekPlannerCornerCell}>
-            <View style={styles.weekPlannerHourGuide} />
-            <Text
+          {weekPlannerCurrentTimeIndicator ? (
+            <View
+              pointerEvents="none"
               style={[
-                styles.weekPlannerTimeText,
-                styles.weekPlannerCornerTimeText,
-                weekStartBoundaryLabel.endsWith(':00')
-                  ? styles.weekPlannerTimeTextHour
-                  : styles.weekPlannerTimeTextMinor,
+                styles.weekPlannerCurrentTimeOverlay,
+                { top: weekPlannerCurrentTimeIndicator.top },
               ]}
-              numberOfLines={1}
-              ellipsizeMode="clip"
             >
-              {weekStartBoundaryLabel}
-            </Text>
-          </View>
-          {weekTimeSlots.map((slotTime, rowIndex) => {
-            const slotBoundaryTime = minutesToTime(timeToMinutes(slotTime) + weekBaseSlotInterval);
-            const isFullHourBoundary = slotBoundaryTime.endsWith(':00');
-
-            return (
-              <View key={`week-time-${slotTime}`} style={styles.weekPlannerTimeCell}>
-                <View style={styles.weekPlannerHourGuide} />
-                <Text
-                  style={[
-                    styles.weekPlannerTimeText,
-                    isFullHourBoundary ? styles.weekPlannerTimeTextHour : styles.weekPlannerTimeTextMinor,
-                  ]}
-                  numberOfLines={1}
-                  ellipsizeMode="clip"
-                >
-                  {slotBoundaryTime}
-                </Text>
+              <View style={styles.weekPlannerCurrentTimeRailGlow} />
+              <View style={styles.weekPlannerCurrentTimeTrack}>
+                <View style={styles.weekPlannerCurrentTimeLine} />
               </View>
-            );
-          })}
-          </View>
+              <View style={styles.weekPlannerCurrentTimeBadge}>
+                <Text style={styles.weekPlannerCurrentTimeBadgeText}>
+                  {weekPlannerCurrentTimeIndicator.timeLabel}
+                </Text>
+        </View>
+      </View>
+          ) : null}
+
+	          <View
+              style={[
+                styles.weekPlannerTimeColumn,
+                weekPlannerHasHorizontalOverflow && styles.weekPlannerTimeColumnOverflow,
+              ]}
+            >
+	          <View style={styles.weekPlannerCornerCell}>
+	            <View style={styles.weekPlannerTimeColumnSpacer} />
+	          </View>
+		          {weekPlannerHasLaneHeaders ? <View style={styles.weekPlannerTimeLaneHeaderSpacer} /> : null}
+			          {weekTimeSlots.map((slotTime, rowIndex) => {
+			            const isFullHourBoundary = slotTime.endsWith(':00');
+			            const boundaryRowStyle =
+			              rowIndex === 0
+			                ? styles.weekPlannerTimeBoundaryRowFirst
+			                : styles.weekPlannerTimeBoundaryRowMiddle;
+
+			            return (
+			              <View key={`week-time-${slotTime}`} style={styles.weekPlannerTimeCell}>
+			                <View style={[styles.weekPlannerTimeBoundaryRow, boundaryRowStyle]}>
+			                  <View style={styles.weekPlannerTimeBoundaryChip}>
+			                    <Text
+			                      style={[
+			                        styles.weekPlannerTimeBoundaryText,
+		                        isFullHourBoundary
+		                          ? styles.weekPlannerTimeLabelHour
+		                          : styles.weekPlannerTimeLabelMinor,
+		                      ]}
+		                      numberOfLines={1}
+		                      ellipsizeMode="clip"
+			                    >
+			                      {slotTime}
+			                    </Text>
+			                    <View style={styles.weekPlannerTimeBoundaryArrow} />
+			                  </View>
+			                </View>
+			              </View>
+			            );
+			          })}
+		          <View style={styles.weekPlannerTimeBoundaryFooter}>
+		            <View style={[styles.weekPlannerTimeBoundaryRow, styles.weekPlannerTimeBoundaryRowFooter]}>
+		              <View style={styles.weekPlannerTimeBoundaryChip}>
+		                <Text
+		                  style={[
+		                    styles.weekPlannerTimeBoundaryText,
+		                    weekEndBoundaryLabel.endsWith(':00')
+		                      ? styles.weekPlannerTimeLabelHour
+		                      : styles.weekPlannerTimeLabelMinor,
+		                  ]}
+		                  numberOfLines={1}
+		                  ellipsizeMode="clip"
+		                >
+		                  {weekEndBoundaryLabel}
+		                </Text>
+		                <View style={styles.weekPlannerTimeBoundaryArrow} />
+		              </View>
+		            </View>
+		          </View>
+	          </View>
 
           <ScrollView
             ref={weekPlannerHorizontalRef}
             horizontal
             style={styles.weekPlannerGridScroller}
             pointerEvents="auto"
-            showsHorizontalScrollIndicator={false}
+            showsHorizontalScrollIndicator={Platform.OS !== 'web'}
+            scrollIndicatorInsets={Platform.OS === 'ios' ? { bottom: -18 } : undefined}
             decelerationRate="normal"
             directionalLockEnabled
             nestedScrollEnabled={false}
@@ -7773,7 +8869,7 @@ const completeWeekDrag = useCallback(() => {
             bounces={false}
             alwaysBounceVertical={false}
             alwaysBounceHorizontal={false}
-            scrollEnabled={false}
+            scrollEnabled={!isWeekPlannerDragging}
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode="on-drag"
             onScroll={(event) => {
@@ -7810,7 +8906,7 @@ const completeWeekDrag = useCallback(() => {
               setIsWeekPlannerHorizontalScrolling(false);
             }}
           >
-            <View
+          <View
               key={`week-grid-${data}-${weekEffectiveVisibleDays}-${weekInteractionEpoch}`}
               style={styles.weekPlannerGridShell}
             >
@@ -7837,6 +8933,13 @@ const completeWeekDrag = useCallback(() => {
                     operatorLaneDefinitions.length
                 )
               : weekVisibleColWidth;
+            const dayColumnWidth = useOperatorLaneMode
+              ? Math.max(
+                  weekVisibleColWidth,
+                  operatorLaneDefinitions.length * operatorLaneWidth +
+                    Math.max(0, operatorLaneDefinitions.length - 1) * operatorLaneGap
+                )
+              : weekVisibleColWidth;
             const dayRenderAppointments = getWeekRenderAppointmentsForDate(day.value);
 
             return (
@@ -7844,7 +8947,7 @@ const completeWeekDrag = useCallback(() => {
                 key={`week-day-column-${day.value}`}
                 style={[
                   styles.weekPlannerDayColumn,
-                  { width: weekVisibleColWidth },
+                  { width: dayColumnWidth },
                   pendingOnDay > 0 && styles.weekPlannerDayColumnWithBadge,
                   isSelectedDay && styles.weekPlannerDayColumnSelected,
                   isLastDayColumn && styles.weekPlannerDayColumnLast,
@@ -7893,11 +8996,85 @@ const completeWeekDrag = useCallback(() => {
                         isClosedDay && !isSelectedDay && styles.weekPlannerDayNumberLabelClosed,
                         isSelectedDay && styles.weekPlannerDayNumberLabelActive,
                       ]}
-                    >
-                      {day.dayNumber}
+                >
+                  {day.dayNumber}
                     </Text>
                   </View>
                 </HapticTouchable>
+
+                {useOperatorLaneMode ? (
+                  <View
+                    style={[
+                      styles.weekPlannerLaneHeaderRow,
+                      { gap: operatorLaneGap },
+                    ]}
+                  >
+                    {operatorLaneDefinitions.map((lane) => {
+                      const laneInfo = getWeekPlannerLaneDisplayInfo(lane);
+                      const isHistoricalLaneDisabled =
+                        isWeekPlannerHistoricalOperatorLaneDisabled(lane);
+                      const laneTone = getServiceAccentByMeta({
+                        serviceName: laneInfo.isSalonLane ? '' : laneInfo.label,
+                        roleName: laneInfo.meta,
+                      });
+
+                      return (
+                        <View
+                          key={`week-lane-header-${day.value}-${lane.key}`}
+                          style={[
+                            styles.weekPlannerLaneHeaderCard,
+                            isHistoricalLaneDisabled && styles.weekPlannerLaneHeaderCardDisabled,
+                            {
+                              borderColor: 'rgba(15, 23, 42, 0.08)',
+                            },
+                            { width: operatorLaneWidth },
+                          ]}
+                        >
+                          <View
+                            style={[
+                              styles.weekPlannerLaneHeaderAccent,
+                              isHistoricalLaneDisabled &&
+                                styles.weekPlannerLaneHeaderAccentDisabled,
+                              { backgroundColor: laneTone.border },
+                            ]}
+                          />
+                          <Text
+                            numberOfLines={1}
+                            ellipsizeMode="clip"
+                            adjustsFontSizeToFit
+                            minimumFontScale={0.74}
+                            style={[
+                              styles.weekPlannerLaneHeaderTitle,
+                              styles.weekPlannerLaneHeaderTitlePremium,
+                              isHistoricalLaneDisabled &&
+                                styles.weekPlannerLaneHeaderTextDisabled,
+                            ]}
+                          >
+                            {laneInfo.label}
+                          </Text>
+                          <Text
+                            numberOfLines={1}
+                            ellipsizeMode="clip"
+                            adjustsFontSizeToFit
+                            minimumFontScale={0.76}
+                            style={[
+                              styles.weekPlannerLaneHeaderMeta,
+                              isHistoricalLaneDisabled &&
+                                styles.weekPlannerLaneHeaderTextDisabled,
+                              { color: laneTone.text },
+                            ]}
+                          >
+                            {laneInfo.meta}
+                          </Text>
+                        </View>
+                      );
+                    })}
+                  </View>
+                ) : weekPlannerShouldReserveLaneHeaderSpace ? (
+                  <View style={styles.weekPlannerLaneHeaderRow}>
+                    <View style={styles.weekPlannerLaneHeaderPlaceholderCard} />
+                  </View>
+                ) : null}
 
                 {weekTimeSlots.map((slotTime, rowIndex) => {
                   const cellState = getWeekRenderCellState(day.value, slotTime);
@@ -7948,9 +9125,6 @@ const completeWeekDrag = useCallback(() => {
 
                   return (
                     <View key={`week-cell-${day.value}-${slotTime}`} style={styles.weekPlannerCellWrap}>
-                      {isFirstDayColumn ? (
-                        <View style={styles.weekPlannerCellHourGuideLead} />
-                      ) : null}
                       {useOperatorLaneMode ? (
                         <View
                           style={[
@@ -7959,6 +9133,8 @@ const completeWeekDrag = useCallback(() => {
                           ]}
                         >
                           {operatorLaneDefinitions.map((lane) => {
+                            const isHistoricalLaneDisabled =
+                              isWeekPlannerHistoricalOperatorLaneDisabled(lane);
                             const laneAppointments = dayRenderAppointments.filter(
                               (item) =>
                                 (appointmentLaneKeys[item.id] ?? getWeekOperatorLaneKey(item)) === lane.key
@@ -7992,6 +9168,7 @@ const completeWeekDrag = useCallback(() => {
                                 )
                               : null;
                             const laneQuickBookAvailable =
+                              !isHistoricalLaneDisabled &&
                               !isPastFreeSlot &&
                               cellState !== 'outside' &&
                               cellState !== 'blocked' &&
@@ -8006,12 +9183,13 @@ const completeWeekDrag = useCallback(() => {
                                     })
                                   : true
                               );
-
                             return (
                               <View
                                 key={`week-lane-${day.value}-${slotTime}-${lane.key}`}
                                 style={[
                                   styles.weekPlannerOperatorLaneCell,
+                                  isHistoricalLaneDisabled &&
+                                    styles.weekPlannerOperatorLaneCellDisabled,
                                   { width: operatorLaneWidth },
                                 ]}
                               >
@@ -8058,13 +9236,20 @@ const completeWeekDrag = useCallback(() => {
                                     style={[
                                       styles.weekPlannerCell,
                                       styles.weekPlannerOperatorLaneQuickCell,
+                                      isHistoricalLaneDisabled &&
+                                        styles.weekPlannerCellDisabledLane,
                                       laneQuickBookAvailable && styles.weekPlannerCellAvailable,
                                       isPastFreeSlot && styles.weekPlannerCellPast,
                                       cellState === 'outside' && styles.weekPlannerCellOutside,
                                       isClosedDay && styles.weekPlannerCellClosedDay,
                                     ]}
                                     onPress={() =>
-                                      openQuickSlotModal(day.value, slotTime, lane.operatorId ?? null)
+                                      openQuickSlotModal(
+                                        day.value,
+                                        slotTime,
+                                        lane.operatorId ?? null,
+                                        lane.key
+                                      )
                                     }
                                     activeOpacity={laneQuickBookAvailable ? 0.9 : 1}
                                     disabled={!laneQuickBookAvailable}
@@ -8077,6 +9262,8 @@ const completeWeekDrag = useCallback(() => {
                                       style={[
                                         styles.weekPlannerCellText,
                                         styles.weekPlannerOperatorLaneText,
+                                        isHistoricalLaneDisabled &&
+                                          styles.weekPlannerCellTextDisabledLane,
                                         laneQuickBookAvailable && styles.weekPlannerCellTextAvailable,
                                         isPastFreeSlot && styles.weekPlannerCellTextPast,
                                         cellState === 'outside' && styles.weekPlannerCellTextMuted,
@@ -8231,40 +9418,7 @@ const completeWeekDrag = useCallback(() => {
       </View>
       </View>
     </>
-  ), [
-    appointmentsById,
-    appLanguage,
-    blockingAppointmentsByDate,
-    buildWeekAppointmentGesture,
-    closeActiveSuggestions,
-    closeWeekAppointmentDetails,
-    data,
-    getAgendaServiceAccent,
-    getWeekAppointmentBlockHeight,
-    getWeekAppointmentStartingAt,
-    getWeekCellState,
-    handleDayLongPress,
-    handleSelectDate,
-    isWeekPlannerDragging,
-    lockPageScrollForDrag,
-    openQuickSlotModal,
-    pendingRequestsCountByDate,
-    renderWeekAppointmentContent,
-    setIsWeekPlannerHorizontalScrolling,
-    todayDate,
-    weekBaseSlotInterval,
-    weekDragDeleteZoneAnim,
-    weekDragOverlayState,
-    weekDragState,
-    weekFloatingDragAnimatedStyle,
-    weekInteractionEpoch,
-    weekRangeLabel,
-    weekStartBoundaryLabel,
-    weekSwapPreview,
-    weekTimeSlots,
-    weekVisibleColWidth,
-    weekVisibleDates,
-  ]);
+  );
 
   const agendaOverviewPanel = (
     <View style={styles.agendaExplorerCard}>
@@ -8499,7 +9653,7 @@ const completeWeekDrag = useCallback(() => {
                   </View>
 
                   <Text style={styles.sectionHint}>
-                    Un tap seleziona il giorno della settimana · due tap portano alla griglia calendario.
+                    Un tap seleziona il giorno della settimana · due tap portano alla griglia calendario · pressione prolungata su slot rosso per sbloccare e rendere prenotabile il giorno.
                   </Text>
                 </View>
 
@@ -8511,7 +9665,7 @@ const completeWeekDrag = useCallback(() => {
                   <View style={styles.inlinePlannerStepRow}>
                     <Text style={styles.stepPill}>2</Text>
                     <View style={styles.inlinePlannerStepTitleWrap}>
-                      <Text style={styles.sectionTitle}>Panoramica Settimana su:</Text>
+                      <Text style={styles.sectionTitle}>Panoramica Settimana</Text>
                       <HapticTouchable
                         style={styles.weekPlannerDaysButton}
                         onPress={() => setShowWeekVisibleDaysPicker(true)}
@@ -9075,6 +10229,45 @@ const completeWeekDrag = useCallback(() => {
               keyboardDismissMode="interactive"
               bounces={false}
             >
+              {quickBookingPreferredOperator ? (
+                <View style={styles.quickBookingLaneContextCard}>
+                  <View style={styles.quickBookingLaneContextAvatar}>
+                    {quickBookingPreferredOperator.fotoUri?.trim() ? (
+                      <Image
+                        source={{ uri: quickBookingPreferredOperator.fotoUri.trim() }}
+                        style={styles.quickBookingLaneContextAvatarImage}
+                      />
+                    ) : (
+                      <Ionicons name="person" size={14} color="#0f172a" />
+                    )}
+                  </View>
+                  <View style={styles.quickBookingLaneContextTextWrap}>
+                    <Text style={styles.quickBookingLaneContextEyebrow}>Corsia preselezionata</Text>
+                    <Text style={styles.quickBookingLaneContextName}>
+                      {quickBookingPreferredOperator.nome}
+                    </Text>
+                    <Text style={styles.quickBookingLaneContextMeta}>
+                      {quickBookingUsesOperators
+                        ? `Aperto dalla corsia ${quickBookingPreferredOperator.mestiere?.trim() || 'operatore'}. Puoi cambiarlo qui sotto.`
+                        : quickBookingPreferredOperator.mestiere?.trim() || 'Operatore assegnato'}
+                    </Text>
+                  </View>
+                </View>
+              ) : isQuickBookingExtraSalonLane ? (
+                <View style={styles.quickBookingLaneContextCard}>
+                  <View style={styles.quickBookingLaneContextAvatar}>
+                    <Text style={styles.quickBookingLaneContextSalonBadge}>Sal.</Text>
+                  </View>
+                  <View style={styles.quickBookingLaneContextTextWrap}>
+                    <Text style={styles.quickBookingLaneContextEyebrow}>Corsia preselezionata</Text>
+                    <Text style={styles.quickBookingLaneContextName}>Ramo salone</Text>
+                    <Text style={styles.quickBookingLaneContextMeta}>
+                      Slot aperto da una corsia salone. Puoi scegliere tu operatore o lasciare il ramo libero.
+                    </Text>
+                  </View>
+                </View>
+              ) : null}
+
               <View style={styles.quickSectionBlock}>
               <View style={styles.quickSectionHeaderRow}>
                 <Text
@@ -9167,9 +10360,18 @@ const completeWeekDrag = useCallback(() => {
                             const selected = item.id === quickBookingServiceId;
                             const selectable = quickBookingAvailableServiceIds.has(item.id);
                             const accent = getAgendaServiceAccent(item.nome);
-                            const unavailableReason = !selectable
-                              ? getQuickBookingServiceUnavailableReason(item)
+                            const laneRestrictionReason = getQuickBookingServiceLaneRestrictionReason(item);
+                            const computedUnavailableReason = !selectable
+                              ? laneRestrictionReason || getQuickBookingServiceUnavailableReason(item)
                               : '';
+                            const unavailableReason =
+                              !selectable && !laneRestrictionReason
+                                ? 'Orario non prenotabile'
+                                : computedUnavailableReason;
+                            const isLaneRestricted = laneRestrictionReason !== '';
+                            const showCorrectLaneHint =
+                              unavailableReason === 'Mestiere diverso' ||
+                              unavailableReason === 'Operatore diverso';
 
                             return (
                               <HapticTouchable
@@ -9182,6 +10384,7 @@ const completeWeekDrag = useCallback(() => {
                                     borderColor: selected ? '#111827' : accent.border,
                                   },
                                   !selectable && styles.quickBookingChipDisabled,
+                                  isLaneRestricted && styles.quickServiceCardLaneRestricted,
                                   selected && styles.quickServiceCardSelected,
                                 ]}
                                 onPress={() => {
@@ -9251,15 +10454,39 @@ const completeWeekDrag = useCallback(() => {
                                   € {item.prezzo.toFixed(2)}
                                 </Text>
                                 {!selectable ? (
-                                  <Text
-                                    style={styles.quickServiceCardStatus}
-                                    numberOfLines={1}
-                                    adjustsFontSizeToFit
-                                    minimumFontScale={0.62}
-                                    ellipsizeMode="clip"
-                                  >
-                                    {unavailableReason}
-                                  </Text>
+                                  <View pointerEvents="none" style={styles.quickServiceCardDisabledOverlay}>
+                                    <View
+                                      style={[
+                                        styles.quickServiceCardDisabledBadge,
+                                        !isLaneRestricted && styles.quickServiceCardDisabledBadgeMuted,
+                                      ]}
+                                    >
+                                      <Text
+                                        style={[
+                                          styles.quickServiceCardDisabledBadgeText,
+                                          !isLaneRestricted &&
+                                            styles.quickServiceCardDisabledBadgeTextMuted,
+                                        ]}
+                                        numberOfLines={1}
+                                        adjustsFontSizeToFit
+                                        minimumFontScale={0.8}
+                                      >
+                                        {unavailableReason}
+                                      </Text>
+                                      {showCorrectLaneHint ? (
+                                        <Text
+                                          style={styles.quickServiceCardDisabledBadgeSubtext}
+                                          numberOfLines={2}
+                                          adjustsFontSizeToFit
+                                          minimumFontScale={0.78}
+                                        >
+                                          {unavailableReason === 'Operatore diverso'
+                                            ? "Vai dall'operatore corretto"
+                                            : 'Vai nella colonna corretta'}
+                                        </Text>
+                                      ) : null}
+                                    </View>
+                                  </View>
                                 ) : null}
                               </HapticTouchable>
                             );
@@ -9705,9 +10932,12 @@ const completeWeekDrag = useCallback(() => {
                 <Text style={styles.summaryText}>
                   Servizio: {selectedQuickService?.nome || '—'}
                 </Text>
-                {quickBookingUsesOperators ? (
+                {quickBookingUsesOperators || quickBookingPreferredOperator ? (
                   <Text style={styles.summaryText}>
-                    Operatore: {selectedQuickBookingOperator?.nome || '—'}
+                    Operatore:{' '}
+                    {selectedQuickBookingOperator?.nome ||
+                      quickBookingPreferredOperator?.nome ||
+                      '—'}
                   </Text>
                 ) : null}
                 <Text style={styles.summaryText}>
@@ -9815,11 +11045,11 @@ const completeWeekDrag = useCallback(() => {
                   {weekAppointmentDetails?.servizio ?? ''}
                 </Text>
               </View>
-              {weekAppointmentDetails && getServiceRequiredRoleLabel(weekAppointmentDetails.servizio) ? (
+              {weekAppointmentDetails && getAppointmentRequiredRoleLabel(weekAppointmentDetails) ? (
                 <View style={styles.weekAppointmentDetailsRow}>
                   <Text style={styles.weekAppointmentDetailsLabel}>Mestiere</Text>
                   <Text style={styles.weekAppointmentDetailsValue}>
-                    {getServiceRequiredRoleLabel(weekAppointmentDetails.servizio)}
+                    {getAppointmentRequiredRoleLabel(weekAppointmentDetails)}
                   </Text>
                 </View>
               ) : null}
@@ -9832,9 +11062,21 @@ const completeWeekDrag = useCallback(() => {
               {weekAppointmentDetails?.operatoreNome ? (
                 <View style={styles.weekAppointmentDetailsRow}>
                   <Text style={styles.weekAppointmentDetailsLabel}>Operatore</Text>
-                  <Text style={styles.weekAppointmentDetailsValue}>
-                    {weekAppointmentDetails.operatoreNome}
-                  </Text>
+                  <View style={styles.weekAppointmentDetailsOperatorValueWrap}>
+                    <View style={styles.weekAppointmentDetailsOperatorAvatar}>
+                      {getAppointmentOperatorPhotoUri(weekAppointmentDetails) ? (
+                        <Image
+                          source={{ uri: getAppointmentOperatorPhotoUri(weekAppointmentDetails) ?? undefined }}
+                          style={styles.weekAppointmentDetailsOperatorAvatarImage}
+                        />
+                      ) : (
+                        <Ionicons name="person" size={14} color="#0f172a" />
+                      )}
+                    </View>
+                    <Text style={styles.weekAppointmentDetailsValue}>
+                      {weekAppointmentDetails.operatoreNome}
+                    </Text>
+                  </View>
                 </View>
               ) : null}
             </View>
@@ -9967,11 +11209,11 @@ const completeWeekDrag = useCallback(() => {
               bounces={false}
             >
               <View style={styles.weekAppointmentDetailsBody}>
-                {weekAppointmentEditDraft && getServiceRequiredRoleLabel(weekAppointmentEditDraft.servizio) ? (
+                {weekAppointmentEditDraft && getAppointmentRequiredRoleLabel(weekAppointmentEditDraft) ? (
                   <View style={styles.weekAppointmentDetailsRow}>
                     <Text style={styles.weekAppointmentDetailsLabel}>Mestiere</Text>
                     <Text style={styles.weekAppointmentDetailsValue}>
-                      {getServiceRequiredRoleLabel(weekAppointmentEditDraft.servizio)}
+                      {getAppointmentRequiredRoleLabel(weekAppointmentEditDraft)}
                     </Text>
                   </View>
                 ) : null}
@@ -10703,7 +11945,7 @@ const completeWeekDrag = useCallback(() => {
         initialValue={availabilitySettings.weekVisibleDays}
         onClose={() => setShowWeekVisibleDaysPicker(false)}
         onConfirm={(value) => {
-          setAvailabilitySettings((current) => ({
+          void updateAvailabilitySettingsPersisted((current) => ({
             ...current,
             weekVisibleDays: Number(value),
           }));
@@ -11115,46 +12357,31 @@ const styles = StyleSheet.create({
   },
   dayPickerCenterOverlay: {
     position: 'absolute',
-    top: IS_ANDROID ? -12 : -10,
-    bottom: IS_ANDROID ? -9 : -6,
+    top: IS_ANDROID ? 10 : 12,
+    bottom: IS_ANDROID ? 16 : 18,
     left: '50%',
-    marginLeft: -(DAY_CARD_WIDTH / 2 + (IS_ANDROID ? 8 : 16)),
-    width: DAY_CARD_WIDTH + (IS_ANDROID ? 16 : 32),
-    borderRadius: 28,
+    marginLeft: -(DAY_CARD_WIDTH / 2),
+    width: DAY_CARD_WIDTH,
+    borderRadius: 22,
     overflow: 'visible',
     zIndex: 40,
   },
   dayPickerCenterFrame: {
     ...StyleSheet.absoluteFillObject,
-    borderRadius: 28,
-    backgroundColor: 'rgba(103, 116, 137, 0.24)',
-    borderWidth: 1,
-    borderColor: 'rgba(51,65,85,0.16)',
-    shadowColor: '#334155',
-    shadowOpacity: 0.18,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 4,
+    borderRadius: 22,
+    backgroundColor: 'transparent',
+    borderWidth: 0,
+    borderColor: 'transparent',
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 0,
   },
   dayPickerCenterHighlight: {
-    position: 'absolute',
-    top: 3,
-    left: 12,
-    right: 12,
-    height: 8,
-    borderRadius: 999,
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    zIndex: 41,
+    display: 'none',
   },
   dayPickerCenterInnerGlow: {
-    position: 'absolute',
-    left: 10,
-    right: 10,
-    bottom: 10,
-    height: 10,
-    borderRadius: 999,
-    backgroundColor: 'rgba(15,23,42,0.08)',
-    zIndex: 41,
+    display: 'none',
   },
   dayPickerCenterCard: {
     position: 'absolute',
@@ -12143,12 +13370,13 @@ const styles = StyleSheet.create({
   },
   weekPlannerInlineNavRow: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     justifyContent: 'space-between',
     gap: 10,
-    paddingHorizontal: 0,
-    paddingTop: 4,
-    paddingBottom: 8,
+    paddingLeft: WEEK_PLANNER_TIME_COL_TOTAL,
+    paddingRight: WEEK_PLANNER_RIGHT_CLIP_GUARD + 2,
+    paddingTop: 6,
+    paddingBottom: 12,
   },
   weekPlannerHeaderNavRow: {
     flexDirection: 'row',
@@ -12164,13 +13392,14 @@ const styles = StyleSheet.create({
     minWidth: 0,
     alignItems: 'center',
     justifyContent: 'center',
+    paddingBottom: 0,
   },
   weekPlannerNavSide: {
     width: 42,
     height: 42,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 10,
+    marginTop: 0,
   },
   weekPlannerHeaderActions: {
     alignItems: 'center',
@@ -12183,6 +13412,15 @@ const styles = StyleSheet.create({
     width: '100%',
     marginBottom: 0,
     alignItems: 'center',
+    justifyContent: 'center',
+  },
+  weekPlannerInstructionsRow: {
+    width: '100%',
+    paddingTop: 6,
+    paddingBottom: 10,
+    paddingHorizontal: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   weekPlannerNavButton: {
     width: 42,
@@ -12231,10 +13469,21 @@ const styles = StyleSheet.create({
   },
   weekPlannerTitle: {
     fontSize: 15,
+    lineHeight: 18,
     fontWeight: '900',
     color: '#111827',
-    marginBottom: 2,
+    marginBottom: 0,
     textAlign: 'center',
+  },
+  weekPlannerSubtitleCompact: {
+    fontSize: 9.8,
+    lineHeight: 12.5,
+    color: '#64748b',
+    fontWeight: '800',
+    textAlign: 'center',
+    width: '100%',
+    maxWidth: '100%',
+    marginTop: 0,
   },
   weekPlannerSubtitle: {
     fontSize: 11,
@@ -12319,31 +13568,137 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: PALETTE.BORDER_SOFT,
   },
+  weekPlannerTableShellOverflow: {
+    paddingBottom: 44,
+  },
+  weekPlannerCurrentTimeOverlay: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    height: 0,
+    zIndex: 42,
+    pointerEvents: 'none',
+  },
+  weekPlannerCurrentTimeRailGlow: {
+    position: 'absolute',
+    left: WEEK_PLANNER_TIME_COL_TOTAL - 2,
+    right: -18,
+    top: -4,
+    height: 12,
+    borderRadius: 999,
+    backgroundColor: 'rgba(30, 41, 59, 0.14)',
+  },
+  weekPlannerCurrentTimeTrack: {
+    position: 'absolute',
+    left: WEEK_PLANNER_TIME_COL_TOTAL - 2,
+    right: -18,
+    top: 0,
+  },
+  weekPlannerCurrentTimeLine: {
+    width: '100%',
+    height: 2,
+    borderRadius: 999,
+    backgroundColor: 'rgba(30, 41, 59, 0.78)',
+  },
+  weekPlannerCurrentTimeBadge: {
+    position: 'absolute',
+    left: -14,
+    top: -12,
+    width: WEEK_PLANNER_TIME_COL_TOTAL + 12,
+    height: 24,
+    paddingHorizontal: 6,
+    paddingVertical: 0,
+    borderRadius: 18,
+    backgroundColor: 'rgba(30, 41, 59, 0.84)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.82)',
+    shadowColor: '#1E293B',
+    shadowOpacity: 0.14,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  weekPlannerCurrentTimeBadgeText: {
+    fontSize: 9.5,
+    lineHeight: 11,
+    fontWeight: '900',
+    color: '#ffffff',
+    textAlign: 'center',
+    letterSpacing: 0.1,
+    includeFontPadding: false,
+  },
   weekPlannerGridScroller: {
     flex: 1,
     minWidth: 0,
     marginRight: -WEEK_PLANNER_EDGE_BLEED_RIGHT,
     overflow: 'visible',
   },
+  weekPlannerHorizontalScrollHintInline: {
+    marginTop: 14,
+    alignItems: 'center',
+  },
+  weekPlannerHorizontalScrollHintChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: 'rgba(148, 163, 184, 0.2)',
+    shadowColor: '#0f172a',
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 1,
+  },
+  weekPlannerHorizontalScrollHintText: {
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: '800',
+    color: '#64748B',
+    includeFontPadding: false,
+  },
   weekPlannerTimeColumn: {
-    width: 43,
+    width: WEEK_PLANNER_TIME_COL_TOTAL,
+    marginLeft: 0,
     marginRight: 0,
     flexShrink: 0,
     paddingLeft: 0,
     paddingRight: 0,
   },
+  weekPlannerTimeColumnOverflow: {
+    width: WEEK_PLANNER_TIME_COL_TOTAL + 34,
+    marginLeft: -34,
+    paddingLeft: 34,
+    backgroundColor: '#FFFFFF',
+    zIndex: 14,
+  },
   weekPlannerCornerCell: {
     height: WEEK_PLANNER_DAY_HEADER_TOTAL_HEIGHT,
     position: 'relative',
+  },
+  weekPlannerCornerCellWithLanes: {
+    height: WEEK_PLANNER_DAY_HEADER_TOTAL_HEIGHT + 34,
+  },
+  weekPlannerTimeColumnSpacer: {
+    flex: 1,
+  },
+  weekPlannerTimeLaneHeaderSpacer: {
+    height: 34,
   },
   weekPlannerTimeCell: {
     height: WEEK_PLANNER_ROW_HEIGHT,
     marginBottom: WEEK_PLANNER_ROW_GAP,
     position: 'relative',
-    justifyContent: 'flex-end',
-    alignItems: 'flex-end',
+    justifyContent: 'flex-start',
+    alignItems: 'stretch',
     paddingLeft: 0,
     paddingRight: 0,
+    overflow: 'visible',
   },
   weekPlannerHourGuide: {
     position: 'absolute',
@@ -12356,7 +13711,7 @@ const styles = StyleSheet.create({
   weekPlannerTimeText: {
     position: 'absolute',
     left: 0,
-    bottom: -1,
+    bottom: 0,
     textAlign: 'left',
     flexShrink: 1,
     width: '100%',
@@ -12364,7 +13719,84 @@ const styles = StyleSheet.create({
     includeFontPadding: false,
   },
   weekPlannerCornerTimeText: {
-    bottom: -2,
+    bottom: 0,
+  },
+  weekPlannerTimeBoundaryRow: {
+    position: 'absolute',
+    left: -10,
+    width: WEEK_PLANNER_TIME_COL_TOTAL + 6,
+    height: 20,
+    alignItems: 'center',
+    overflow: 'visible',
+    zIndex: 4,
+  },
+  weekPlannerTimeBoundaryRowFirst: {
+    top: -11,
+  },
+  weekPlannerTimeBoundaryRowMiddle: {
+    top: -10,
+  },
+  weekPlannerTimeBoundaryRowFooter: {
+    top: -10,
+  },
+  weekPlannerTimeBoundaryFooter: {
+    position: 'relative',
+    height: 0,
+    marginBottom: 0,
+    overflow: 'visible',
+  },
+  weekPlannerTimeBoundaryChip: {
+    paddingLeft: 8,
+    paddingRight: 8,
+    width: '100%',
+    height: 20,
+    borderRadius: 6,
+    backgroundColor: '#EEF3F8',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#cbd5e1',
+    shadowOpacity: 0.18,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 2,
+    overflow: 'visible',
+  },
+  weekPlannerTimeBoundaryText: {
+    width: '100%',
+    textAlign: 'center',
+    includeFontPadding: false,
+    transform: [{ translateX: 2 }],
+  },
+  weekPlannerTimeBoundaryArrow: {
+    position: 'absolute',
+    right: -4,
+    top: 5,
+    width: 8,
+    height: 8,
+    borderRadius: 2,
+    backgroundColor: '#EEF3F8',
+    transform: [{ rotate: '45deg' }],
+    shadowColor: '#cbd5e1',
+    shadowOpacity: 0.16,
+    shadowRadius: 3,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 1,
+  },
+  weekPlannerTimeLabelHour: {
+    fontSize: 10.5,
+    lineHeight: 12,
+    fontWeight: '900',
+    color: '#22314a',
+    letterSpacing: 0.1,
+    includeFontPadding: false,
+  },
+  weekPlannerTimeLabelMinor: {
+    fontSize: 8.7,
+    lineHeight: 10,
+    fontWeight: '800',
+    color: '#718198',
+    letterSpacing: 0.2,
+    includeFontPadding: false,
   },
   weekPlannerTimeTextHour: {
     fontSize: 10,
@@ -12402,7 +13834,7 @@ const styles = StyleSheet.create({
     borderColor: PALETTE.BORDER_LIGHT,
     paddingHorizontal: 2,
     paddingVertical: 3,
-    marginBottom: 3,
+    marginBottom: 1,
     alignItems: 'center',
     justifyContent: 'center',
     position: 'relative',
@@ -12427,6 +13859,80 @@ const styles = StyleSheet.create({
   weekPlannerDayHeaderHoliday: {
     backgroundColor: '#FFF7ED',
     borderColor: 'rgba(245, 158, 11, 0.22)',
+  },
+  weekPlannerLaneHeaderRow: {
+    width: '100%',
+    flexDirection: 'row',
+    marginTop: -1,
+    marginBottom: 2,
+  },
+  weekPlannerLaneHeaderPlaceholderCard: {
+    width: '100%',
+    minHeight: 30,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(148, 163, 184, 0.12)',
+    backgroundColor: 'rgba(255, 255, 255, 0.88)',
+  },
+  weekPlannerLaneHeaderCard: {
+    minHeight: 30,
+    borderRadius: 10,
+    paddingHorizontal: 4,
+    paddingVertical: 3,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.94)',
+    shadowColor: '#0f172a',
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 1,
+    overflow: 'hidden',
+  },
+  weekPlannerLaneHeaderCardDisabled: {
+    backgroundColor: '#E5E7EB',
+    borderColor: 'rgba(148, 163, 184, 0.28)',
+    shadowOpacity: 0,
+    elevation: 0,
+  },
+  weekPlannerLaneHeaderAccent: {
+    position: 'absolute',
+    top: 0,
+    left: 8,
+    right: 8,
+    height: 2.5,
+    borderBottomLeftRadius: 999,
+    borderBottomRightRadius: 999,
+  },
+  weekPlannerLaneHeaderAccentDisabled: {
+    backgroundColor: '#94A3B8',
+  },
+  weekPlannerLaneHeaderTitle: {
+    width: '100%',
+    fontSize: 8.5,
+    lineHeight: 10,
+    fontWeight: '900',
+    textAlign: 'center',
+    includeFontPadding: false,
+  },
+  weekPlannerLaneHeaderTitlePremium: {
+    color: '#0f172a',
+    letterSpacing: 0.2,
+  },
+  weekPlannerLaneHeaderMeta: {
+    width: '100%',
+    marginTop: 1,
+    fontSize: 7.5,
+    lineHeight: 9,
+    fontWeight: '800',
+    textAlign: 'center',
+    includeFontPadding: false,
+    opacity: 0.84,
+  },
+  weekPlannerLaneHeaderTextDisabled: {
+    color: '#64748B',
+    opacity: 0.92,
   },
   weekPlannerDayLabelStack: {
     width: '100%',
@@ -12505,6 +14011,7 @@ const styles = StyleSheet.create({
     height: WEEK_PLANNER_ROW_HEIGHT,
     marginBottom: WEEK_PLANNER_ROW_GAP,
     position: 'relative',
+    overflow: 'visible',
   },
   weekPlannerCellHourGuide: {
     position: 'absolute',
@@ -12519,8 +14026,8 @@ const styles = StyleSheet.create({
   weekPlannerCellHourGuideLead: {
     position: 'absolute',
     bottom: -1,
-    left: -43,
-    width: 43,
+    left: -WEEK_PLANNER_TIME_COL_TOTAL,
+    width: WEEK_PLANNER_TIME_COL_TOTAL,
     height: 1,
     backgroundColor: 'rgba(15,23,42,0.24)',
     zIndex: 2,
@@ -12535,6 +14042,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 0,
+    marginBottom: -WEEK_PLANNER_ROW_GAP,
   },
   weekPlannerCellAvailable: {
     backgroundColor: PALETTE.SUCCESS_BG,
@@ -12597,7 +14105,7 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
-    bottom: 0,
+    bottom: -WEEK_PLANNER_ROW_GAP,
     overflow: 'visible',
   },
   weekPlannerOperatorLaneRow: {
@@ -12611,10 +14119,20 @@ const styles = StyleSheet.create({
     position: 'relative',
     overflow: 'visible',
   },
+  weekPlannerOperatorLaneCellDisabled: {
+    opacity: 0.92,
+  },
   weekPlannerOperatorLaneQuickCell: {
     width: '100%',
     height: '100%',
-    paddingHorizontal: 1,
+    paddingHorizontal: 0,
+  },
+  weekPlannerCellDisabledLane: {
+    backgroundColor: '#E2E8F0',
+    borderColor: 'rgba(148, 163, 184, 0.24)',
+  },
+  weekPlannerCellTextDisabledLane: {
+    color: '#94A3B8',
   },
   weekPlannerOperatorLaneText: {
     fontSize: 18,
@@ -12765,7 +14283,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.02,
   },
   weekAppointmentUniversalOperator: {
-    color: '#1f2937',
+    color: '#315ea8',
     opacity: 0.96,
     textTransform: 'uppercase',
     letterSpacing: 0.02,
@@ -13477,7 +14995,61 @@ const styles = StyleSheet.create({
   quickBookingContent: {
     flexGrow: 1,
     paddingTop: 8,
-    paddingBottom: 220,
+    paddingBottom: 20,
+  },
+  quickBookingLaneContextCard: {
+    marginBottom: 12,
+    backgroundColor: '#F8FAFC',
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(49,94,168,0.12)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  quickBookingLaneContextAvatar: {
+    width: 34,
+    height: 34,
+    borderRadius: 999,
+    backgroundColor: '#ffffff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(15,23,42,0.06)',
+  },
+  quickBookingLaneContextAvatarImage: {
+    width: '100%',
+    height: '100%',
+  },
+  quickBookingLaneContextSalonBadge: {
+    fontSize: 10,
+    fontWeight: '900',
+    color: '#0f172a',
+  },
+  quickBookingLaneContextTextWrap: {
+    flex: 1,
+    minWidth: 0,
+  },
+  quickBookingLaneContextEyebrow: {
+    fontSize: 10,
+    fontWeight: '900',
+    color: '#315ea8',
+    letterSpacing: 0.3,
+    marginBottom: 2,
+  },
+  quickBookingLaneContextName: {
+    fontSize: 13,
+    fontWeight: '900',
+    color: '#0f172a',
+  },
+  quickBookingLaneContextMeta: {
+    marginTop: 2,
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#64748b',
   },
   quickSectionBlock: {
     marginBottom: 18,
@@ -13681,6 +15253,61 @@ const styles = StyleSheet.create({
     paddingHorizontal: 2,
     flexShrink: 1,
   },
+  quickServiceCardLaneRestricted: {
+    borderColor: 'rgba(148,163,184,0.38)',
+    overflow: 'hidden',
+  },
+  quickServiceCardDisabledOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 20,
+    backgroundColor: 'rgba(241,245,249,0.72)',
+    borderWidth: 1,
+    borderColor: 'rgba(148,163,184,0.24)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 10,
+  },
+  quickServiceCardDisabledBadge: {
+    maxWidth: '86%',
+    minHeight: 34,
+    borderRadius: 14,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: 'rgba(185,28,28,0.92)',
+    borderWidth: 1,
+    borderColor: 'rgba(127,29,29,0.32)',
+    shadowColor: '#7f1d1d',
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  quickServiceCardDisabledBadgeMuted: {
+    backgroundColor: 'rgba(148,163,184,0.92)',
+    borderColor: 'rgba(100,116,139,0.24)',
+    shadowColor: '#475569',
+    shadowOpacity: 0.08,
+  },
+  quickServiceCardDisabledBadgeText: {
+    fontSize: 9,
+    lineHeight: 10.5,
+    fontWeight: '900',
+    color: '#ffffff',
+    textAlign: 'center',
+  },
+  quickServiceCardDisabledBadgeTextMuted: {
+    color: '#ffffff',
+  },
+  quickServiceCardDisabledBadgeSubtext: {
+    marginTop: 3,
+    fontSize: 8,
+    lineHeight: 9.5,
+    fontWeight: '800',
+    color: 'rgba(255,255,255,0.92)',
+    textAlign: 'center',
+  },
   quickBookingChipWrap: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -13705,7 +15332,7 @@ const styles = StyleSheet.create({
     borderColor: '#111827',
   },
   quickBookingChipDisabled: {
-    opacity: 0.3,
+    opacity: 0.66,
   },
   quickBookingChipTitle: {
     fontSize: 13,
@@ -15272,6 +16899,26 @@ const styles = StyleSheet.create({
     lineHeight: 21,
     fontWeight: '800',
     color: '#111827',
+  },
+  weekAppointmentDetailsOperatorValueWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  weekAppointmentDetailsOperatorAvatar: {
+    width: 28,
+    height: 28,
+    borderRadius: 999,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: 'rgba(15,23,42,0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  weekAppointmentDetailsOperatorAvatarImage: {
+    width: '100%',
+    height: '100%',
   },
   weekAppointmentDetailsActionsRow: {
     flexDirection: 'row',

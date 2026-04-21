@@ -8,6 +8,7 @@ import {
 } from '@react-navigation/material-top-tabs';
 import { ParamListBase, TabActions, TabNavigationState } from '@react-navigation/native';
 import * as Haptics from 'expo-haptics';
+import * as Notifications from 'expo-notifications';
 import { withLayoutContext } from 'expo-router';
 import React from 'react';
 import {
@@ -32,6 +33,7 @@ import Animated, {
 import { useAppContext } from '../../src/context/AppContext';
 import { TabSwipeLockProvider } from '../../src/context/TabSwipeLockContext';
 import { tApp } from '../../src/lib/i18n';
+import { isExpoGoPushRuntime, scheduleLocalRuntimeNotification } from '../../src/lib/push/push-notifications';
 import { SALON_MODULES, SalonModuleKey } from '../../src/lib/salon-modules';
 
 const MaterialTopTabs = createMaterialTopTabNavigator();
@@ -47,6 +49,33 @@ const IS_ANDROID = Platform.OS === 'android';
 const TAB_BAR_OUTER_BOTTOM_IOS = 26;
 const ANDROID_TAB_BAR_EXTRA_LIFT = 15;
 const ANDROID_TEXT_BREATHING_ROOM = IS_ANDROID ? 8 : 0;
+const buildExpoGoNotifiedRequestIdsStorageKey = (email?: string | null) =>
+  `salon_manager_expo_go_notified_request_ids__${(email ?? '').trim().toLowerCase()}`;
+const buildExpoGoNotificationSignature = (item: {
+  id: string;
+  stato?: string | null;
+  cancellationSource?: string | null;
+}) => `${item.id}:${item.stato ?? 'unknown'}:${item.cancellationSource ?? 'none'}`;
+const expoGoRuntimeTrackedNotificationSignatures = new Set<string>();
+const formatOwnerPushDateLabel = (dateValue?: string | null) => {
+  const normalizedDate = dateValue?.trim() ?? '';
+  const match = normalizedDate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) {
+    return normalizedDate;
+  }
+
+  return `${match[3]}/${match[2]}/${match[1]}`;
+};
+const formatOwnerPushDateTimeLabel = (dateValue?: string | null, timeValue?: string | null) => {
+  const normalizedDate = formatOwnerPushDateLabel(dateValue);
+  const normalizedTime = timeValue?.trim() ?? '';
+
+  if (normalizedDate && normalizedTime) {
+    return `${normalizedDate} alle ${normalizedTime}`;
+  }
+
+  return normalizedDate || normalizedTime || 'dettaglio non disponibile';
+};
 
 type TabBarItemVisualProps = {
   index: number;
@@ -217,7 +246,7 @@ function BottomTabBar({
   position,
 }: MaterialTopTabBarProps) {
   const { width: viewportWidth, height: viewportHeight } = useWindowDimensions();
-  const { richiestePrenotazione, clienti, appLanguage, salonAccountEmail } = useAppContext();
+  const { richiestePrenotazione, clienti, servizi, appLanguage, salonAccountEmail } = useAppContext();
 
   const [viewedRequestIds, setViewedRequestIds] = React.useState<string[]>([]);
   const [hasLoadedViewedRequestIds, setHasLoadedViewedRequestIds] = React.useState(false);
@@ -228,6 +257,8 @@ function BottomTabBar({
   const [isBarDraggingJS, setIsBarDraggingJS] = React.useState(false);
   const dragPressLockRef = React.useRef(false);
   const dragPressUnlockTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const notifiedRequestSignaturesRef = React.useRef<Set<string>>(new Set());
+  const [hasLoadedExpoGoNotifiedRequestIds, setHasLoadedExpoGoNotifiedRequestIds] = React.useState(false);
 
   const buildClientViewKey = React.useCallback(
     (item: (typeof clienti)[number]) => {
@@ -349,7 +380,13 @@ function BottomTabBar({
     const hasPotentialUnread = richiestePrenotazione.some(
       (item) =>
         (item.origine ?? 'frontend') === 'frontend' &&
-        (item.stato === 'In attesa' || item.stato === 'Annullata')
+        item.viewedBySalon !== true &&
+        (
+          item.stato === 'In attesa' ||
+          item.stato === 'Accettata' ||
+          item.stato === 'Rifiutata' ||
+          item.stato === 'Annullata'
+        )
     );
 
     if (!hasPotentialUnread) return;
@@ -441,7 +478,13 @@ function BottomTabBar({
         (item.origine ?? 'frontend') === 'frontend' &&
         item.viewedBySalon !== true &&
         !viewedRequestIds.includes(item.id) &&
-        item.stato === 'In attesa'
+        (
+          item.stato === 'In attesa' ||
+          item.stato === 'Accettata' ||
+          item.stato === 'Rifiutata' ||
+          (item.stato === 'Annullata' &&
+            (item.cancellationSource === 'cliente' || item.cancellationSource === 'salone'))
+        )
     ).length;
   }, [hasLoadedViewedRequestIds, richiestePrenotazione, viewedRequestIds]);
 
@@ -458,6 +501,173 @@ function BottomTabBar({
         !viewedClientKeys.includes(buildClientViewKey(item))
     ).length;
   }, [buildClientViewKey, clienti, hasLoadedViewedClientIds, viewedClientIds, viewedClientKeys]);
+
+  const appIconBadgeCount = React.useMemo(
+    () => richiesteInAttesa + clientiNonLetti,
+    [clientiNonLetti, richiesteInAttesa]
+  );
+
+  React.useEffect(() => {
+    if (Platform.OS === 'web') {
+      return;
+    }
+
+    Notifications.setBadgeCountAsync(appIconBadgeCount).catch(() => null);
+  }, [appIconBadgeCount]);
+
+  React.useEffect(() => {
+    if (!isExpoGoPushRuntime()) {
+      notifiedRequestSignaturesRef.current = new Set();
+      expoGoRuntimeTrackedNotificationSignatures.clear();
+      setHasLoadedExpoGoNotifiedRequestIds(true);
+      return;
+    }
+
+    let cancelled = false;
+    setHasLoadedExpoGoNotifiedRequestIds(false);
+
+    const loadNotifiedRequestIds = async () => {
+      const normalizedEmail = salonAccountEmail.trim().toLowerCase();
+      if (!normalizedEmail) {
+        if (!cancelled) {
+          notifiedRequestSignaturesRef.current = new Set();
+          setHasLoadedExpoGoNotifiedRequestIds(true);
+        }
+        return;
+      }
+
+      try {
+        const raw = await AsyncStorage.getItem(
+          buildExpoGoNotifiedRequestIdsStorageKey(normalizedEmail)
+        );
+        const parsed = raw ? (JSON.parse(raw) as unknown) : [];
+        const nextIds = Array.isArray(parsed)
+          ? parsed.filter((item): item is string => typeof item === 'string')
+          : [];
+
+        if (!cancelled) {
+          notifiedRequestSignaturesRef.current = new Set(nextIds);
+          expoGoRuntimeTrackedNotificationSignatures.clear();
+          nextIds.forEach((id) => expoGoRuntimeTrackedNotificationSignatures.add(id));
+          setHasLoadedExpoGoNotifiedRequestIds(true);
+        }
+      } catch {
+        if (!cancelled) {
+          notifiedRequestSignaturesRef.current = new Set();
+          expoGoRuntimeTrackedNotificationSignatures.clear();
+          setHasLoadedExpoGoNotifiedRequestIds(true);
+        }
+      }
+    };
+
+    void loadNotifiedRequestIds();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [salonAccountEmail]);
+
+  React.useEffect(() => {
+    if (!isExpoGoPushRuntime()) {
+      return;
+    }
+
+    if (!hasLoadedViewedRequestIds || !hasLoadedExpoGoNotifiedRequestIds) {
+      return;
+    }
+
+    const uniqueUnreadRequestMap = new Map<string, (typeof richiestePrenotazione)[number]>();
+    richiestePrenotazione.forEach((item) => {
+      const isFrontend = (item.origine ?? 'frontend') === 'frontend';
+      const isUnread = item.viewedBySalon !== true && !viewedRequestIds.includes(item.id);
+      const isRelevantStatus =
+        item.stato === 'In attesa' ||
+        (item.stato === 'Annullata' && item.cancellationSource === 'cliente');
+
+      if (!isFrontend || !isUnread || !isRelevantStatus || !item.id) {
+        return;
+      }
+
+      if (!uniqueUnreadRequestMap.has(item.id)) {
+        uniqueUnreadRequestMap.set(item.id, item);
+      }
+    });
+
+    const unreadFrontendRequests = Array.from(uniqueUnreadRequestMap.values());
+
+    const nextTrackedSignatures = new Set(
+      unreadFrontendRequests.map((item) => buildExpoGoNotificationSignature(item))
+    );
+    const newlyAdded = unreadFrontendRequests.filter(
+      (item) =>
+        !notifiedRequestSignaturesRef.current.has(buildExpoGoNotificationSignature(item)) &&
+        !expoGoRuntimeTrackedNotificationSignatures.has(buildExpoGoNotificationSignature(item))
+    );
+
+    notifiedRequestSignaturesRef.current = nextTrackedSignatures;
+    expoGoRuntimeTrackedNotificationSignatures.clear();
+    nextTrackedSignatures.forEach((id) => expoGoRuntimeTrackedNotificationSignatures.add(id));
+    const normalizedEmail = salonAccountEmail.trim().toLowerCase();
+
+    if (normalizedEmail) {
+      void AsyncStorage.setItem(
+        buildExpoGoNotifiedRequestIdsStorageKey(normalizedEmail),
+        JSON.stringify(Array.from(nextTrackedSignatures))
+      ).catch(() => null);
+    }
+
+    if (newlyAdded.length === 0) {
+      return;
+    }
+
+    const scheduleExpoGoFallbackNotifications = async () => {
+      for (const item of newlyAdded) {
+        const customerLabel = [item.nome?.trim(), item.cognome?.trim()].filter(Boolean).join(' ');
+        const serviceLabel = item.servizio?.trim() || 'Servizio';
+        const roleLabel =
+          item.mestiereRichiesto?.trim() ||
+          servizi.find(
+            (serviceItem) =>
+              serviceItem.nome?.trim().toLowerCase() === serviceLabel.toLowerCase()
+          )?.mestiereRichiesto?.trim() ||
+          '';
+        const operatorLabel = item.operatoreNome?.trim() || '';
+        const datetimeLabel = formatOwnerPushDateTimeLabel(item.data, item.ora);
+        const isCancellation =
+          item.stato === 'Annullata' && item.cancellationSource === 'cliente';
+        const detailParts = [
+          `Servizio: ${serviceLabel}`,
+          roleLabel ? `Mestiere: ${roleLabel}` : null,
+          operatorLabel ? `Operatore: ${operatorLabel}` : null,
+          `Data: ${datetimeLabel}`,
+        ].filter(Boolean);
+        const bodyPrefix = customerLabel || 'Cliente';
+
+        await scheduleLocalRuntimeNotification({
+          title: isCancellation
+            ? 'Richiesta annullata dal cliente'
+            : 'Nuova richiesta prenotazione',
+          body: `${bodyPrefix}. ${detailParts.join('. ')}.`,
+          dedupeKey: `expo-go-owner:${buildExpoGoNotificationSignature(item)}`,
+          data: {
+            source: 'expo_go_owner_fallback',
+            requestId: item.id,
+            requestStatus: item.stato ?? null,
+            cancellationSource: item.cancellationSource ?? null,
+          },
+        });
+      }
+    };
+
+    void scheduleExpoGoFallbackNotifications();
+  }, [
+    hasLoadedExpoGoNotifiedRequestIds,
+    hasLoadedViewedRequestIds,
+    richiestePrenotazione,
+    salonAccountEmail,
+    servizi,
+    viewedRequestIds,
+  ]);
 
   const tabTitles = React.useMemo(
     () => ({

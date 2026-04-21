@@ -3,6 +3,7 @@ import { router } from 'expo-router';
 import React from 'react';
 import {
   ActivityIndicator,
+  Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -25,6 +26,7 @@ const resolveCurrentUrl = async () => {
 };
 
 const OWNER_RESET_SAFE_ROUTE = '/proprietario?reset=1';
+const OWNER_RESET_SUCCESS_ROUTE = '/proprietario?reset=done';
 
 export default function ResetPasswordScreen() {
   const {
@@ -47,6 +49,10 @@ export default function ResetPasswordScreen() {
   const [isSaving, setIsSaving] = React.useState(false);
   const [isRequestingNewLink, setIsRequestingNewLink] = React.useState(false);
   const [requestMessage, setRequestMessage] = React.useState('');
+
+  const handleGoToOwnerLogin = React.useCallback(() => {
+    router.replace(OWNER_RESET_SUCCESS_ROUTE);
+  }, []);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -112,9 +118,14 @@ export default function ResetPasswordScreen() {
     }
 
     setStatus('success');
-    setMessage('Password aggiornata correttamente. Ora puoi accedere al backoffice.');
+    setMessage('Password resettata con successo. Vai in Accedi e riprova il login con la nuova password.');
     setPassword('');
     setConfirmPassword('');
+    Alert.alert(
+      'Password resettata con successo',
+      'Vai in Accedi e riprova il login con la nuova password.',
+      [{ text: 'OK', onPress: handleGoToOwnerLogin }]
+    );
   };
 
   const handleRequestNewLink = async () => {
@@ -275,16 +286,22 @@ export default function ResetPasswordScreen() {
           ) : null}
 
           {status === 'success' ? (
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => router.replace(OWNER_RESET_SAFE_ROUTE)}
-              style={({ pressed }) => [
-                styles.primaryButton,
-                pressed && styles.primaryButtonPressed,
-              ]}
-            >
-              <Text style={styles.primaryButtonText}>Vai al login proprietario</Text>
-            </Pressable>
+            <View style={styles.successPanel}>
+              <Text style={styles.successPanelTitle}>Password resettata con successo</Text>
+              <Text style={styles.successPanelText}>
+                Vai in Accedi e riprova il login con la nuova password. Questo link non va più riusato dopo il reset riuscito.
+              </Text>
+              <Pressable
+                accessibilityRole="button"
+                onPress={handleGoToOwnerLogin}
+                style={({ pressed }) => [
+                  styles.primaryButton,
+                  pressed && styles.primaryButtonPressed,
+                ]}
+              >
+                <Text style={styles.primaryButtonText}>Vai in accedi</Text>
+              </Pressable>
+            </View>
           ) : null}
         </View>
       </ScrollView>
@@ -458,5 +475,20 @@ const styles = StyleSheet.create({
   },
   requestMessageError: {
     color: '#b91c1c',
+  },
+  successPanel: {
+    marginTop: 6,
+  },
+  successPanelTitle: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: '#111111',
+    marginBottom: 10,
+  },
+  successPanelText: {
+    fontSize: 15,
+    lineHeight: 23,
+    color: '#475569',
+    marginBottom: 10,
   },
 });

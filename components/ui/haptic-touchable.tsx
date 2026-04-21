@@ -1,5 +1,6 @@
 import React from 'react';
 import {
+  Platform,
   TouchableOpacity,
   type TouchableOpacityProps,
 } from 'react-native';
@@ -42,11 +43,23 @@ export function HapticTouchable({
 }: HapticTouchableProps) {
   const scale = useSharedValue(1);
   const opacity = useSharedValue(1);
+  const longPressTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressTriggeredRef = React.useRef(false);
+  const longPressDelay = typeof props.delayLongPress === 'number' ? props.delayLongPress : 500;
+
+  const clearWebLongPressTimer = React.useCallback(() => {
+    if (longPressTimeoutRef.current) {
+      clearTimeout(longPressTimeoutRef.current);
+      longPressTimeoutRef.current = null;
+    }
+  }, []);
 
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [{ scale: scale.value }],
     opacity: opacity.value,
   }));
+
+  React.useEffect(() => clearWebLongPressTimer, [clearWebLongPressTimer]);
 
   return (
     <AnimatedTouchableOpacity
@@ -66,9 +79,21 @@ export function HapticTouchable({
           duration: pressInDuration,
           easing: Easing.out(Easing.quad),
         });
+        if (Platform.OS === 'web' && !disabled && onLongPress) {
+          longPressTriggeredRef.current = false;
+          clearWebLongPressTimer();
+          longPressTimeoutRef.current = setTimeout(() => {
+            longPressTriggeredRef.current = true;
+            if (longPressHapticType && longPressHapticType !== 'none') {
+              haptic[longPressHapticType]().catch(() => null);
+            }
+            onLongPress(event);
+          }, longPressDelay);
+        }
         onPressIn?.(event);
       }}
       onPressOut={(event) => {
+        clearWebLongPressTimer();
         scale.value = withTiming(1, {
           duration: pressOutDuration,
           easing: Easing.out(Easing.cubic),
@@ -80,17 +105,35 @@ export function HapticTouchable({
         onPressOut?.(event);
       }}
       onLongPress={(event) => {
+        if (Platform.OS === 'web') {
+          return;
+        }
         if (!disabled && longPressHapticType && longPressHapticType !== 'none') {
           haptic[longPressHapticType]().catch(() => null);
         }
         onLongPress?.(event);
       }}
       onPress={(event) => {
+        clearWebLongPressTimer();
+        if (Platform.OS === 'web' && longPressTriggeredRef.current) {
+          longPressTriggeredRef.current = false;
+          return;
+        }
         if (!disabled && hapticType && hapticType !== 'none') {
           haptic[hapticType]().catch(() => null);
         }
         onPress?.(event);
       }}
+      {...(Platform.OS === 'web' && onLongPress
+        ? ({
+            onMouseLeave: () => {
+              clearWebLongPressTimer();
+            },
+            onContextMenu: (event: Event) => {
+              event.preventDefault?.();
+            },
+          } as unknown as TouchableOpacityProps)
+        : null)}
     />
   );
 }

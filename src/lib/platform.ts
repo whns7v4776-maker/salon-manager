@@ -29,6 +29,7 @@ export type SalonWorkspace = {
   updatedAt: string;
   cashSectionDisabled?: boolean;
   autoAcceptBookingRequests?: boolean;
+  autoAcceptBookingRequestsUpdatedAt?: string;
   customerReminderHoursBefore?: number;
   trialEndsAt?: string;
   subscriptionEndsAt?: string;
@@ -182,6 +183,7 @@ export const createDefaultWorkspace = (email: string): SalonWorkspace => {
     updatedAt: now,
     cashSectionDisabled: false,
     autoAcceptBookingRequests: false,
+    autoAcceptBookingRequestsUpdatedAt: now,
     customerReminderHoursBefore: 24,
     trialEndsAt: undefined,
     subscriptionEndsAt: undefined,
@@ -222,6 +224,11 @@ export const normalizeWorkspace = (
     cashSectionDisabled: workspace?.cashSectionDisabled ?? fallback.cashSectionDisabled,
     autoAcceptBookingRequests:
       workspace?.autoAcceptBookingRequests ?? fallback.autoAcceptBookingRequests,
+    autoAcceptBookingRequestsUpdatedAt:
+      typeof workspace?.autoAcceptBookingRequestsUpdatedAt === 'string' &&
+      workspace.autoAcceptBookingRequestsUpdatedAt.trim()
+        ? workspace.autoAcceptBookingRequestsUpdatedAt.trim()
+        : fallback.autoAcceptBookingRequestsUpdatedAt,
     customerReminderHoursBefore: normalizeReminderHours(workspace?.customerReminderHoursBefore),
     salonAddress: formatSalonAddress({
       streetType: workspace?.streetType ?? fallback.streetType,
@@ -236,4 +243,4 @@ export const normalizeWorkspace = (
 };
 
 export const isWorkspaceAccessible = (workspace: SalonWorkspace) =>
-  workspace.subscriptionStatus === 'active';
+  workspace.subscriptionStatus === 'active' || workspace.subscriptionStatus === 'demo';

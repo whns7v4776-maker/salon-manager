@@ -44,16 +44,13 @@ export function WebImmediateTouchableOpacity({
   const pressableProps = props as PressableProps & {
     onClick?: (event: unknown) => void;
     onMouseDown?: (event: unknown) => void;
-    onMouseUp?: (event: unknown) => void;
-    onPointerUp?: (event: unknown) => void;
-    onTouchEnd?: (event: unknown) => void;
+    onPointerCancel?: (event: unknown) => void;
   };
-  const { onPress, onClick, onMouseDown, onMouseUp, onPointerUp, onTouchEnd, ...restProps } =
+  const { onPress, onClick, onMouseDown, onPointerCancel, ...restProps } =
     pressableProps;
-  const lastTouchEndAtRef = React.useRef(0);
-  const lastMouseUpAtRef = React.useRef(0);
   const pointerDownStartRef = React.useRef<{ x: number; y: number } | null>(null);
   const pointerMovedRef = React.useRef(false);
+  const suppressClickUntilRef = React.useRef(0);
 
   const resetPointerState = () => {
     pointerDownStartRef.current = null;
@@ -90,53 +87,40 @@ export function WebImmediateTouchableOpacity({
     }
   };
 
+  const handlePointerUp = (event: unknown) => {
+    const pointerEvent = event as { pointerType?: string };
+    const pointerType = pointerEvent.pointerType ?? '';
+    if ((pointerType === 'touch' || pointerType === 'pen' || pointerType === 'mouse') && !pointerMovedRef.current) {
+      suppressClickUntilRef.current = Date.now() + 500;
+      handlePress(event);
+    }
+    resetPointerState();
+  };
+
   return (
     <WebPressable
       {...restProps}
       disabled={disabled}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
-      onMouseUp={(event: unknown) => {
-        onMouseUp?.(event);
-        if (disabled) return;
-        if (pointerMovedRef.current) {
-          resetPointerState();
-          return;
-        }
-        lastMouseUpAtRef.current = Date.now();
-        handlePress(event);
-      }}
-      onPointerUp={(event: unknown) => {
-        onPointerUp?.(event);
-      }}
-      onTouchEnd={(event: unknown) => {
-        onTouchEnd?.(event);
-        lastTouchEndAtRef.current = Date.now();
-        if (pointerMovedRef.current) {
-          resetPointerState();
-          return;
-        }
-        handlePress(event);
+      onPointerUp={handlePointerUp}
+      onPointerCancel={(event: unknown) => {
+        onPointerCancel?.(event);
+        resetPointerState();
       }}
       onClick={(event: unknown) => {
         onClick?.(event);
-
-        // iOS Safari/WebView often fires a synthetic click after touchend:
-        // handle the touch immediately and swallow the trailing click.
-        if (Date.now() - lastTouchEndAtRef.current < 700) {
-          const maybePreventDefault = (event as { preventDefault?: () => void }).preventDefault;
-          maybePreventDefault?.();
+        if (Date.now() < suppressClickUntilRef.current) {
+          resetPointerState();
           return;
         }
-
-        // Safari desktop can dispatch click after mouseup on custom Pressables.
-        if (Date.now() - lastMouseUpAtRef.current < 700) {
-          const maybePreventDefault = (event as { preventDefault?: () => void }).preventDefault;
-          maybePreventDefault?.();
+        if (pointerMovedRef.current) {
+          resetPointerState();
           return;
         }
 
         handlePress(event);
+        resetPointerState();
       }}
       style={({ pressed }: { pressed: boolean }) =>
         [

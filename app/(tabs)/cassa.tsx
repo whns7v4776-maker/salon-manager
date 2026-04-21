@@ -38,6 +38,7 @@ type SuggerimentoDescrizione = {
 
 const METODI_PAGAMENTO: MetodoPagamento[] = ['Contanti', 'Carta', 'Bonifico'];
 const IS_ANDROID = Platform.OS === 'android';
+const IS_WEB = Platform.OS === 'web';
 
 const resolveMovementDate = (movement: { id: string; createdAt?: string }) => {
   if (movement.createdAt) {
@@ -385,42 +386,53 @@ export default function CassaScreen() {
   }, []);
 
   const handleCashSectionToggle = useCallback(() => {
+    const confirmToggle = (
+      title: string,
+      body: string,
+      onConfirm: () => void | Promise<void>
+    ) => {
+      if (IS_WEB && typeof window !== 'undefined') {
+        const confirmed = window.confirm(`${title}\n\n${body}`);
+        if (!confirmed) return;
+        void onConfirm();
+        return;
+      }
+
+      Alert.alert(title, body, [
+        { text: 'Annulla', style: 'cancel' },
+        {
+          text: title.toLowerCase().includes('disabilita') ? 'Disabilita Cassa' : 'Riabilita Cassa',
+          style: title.toLowerCase().includes('disabilita') ? 'destructive' : 'default',
+          onPress: () => {
+            void onConfirm();
+          },
+        },
+      ]);
+    };
+
     if (salonWorkspace.cashSectionDisabled) {
-      Alert.alert(
+      confirmToggle(
         'Riabilita Cassa',
         'Confermando, la sezione Cassa tornerà visibile con tutti i contenuti e i movimenti già registrati.',
-        [
-          { text: 'Annulla', style: 'cancel' },
-          {
-            text: 'Riabilita Cassa',
-            onPress: () => {
-              void updateSalonWorkspacePersisted((current) => ({
-                ...current,
-                cashSectionDisabled: false,
-              }));
-            },
-          },
-        ]
+        async () => {
+          await updateSalonWorkspacePersisted((current) => ({
+            ...current,
+            cashSectionDisabled: false,
+          }));
+        }
       );
       return;
     }
 
-    Alert.alert(
+    confirmToggle(
       'Disabilita Cassa',
       'Questa schermata non è collegata direttamente a banca o conto corrente. Se usi già un gestionale contabile esterno collegato elettronicamente con la banca, puoi nascondere tutta la sezione Cassa mantenendo visibile solo il tab.',
-      [
-        { text: 'Annulla', style: 'cancel' },
-        {
-          text: 'Disabilita Cassa',
-          style: 'destructive',
-          onPress: () => {
-            void updateSalonWorkspacePersisted((current) => ({
-              ...current,
-              cashSectionDisabled: true,
-            }));
-          },
-        },
-      ]
+      async () => {
+        await updateSalonWorkspacePersisted((current) => ({
+          ...current,
+          cashSectionDisabled: true,
+        }));
+      }
     );
   }, [salonWorkspace.cashSectionDisabled, updateSalonWorkspacePersisted]);
 

@@ -1,10 +1,16 @@
 # Keep CLI uploads small; Vercel runs `npm install` during build.
 node_modules
 node_modules_old
+node_modules_broken
 .expo
 dist
 web-build
 .swift-cache
+.backups
+.vercel
+.vscode
+.DS_Store
+.tmp-portal-barberia-lcom.json
 .git
 .cursor
 *.codexbak*

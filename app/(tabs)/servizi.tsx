@@ -75,6 +75,8 @@ type OperatoreItem = {
 
 const normalizeServiceName = (value: string) =>
   value.trim().toLowerCase().replace(/\s+/g, ' ');
+const buildUniqueEntityId = (prefix: string) =>
+  `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
 const normalizeOperatorName = (value: string) =>
   value.trim().toLowerCase().replace(/\s+/g, ' ');
@@ -114,6 +116,56 @@ const shouldWarnAboutMissingOperatorsForRole = ({
   return distinctRoles.size > 1;
 };
 
+const formatRoleLabelForDisplay = (value?: string | null) => {
+  const trimmedValue = (value ?? '').trim();
+  if (!trimmedValue) {
+    return '';
+  }
+
+  return trimmedValue
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word) => {
+      const lowerWord = word.toLocaleLowerCase('it-IT');
+      return lowerWord.charAt(0).toLocaleUpperCase('it-IT') + lowerWord.slice(1);
+    })
+    .join(' ');
+};
+
+const buildRoleCoverageSummary = (
+  services: ServizioItem[],
+  operators: OperatoreItem[]
+) => {
+  const activeRoles = Array.from(
+    new Set(
+      services
+        .map((item) => normalizeRoleName(item.mestiereRichiesto ?? ''))
+        .filter(Boolean)
+    )
+  );
+
+  const operatorCountByRole = new Map<string, number>();
+  operators.forEach((item) => {
+    const normalizedRole = normalizeRoleName(item.mestiere ?? '');
+    if (!normalizedRole) return;
+    operatorCountByRole.set(normalizedRole, (operatorCountByRole.get(normalizedRole) ?? 0) + 1);
+  });
+
+  const coveredRoles = activeRoles.filter((role) => (operatorCountByRole.get(role) ?? 0) > 0);
+  const missingRoles = activeRoles.filter((role) => (operatorCountByRole.get(role) ?? 0) === 0);
+  const orphanOperatorRoles = Array.from(operatorCountByRole.keys()).filter(
+    (role) => !activeRoles.includes(role)
+  );
+
+  return {
+    activeRoles,
+    coveredRoles,
+    missingRoles,
+    orphanOperatorRoles,
+    operatorCountByRole,
+  };
+};
+
 const PRESET_ROLE_OPTIONS = [
   'Barber',
   'Hair Stylist',
@@ -148,6 +200,9 @@ const WEEKDAY_OPTIONS = [
 ];
 
 const ALL_WEEKDAY_VALUES = WEEKDAY_OPTIONS.map((item) => item.value);
+const DEFAULT_OPERATOR_WEEKDAY_VALUES = WEEKDAY_OPTIONS.filter((item) => item.value !== 0).map(
+  (item) => item.value
+);
 const OPERATOR_PHOTO_QUALITY = 0.82;
 const COLOR_SCALE = [
   '#ffd6d6',
@@ -155,6 +210,10 @@ const COLOR_SCALE = [
   '#fff0bf',
   '#eadfcb',
   '#e3d3bf',
+  '#dcfce7',
+  '#d1fae5',
+  '#ccfbf1',
+  '#dcfcef',
   '#cbeff0',
   '#d6e8ff',
   '#d9ddff',
@@ -369,7 +428,7 @@ export default function ServiziScreen() {
   const [operatorCustomRoleOpen, setOperatorCustomRoleOpen] = useState(false);
   const [operatoreInModifica, setOperatoreInModifica] = useState<string | null>(null);
   const [operatorEnabledWeekdays, setOperatorEnabledWeekdays] = useState<number[]>(
-    ALL_WEEKDAY_VALUES
+    DEFAULT_OPERATOR_WEEKDAY_VALUES
   );
   const [operatorAvailabilityRanges, setOperatorAvailabilityRanges] = useState<
     { id: string; startDate: string; endDate: string; label?: string }[]
@@ -418,8 +477,57 @@ export default function ServiziScreen() {
   const openOperatorRolePicker = useCallback(() => {
     Keyboard.dismiss();
     runSoftLayoutAnimation();
-    setOperatorRolePickerOpen(true);
-  }, []);
+    setOperatorRolePickerOpen((current) => {
+      const next = !current;
+
+      if (next) {
+        requestAnimationFrame(() => {
+          setTimeout(() => {
+            listRef.current?.scrollToOffset({
+              offset: Math.max(
+                0,
+                operatorFormOffsetRef.current + (responsive.isDesktop ? 180 : 250)
+              ),
+              animated: true,
+            });
+          }, 130);
+        });
+      }
+
+      return next;
+    });
+  }, [responsive.isDesktop]);
+  const openServiceRolePicker = useCallback(() => {
+    Keyboard.dismiss();
+    runSoftLayoutAnimation();
+    setServiceRolePickerOpen((current) => {
+      const next = !current;
+
+      if (next) {
+        requestAnimationFrame(() => {
+          setTimeout(() => {
+            listRef.current?.scrollToOffset({
+              offset: Math.max(
+                0,
+                serviceFormOffsetRef.current + (responsive.isDesktop ? 250 : 320)
+              ),
+              animated: true,
+            });
+          }, 130);
+        });
+      }
+
+      return next;
+    });
+  }, [responsive.isDesktop]);
+  const handleOperatorNameSubmit = useCallback(() => {
+    if (operatorCustomRoleOpen) {
+      focusField(operatorCustomRoleRef);
+      return;
+    }
+
+    Keyboard.dismiss();
+  }, [focusField, operatorCustomRoleOpen]);
   const handleKeyboardNext = useCallback(() => {
     const focusedInput = (
       TextInput.State as unknown as {
@@ -551,6 +659,14 @@ export default function ServiziScreen() {
 
   const shouldShowMultiRoleNoOperatorWarning = missingOperatorRoles.length > 0;
 
+  const roleCoverageSummary = useMemo(
+    () => buildRoleCoverageSummary(servizi, operatori),
+    [operatori, servizi]
+  );
+  const orphanOperatorRoles = roleCoverageSummary.orphanOperatorRoles;
+  const shouldShowRoleAlignmentWarning =
+    shouldShowMultiRoleNoOperatorWarning || orphanOperatorRoles.length > 0;
+
   const hasMatchingServiceTarget = useCallback(
     (roleName: string) => {
       const normalizedRole = normalizeRoleName(roleName);
@@ -584,7 +700,7 @@ export default function ServiziScreen() {
     setOperatorRolePickerOpen(false);
     setOperatorCustomRoleOpen(false);
     setOperatoreInModifica(null);
-    setOperatorEnabledWeekdays(ALL_WEEKDAY_VALUES);
+    setOperatorEnabledWeekdays(DEFAULT_OPERATOR_WEEKDAY_VALUES);
     setOperatorAvailabilityRanges([]);
     setAvailabilityStartDate('');
     setAvailabilityEndDate('');
@@ -827,7 +943,7 @@ export default function ServiziScreen() {
     } else {
       setServizi([
         {
-          id: Date.now().toString(),
+          id: buildUniqueEntityId('servizio'),
           nome: nome.trim(),
           prezzo: valorePrezzo,
           prezzoOriginale: nextPrezzoOriginale,
@@ -841,38 +957,36 @@ export default function ServiziScreen() {
       ]);
     }
 
-    if (
-      shouldWarnAboutMissingOperatorsForRole({
-        roleName: nextMestiereRichiesto,
-        services: servizioInModifica
-          ? servizi.map((item) =>
-              item.id === servizioInModifica
-                ? { ...item, mestiereRichiesto: nextMestiereRichiesto }
-                : item
-            )
-          : [
-              ...servizi,
-              {
-                id: '__preview__',
-                nome: nome.trim(),
-                prezzo: valorePrezzo,
-                durataMinuti,
-                mestiereRichiesto: nextMestiereRichiesto,
-              },
-            ],
-        operators: operatori,
-      })
-    ) {
-      Alert.alert(
-        'Operatore da collegare',
-        `Hai salvato il servizio con mestiere "${nextMestiereRichiesto}" in un salone con più mestieri, ma non esiste ancora nessun operatore con quel mestiere. Se non lo imposti, dal frontend il cliente potrebbe non trovare slot prenotabili.`
-      );
-    }
+    const missingOperatorWarning = shouldWarnAboutMissingOperatorsForRole({
+      roleName: nextMestiereRichiesto,
+      services: servizioInModifica
+        ? servizi.map((item) =>
+            item.id === servizioInModifica
+              ? { ...item, mestiereRichiesto: nextMestiereRichiesto }
+              : item
+          )
+        : [
+            ...servizi,
+            {
+              id: '__preview__',
+              nome: nome.trim(),
+              prezzo: valorePrezzo,
+              durataMinuti,
+              mestiereRichiesto: nextMestiereRichiesto,
+            },
+          ],
+      operators: operatori,
+    });
 
     resetForm();
 
     if (!isEditingService) {
-      Alert.alert('Servizio aggiunto', 'Servizio inserito correttamente.');
+      Alert.alert(
+        'Servizio aggiunto',
+        missingOperatorWarning
+          ? `Servizio inserito correttamente.\n\nOperatore da collegare:\nHai salvato il servizio con mestiere "${nextMestiereRichiesto}" in un salone con più mestieri, ma non esiste ancora nessun operatore con quel mestiere. Se non lo imposti, dal frontend il cliente potrebbe non trovare slot prenotabili.`
+          : 'Servizio inserito correttamente.'
+      );
     }
   };
 
@@ -891,15 +1005,10 @@ export default function ServiziScreen() {
     setServiceCustomRoleOpen(!!item.mestiereRichiesto);
     setServiceRolePickerOpen(false);
     setIsServiceFormExpanded(true);
-    requestAnimationFrame(() => {
-      listRef.current?.scrollToOffset({ offset: 0, animated: true });
-      setTimeout(() => {
-        listRef.current?.scrollToOffset({ offset: 0, animated: true });
-      }, 220);
-    });
     setTimeout(() => {
+      scrollToField(serviceNameRef);
       focusField(serviceNameRef);
-    }, 320);
+    }, 180);
   };
 
   const salvaOperatore = () => {
@@ -947,6 +1056,7 @@ export default function ServiziScreen() {
             : item
         )
       );
+      Alert.alert('Operatore aggiornato', 'Operatore salvato correttamente.');
     } else {
       setOperatori((current) => [
         {
@@ -963,6 +1073,7 @@ export default function ServiziScreen() {
         },
         ...current,
       ]);
+      Alert.alert('Operatore aggiunto', 'Operatore inserito correttamente.');
     }
 
     resetOperatoreForm();
@@ -977,19 +1088,18 @@ export default function ServiziScreen() {
     setOperatorPhotoUri(item.fotoUri ?? '');
     setOperatorCustomRoleOpen(true);
     setOperatorRolePickerOpen(false);
-    setOperatorEnabledWeekdays(item.availability?.enabledWeekdays ?? ALL_WEEKDAY_VALUES);
+    setOperatorEnabledWeekdays(
+      item.availability?.enabledWeekdays ?? DEFAULT_OPERATOR_WEEKDAY_VALUES
+    );
     setOperatorAvailabilityRanges(item.availability?.dateRanges ?? []);
     setAvailabilityStartDate('');
     setAvailabilityEndDate('');
     setDatePickerTarget(null);
     setIsOperatorFormExpanded(true);
-    listRef.current?.scrollToOffset({
-      offset: Math.max(0, operatorFormOffsetRef.current - 28),
-      animated: true,
-    });
     setTimeout(() => {
+      scrollToField(operatorNameRef);
       focusField(operatorNameRef);
-    }, 250);
+    }, 180);
   };
 
   const toggleOperatorWeekday = (weekday: number) => {
@@ -1115,32 +1225,25 @@ export default function ServiziScreen() {
     setMestiereRichiesto(role);
     setServiceRolePickerOpen(false);
     setServiceCustomRoleOpen(false);
-    requestAnimationFrame(() => {
-      InteractionManager.runAfterInteractions(() => {
-        scrollToNode(serviceSubmitButtonRef);
-      });
-    });
   };
 
   const selectOperatorRole = (role: string) => {
     setMestiereOperatore(role);
     setOperatorRolePickerOpen(false);
     setOperatorCustomRoleOpen(false);
+
     requestAnimationFrame(() => {
-      InteractionManager.runAfterInteractions(() => {
-        scrollToNode(operatorAvailabilityPanelRef);
-      });
+      setTimeout(() => {
+        listRef.current?.scrollToOffset({
+          offset: Math.max(
+            0,
+            operatorFormOffsetRef.current + (responsive.isDesktop ? 340 : 430)
+          ),
+          animated: true,
+        });
+      }, 130);
     });
   };
-
-  const scrollToOperatorAvailability = useCallback(() => {
-    Keyboard.dismiss();
-    requestAnimationFrame(() => {
-      InteractionManager.runAfterInteractions(() => {
-        scrollToNode(operatorAvailabilityPanelRef);
-      });
-    });
-  }, [scrollToNode]);
 
   const selectMachineryRole = (role: string) => {
     setMestiereMacchinario(role);
@@ -1253,25 +1356,19 @@ export default function ServiziScreen() {
     const richiesteAccettateFutureCollegate = richiesteCollegate.filter(
       (item) => item.stato === 'Accettata' && (item.data ?? today) >= today
     );
-    const hasProtectedFutureEntries =
-      appuntamentiFuturiCollegati.length > 0 || richiesteAccettateFutureCollegate.length > 0;
     const hasLinkedEntries =
       appuntamentiCollegati.length > 0 || richiesteCollegate.length > 0;
-
-    if (hasProtectedFutureEntries) {
-      Alert.alert(
-        'Eliminazione bloccata',
-        `${operatoreDaEliminare.nome} ha ancora appuntamenti futuri o richieste accettate collegate. Sposta o chiudi prima quelle prenotazioni, poi potrai eliminare l'operatore.`
-      );
-      return;
-    }
+    const hasFutureEntries =
+      appuntamentiFuturiCollegati.length > 0 || richiesteAccettateFutureCollegate.length > 0;
 
     Alert.alert(
       tApp(appLanguage, 'services_operator_delete_title'),
-      hasLinkedEntries
-        ? tApp(appLanguage, 'services_operator_delete_body_linked', {
-            operatorName: operatoreDaEliminare.nome,
-          })
+      hasFutureEntries
+        ? `${operatoreDaEliminare.nome} verra rimosso dagli operatori attivi. Gli appuntamenti e le richieste gia salvati resteranno nello storico e in agenda come corsia orfana finche non li riassegni o li chiudi.`
+        : hasLinkedEntries
+          ? tApp(appLanguage, 'services_operator_delete_body_linked', {
+              operatorName: operatoreDaEliminare.nome,
+            })
         : tApp(appLanguage, 'services_operator_delete_body_simple', {
             operatorName: operatoreDaEliminare.nome,
           }),
@@ -1360,18 +1457,52 @@ export default function ServiziScreen() {
     </View>
   );
 
-  const multiRoleNoOperatorWarningCard = shouldShowMultiRoleNoOperatorWarning ? (
+  const multiRoleNoOperatorWarningCard = shouldShowRoleAlignmentWarning ? (
     <View style={[styles.formCard, styles.warningCard]}>
       <Text style={styles.cardTitle} adjustsFontSizeToFit minimumFontScale={0.72}>
-        Attenzione mestieri senza operatore
+        Attenzione allineamento mestieri
       </Text>
-      <Text style={styles.warningCardText}>
-        Finche anche un solo mestiere attivo non ha almeno un operatore compatibile assegnato,
-        questo avviso resta visibile.
-      </Text>
-      <Text style={styles.warningCardText}>
-        Mestieri ancora scoperti: {missingOperatorRoles.join(' · ')}.
-      </Text>
+      {shouldShowMultiRoleNoOperatorWarning ? (
+        <Text style={styles.warningCardText}>
+          Finche anche un solo mestiere attivo non ha almeno un operatore compatibile assegnato,
+          questo avviso resta visibile.
+        </Text>
+      ) : null}
+      {roleCoverageSummary.coveredRoles.length > 0 ? (
+        <Text style={styles.warningCardText}>
+          Mestieri gia coperti: {roleCoverageSummary.coveredRoles
+            .map((role) => {
+              const count = roleCoverageSummary.operatorCountByRole.get(role) ?? 0;
+              return `${role} (${count})`;
+            })
+            .join(' · ')}.
+        </Text>
+      ) : null}
+      {missingOperatorRoles.length > 0 ? (
+        <Text style={styles.warningCardText}>
+          Mestieri ancora scoperti: {missingOperatorRoles.join(' · ')}.
+        </Text>
+      ) : null}
+      {orphanOperatorRoles.length > 0 ? (
+        <Text style={styles.warningCardText}>
+          Operatori assegnati a mestieri non piu presenti nei servizi: {orphanOperatorRoles
+            .map((role) => `${role} (${roleCoverageSummary.operatorCountByRole.get(role) ?? 0})`)
+            .join(' · ')}.
+        </Text>
+      ) : null}
+      {missingOperatorRoles.length > 0 ? (
+        <Text style={styles.warningCardText}>
+          Se un mestiere resta scoperto, il ramo frontend puo esistere comunque come salone: quindi
+          hai piu rami prenotabili ma meno operatori effettivi. Meglio assegnare un operatore per
+          ogni mestiere attivo.
+        </Text>
+      ) : null}
+      {orphanOperatorRoles.length > 0 ? (
+        <Text style={styles.warningCardText}>
+          Se cancelli un mestiere dai servizi ma lasci operatori collegati a quel mestiere, conviene
+          riallinearli o cambiare il loro mestiere per evitare configurazioni incoerenti.
+        </Text>
+      ) : null}
     </View>
   ) : null;
 
@@ -1451,7 +1582,7 @@ export default function ServiziScreen() {
                           style={[styles.operatorRole, { color: accent.text }]}
                           numberOfLines={1}
                         >
-                          {item.mestiere}
+                          {formatRoleLabelForDisplay(item.mestiere)}
                         </Animated.Text>
                         <Text style={[styles.operatorAvailabilitySummary, { color: accent.text }]}>
                           {formatAvailabilitySummary(item)}
@@ -1624,10 +1755,7 @@ export default function ServiziScreen() {
 
                   <HapticTouchable
                     style={[styles.input, styles.roleSelectorInput]}
-                    onPress={() => {
-                      runSoftLayoutAnimation();
-                      setServiceRolePickerOpen((current) => !current);
-                    }}
+                    onPress={openServiceRolePicker}
                     activeOpacity={0.9}
                   >
                     <Text
@@ -1803,6 +1931,16 @@ export default function ServiziScreen() {
                     </Animated.View>
                   ) : null}
 
+                  <HapticTouchable
+                    style={styles.buttonLightDanger}
+                    onPress={resetForm}
+                    activeOpacity={0.9}
+                  >
+                    <Text style={styles.buttonLightDangerText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.72}>
+                      Svuota campi
+                    </Text>
+                  </HapticTouchable>
+
                   <View ref={serviceSubmitButtonRef} collapsable={false}>
                     <HapticTouchable
                       style={[styles.buttonDark, !canSubmit && styles.buttonDisabled]}
@@ -1948,21 +2086,13 @@ export default function ServiziScreen() {
                   value={nomeOperatore}
                   onChangeText={setNomeOperatore}
                   onFocus={() => scrollToField(operatorNameRef)}
-                  onBlur={scrollToOperatorAvailability}
                   returnKeyType="next"
-                  onSubmitEditing={() =>
-                    operatorCustomRoleOpen
-                      ? focusField(operatorCustomRoleRef)
-                      : openOperatorRolePicker()
-                  }
+                  onSubmitEditing={handleOperatorNameSubmit}
                   blurOnSubmit={!operatorCustomRoleOpen}
                 />
                 <HapticTouchable
                   style={[styles.input, styles.roleSelectorInput]}
-                  onPress={() => {
-                    runSoftLayoutAnimation();
-                    setOperatorRolePickerOpen((current) => !current);
-                  }}
+                  onPress={openOperatorRolePicker}
                   activeOpacity={0.9}
                 >
                   <Text
@@ -2030,9 +2160,8 @@ export default function ServiziScreen() {
                     value={mestiereOperatore}
                     onChangeText={setMestiereOperatore}
                     onFocus={() => scrollToField(operatorCustomRoleRef)}
-                    onBlur={scrollToOperatorAvailability}
                     returnKeyType="done"
-                    onSubmitEditing={scrollToOperatorAvailability}
+                    onSubmitEditing={Keyboard.dismiss}
                   />
                 ) : null}
 
@@ -2216,6 +2345,16 @@ export default function ServiziScreen() {
                 />
 
                 <HapticTouchable
+                  style={styles.buttonLightDanger}
+                  onPress={resetOperatoreForm}
+                  activeOpacity={0.9}
+                >
+                  <Text style={styles.buttonLightDangerText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.72}>
+                    Svuota campi
+                  </Text>
+                </HapticTouchable>
+
+                <HapticTouchable
                   style={[styles.buttonDark, !canSubmitOperatore && styles.buttonDisabled]}
                   onPress={salvaOperatore}
                   activeOpacity={0.9}
@@ -2276,11 +2415,11 @@ export default function ServiziScreen() {
 
               {cardColorMode === 'service' ? (
                 <View style={styles.colorTargetWrap}>
-                  {servizi.map((item) => {
+                  {servizi.map((item, index) => {
                     const selected = selectedServiceColorTargetId === item.id;
                     return (
                       <HapticTouchable
-                        key={`card-color-service-${item.id}`}
+                        key={`card-color-service-${item.id}-${item.nome}-${index}`}
                         style={[styles.colorTargetChip, selected && styles.colorTargetChipActive]}
                         onPress={() => setSelectedServiceColorTargetId(item.id)}
                         activeOpacity={0.9}
@@ -2414,7 +2553,7 @@ export default function ServiziScreen() {
             >
               <View style={styles.itemLeft}>
                 <Text
-                  style={[styles.serviceName, { color: accent.text }]}
+                  style={[styles.serviceName, { color: '#111111' }]}
                   numberOfLines={1}
                   adjustsFontSizeToFit
                   minimumFontScale={0.68}
@@ -2437,7 +2576,7 @@ export default function ServiziScreen() {
                       adjustsFontSizeToFit
                       minimumFontScale={0.74}
                     >
-                      {item.mestiereRichiesto}
+                      {formatRoleLabelForDisplay(item.mestiereRichiesto)}
                     </Animated.Text>
                   ) : null}
                   {showOperatorBadge ? (
@@ -2452,7 +2591,7 @@ export default function ServiziScreen() {
                   ) : null}
                 </View>
                 <Text
-                  style={[styles.serviceHint, { color: accent.text }]}
+                  style={[styles.serviceHint, { color: '#111111' }]}
                   numberOfLines={1}
                   adjustsFontSizeToFit
                   minimumFontScale={0.72}
@@ -2464,7 +2603,7 @@ export default function ServiziScreen() {
                 item.scontoValidoDal &&
                 item.scontoValidoAl ? (
                   <Text
-                    style={[styles.serviceHint, { color: accent.text }]}
+                    style={[styles.serviceHint, { color: '#111111' }]}
                     numberOfLines={1}
                     adjustsFontSizeToFit
                     minimumFontScale={0.64}
@@ -2488,7 +2627,7 @@ export default function ServiziScreen() {
                       </Text>
                     </Animated.View>
                     <Text
-                      style={styles.servicePriceOriginal}
+                      style={[styles.servicePriceOriginal, { color: '#111111' }]}
                       numberOfLines={1}
                       adjustsFontSizeToFit
                       minimumFontScale={0.78}
@@ -2498,13 +2637,30 @@ export default function ServiziScreen() {
                   </>
                 ) : null}
                 <Text
-                  style={[styles.servicePrice, { color: accent.text }]}
+                  style={[styles.servicePrice, { color: '#111111' }]}
                   numberOfLines={1}
                   adjustsFontSizeToFit
                   minimumFontScale={0.74}
                 >
                   € {item.prezzo.toFixed(2)}
                 </Text>
+              </View>
+              <View
+                style={[
+                  styles.serviceSwipeHintRow,
+                  { backgroundColor: accent.border },
+                ]}
+              >
+                <View
+                  style={[
+                    styles.serviceSwipeHintInline,
+                  ]}
+                >
+                  <Ionicons name="arrow-back-outline" size={13} color={accent.text} />
+                  <Text style={[styles.serviceSwipeHintText, { color: accent.text }]}>
+                    Scorri per azioni rapide
+                  </Text>
+                </View>
               </View>
             </Animated.View>
               );
@@ -2531,7 +2687,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#F3F6FA',
   },
   content: {
-    paddingTop: 48,
+    paddingTop: 54,
     paddingBottom: 140,
   },
   pageShell: {
@@ -2542,7 +2698,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderRadius: 24,
     paddingHorizontal: IS_ANDROID ? 22 : 16,
-    paddingTop: 22,
+    paddingTop: 0,
     paddingBottom: 14,
     marginBottom: 10,
     borderWidth: 0,
@@ -2942,6 +3098,20 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '800',
   },
+  buttonLightDanger: {
+    backgroundColor: '#FEE2E2',
+    borderRadius: 20,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: '#FCA5A5',
+  },
+  buttonLightDangerText: {
+    color: '#991B1B',
+    fontSize: 15,
+    fontWeight: '800',
+  },
   buttonDisabled: {
     opacity: 0.45,
   },
@@ -2989,17 +3159,13 @@ const styles = StyleSheet.create({
     color: '#64748B',
   },
   operatorAvailabilityPanel: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 18,
-    padding: 12,
+    backgroundColor: 'transparent',
+    borderRadius: 0,
+    paddingHorizontal: 0,
+    paddingTop: 8,
+    paddingBottom: 4,
     marginBottom: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(15, 23, 42, 0.06)',
-    shadowColor: '#000',
-    shadowOpacity: 0.04,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 2,
+    borderWidth: 0,
   },
   operatorAvailabilityTitle: {
     fontSize: 12,
@@ -3304,6 +3470,28 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     width: '100%',
     minWidth: 0,
+  },
+  serviceSwipeHintRow: {
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 7,
+    minHeight: 22,
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  serviceSwipeHintInline: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    width: '100%',
+  },
+  serviceSwipeHintText: {
+    fontSize: 9.5,
+    fontWeight: '800',
+    textAlign: 'center',
   },
   discountBadge: {
     backgroundColor: '#fee2e2',
