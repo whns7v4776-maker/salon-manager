@@ -1494,7 +1494,7 @@ export default function ClienteFrontendScreen() {
       setAccessMode('login');
       setIsRegistered(true);
       setIsBookingStarted(shouldStartInBookingMode);
-      setShowRequestsExpanded(false);
+      setShowRequestsExpanded(!shouldStartInBookingMode);
 
       requestAnimationFrame(() => {
         scrollRef.current?.scrollTo({ y: 0, animated: true });
@@ -3527,7 +3527,7 @@ export default function ClienteFrontendScreen() {
 
       setIsRegistered(true);
       setIsBookingStarted(shouldStartInBookingMode);
-      setShowRequestsExpanded(false);
+      setShowRequestsExpanded(!shouldStartInBookingMode);
       requestAnimationFrame(() => {
         scrollRef.current?.scrollTo({ y: 0, animated: true });
       });
