@@ -1915,6 +1915,21 @@ const formatDurationLabel = (durationMinutes: number) => {
   return `${durationMinutes} min`;
 };
 
+const toSafeMoneyValue = (value: unknown) => {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : 0;
+  }
+
+  if (typeof value === 'string') {
+    const normalized = Number(value.replace(',', '.').trim());
+    return Number.isFinite(normalized) ? normalized : 0;
+  }
+
+  return 0;
+};
+
+const formatMoneyValue = (value: unknown) => toSafeMoneyValue(value).toFixed(2);
+
 export default function ClienteFrontendScreen() {
   const router = useRouter();
   const { width } = useWindowDimensions();
@@ -2584,6 +2599,24 @@ export default function ClienteFrontendScreen() {
   const frontendBiometricActionLabel =
     frontendBiometricType === 'faceid' ? 'Face ID' : 'biometria';
   const heroTitle = hasResolvedOrIncomingSalonCode ? 'Prenota' : tf('frontend_find_salon');
+  const connectedSalonBadgeLabel = useMemo(() => {
+    const salonName = effectiveWorkspace?.salonName?.trim() ?? '';
+    if (salonName) {
+      return salonName;
+    }
+
+    const fallbackCode = normalizeSalonCode(
+      selectedSalonCode || salonCodeDraft || initialSalonCodeParam || normalizedSelectedSalonCode
+    );
+
+    return fallbackCode || '';
+  }, [
+    effectiveWorkspace?.salonName,
+    initialSalonCodeParam,
+    normalizedSelectedSalonCode,
+    salonCodeDraft,
+    selectedSalonCode,
+  ]);
 
   useEffect(() => {
     (async () => {
@@ -2658,8 +2691,7 @@ export default function ClienteFrontendScreen() {
           });
         if (parsed.email?.trim() && parsed.telefono?.trim()) {
           if (preferredSalonCode) {
-            const shouldEnterBookingDirectly =
-              shouldStartInBookingMode || Boolean(preferredSalonCode);
+            const shouldEnterBookingDirectly = shouldStartInBookingMode;
             setIsRegistered(true);
             setIsBookingStarted(shouldEnterBookingDirectly);
             setShowRequestsExpanded(!shouldEnterBookingDirectly);
@@ -2940,8 +2972,7 @@ export default function ClienteFrontendScreen() {
       setAccessMode('login');
       setIsRegistered(true);
       setHasSavedProfileForSelectedSalon(true);
-      const shouldOpenBookingDirectly =
-        shouldStartInBookingMode || Boolean(initialSalonCodeParam) || Boolean(normalizedSalon);
+      const shouldOpenBookingDirectly = shouldStartInBookingMode;
       setIsBookingStarted(shouldOpenBookingDirectly);
       setShowRequestsExpanded(!shouldOpenBookingDirectly);
 
@@ -3048,7 +3079,15 @@ export default function ClienteFrontendScreen() {
       publicSalonRefreshInFlightRef.current = true;
 
       try {
-        const resolved = await resolveSalonByCode(normalizedSelectedSalonCode);
+        const [resolved, lightweightSettings] = await Promise.all([
+          resolveSalonByCode(normalizedSelectedSalonCode),
+          fetchClientPortalAvailabilitySettings(normalizedSelectedSalonCode).catch(() => null),
+        ]);
+
+        if (lightweightSettings?.availabilitySettings) {
+          applyPublicAvailabilitySettings(lightweightSettings.availabilitySettings);
+        }
+
         if (resolved) {
           applyPublicAvailabilitySettings(resolved.availabilitySettings);
           const now = Date.now();
@@ -3136,10 +3175,6 @@ export default function ClienteFrontendScreen() {
           return mergedResolved;
         }
 
-        const lightweightSettings = await fetchClientPortalAvailabilitySettings(
-          normalizedSelectedSalonCode
-        ).catch(() => null);
-
         if (lightweightSettings) {
           applyPublicAvailabilitySettings(lightweightSettings.availabilitySettings);
           setSalonLoadError('');
@@ -3147,6 +3182,9 @@ export default function ClienteFrontendScreen() {
         }
 
         return resolved;
+      } catch (error) {
+        console.log('Errore refresh stato salone pubblico:', error);
+        return publicSalonState;
       } finally {
         publicSalonRefreshInFlightRef.current = false;
         publicSalonRefreshPromiseRef.current = null;
@@ -3202,7 +3240,10 @@ export default function ClienteFrontendScreen() {
 
     const lightweightSettings = await fetchClientPortalAvailabilitySettings(
       normalizedSelectedSalonCode
-    ).catch(() => null);
+    ).catch((error) => {
+      console.log('Errore refresh availability settings pubblico:', error);
+      return null;
+    });
 
     if (lightweightSettings) {
       applyPublicAvailabilitySettings(lightweightSettings.availabilitySettings);
@@ -3221,19 +3262,32 @@ export default function ClienteFrontendScreen() {
       return { resolved: null, occupancy: [] as PublicBookingOccupancyItem[] };
     }
 
-    const lightweightSettings = await fetchClientPortalAvailabilitySettings(
-      normalizedSelectedSalonCode
-    ).catch(() => null);
+    try {
+      const lightweightSettings = await fetchClientPortalAvailabilitySettings(
+        normalizedSelectedSalonCode
+      ).catch((error) => {
+        console.log('Errore refresh availability settings prenota pubblico:', error);
+        return null;
+      });
 
-    if (lightweightSettings) {
-      applyPublicAvailabilitySettings(lightweightSettings.availabilitySettings);
+      if (lightweightSettings) {
+        applyPublicAvailabilitySettings(lightweightSettings.availabilitySettings);
+      }
+
+      const resolved = await refreshPublicSalonState();
+      const occupancy = derivePublicBookingOccupancyFromSnapshot(resolved, data);
+      setBackendDayOccupancy(occupancy);
+
+      return { resolved, occupancy };
+    } catch (error) {
+      console.log('Errore refresh disponibilita salone pubblico:', error);
+      const fallbackOccupancy = derivePublicBookingOccupancyFromSnapshot(publicSalonState, data);
+      setBackendDayOccupancy(fallbackOccupancy);
+      return {
+        resolved: publicSalonState,
+        occupancy: fallbackOccupancy,
+      };
     }
-
-    const resolved = await refreshPublicSalonState();
-    const occupancy = derivePublicBookingOccupancyFromSnapshot(resolved, data);
-    setBackendDayOccupancy(occupancy);
-
-    return { resolved, occupancy };
   }, [
     data,
     derivePublicBookingOccupancyFromSnapshot,
@@ -3255,6 +3309,24 @@ export default function ClienteFrontendScreen() {
       return undefined;
     }, [isCurrentWorkspaceSalon, normalizedSelectedSalonCode, refreshPublicSalonAvailability])
   );
+
+  useEffect(() => {
+    if (isCurrentWorkspaceSalon || !normalizedSelectedSalonCode) {
+      return undefined;
+    }
+
+    const interval = setInterval(() => {
+      void refreshPublicAvailabilitySettingsOnly();
+    }, 4000);
+
+    return () => {
+      clearInterval(interval);
+    };
+  }, [
+    isCurrentWorkspaceSalon,
+    normalizedSelectedSalonCode,
+    refreshPublicAvailabilitySettingsOnly,
+  ]);
 
   const syncClientPushRegistration = useCallback(async () => {
     if (!isRegistered || !effectiveWorkspace?.salonCode) {
@@ -6579,8 +6651,7 @@ export default function ClienteFrontendScreen() {
         console.log('Errore salvataggio ultimo salone dopo registrazione:', error);
       });
 
-      const shouldOpenBookingDirectly =
-        shouldStartInBookingMode || Boolean(normalizeSalonCode(effectiveWorkspace.salonCode));
+      const shouldOpenBookingDirectly = shouldStartInBookingMode;
       setHasSavedProfileForSelectedSalon(true);
       setIsRegistered(true);
       setIsBookingStarted(shouldOpenBookingDirectly);
@@ -6593,6 +6664,11 @@ export default function ClienteFrontendScreen() {
       requestAnimationFrame(() => {
         scrollRef.current?.scrollTo({ y: 0, animated: true });
       });
+    } catch (error) {
+      console.log('Errore registrazione cliente frontend:', error);
+      setProfileSaveError(
+        'Non riesco a completare la registrazione in questo momento. Riprova tra un attimo.'
+      );
     } finally {
       setIsSavingProfile(false);
     }
@@ -6782,8 +6858,7 @@ export default function ClienteFrontendScreen() {
         console.log('Errore salvataggio ultimo salone dopo accesso:', error);
       });
 
-      const shouldOpenBookingDirectly =
-        shouldStartInBookingMode || Boolean(normalizeSalonCode(sourceWorkspace.salonCode));
+      const shouldOpenBookingDirectly = shouldStartInBookingMode;
       setHasSavedProfileForSelectedSalon(true);
       setIsRegistered(true);
       setIsBookingStarted(shouldOpenBookingDirectly);
@@ -6792,6 +6867,11 @@ export default function ClienteFrontendScreen() {
       requestAnimationFrame(() => {
         scrollRef.current?.scrollTo({ y: 0, animated: true });
       });
+    } catch (error) {
+      console.log('Errore accesso cliente frontend:', error);
+      setProfileSaveError(
+        'Non riesco a completare l’accesso in questo momento. Riprova tra un attimo.'
+      );
     } finally {
       setIsSavingProfile(false);
     }
@@ -6923,7 +7003,7 @@ export default function ClienteFrontendScreen() {
       return;
     }
 
-    router.replace('/cliente-scanner');
+    router.replace('/');
   }, [
     isHomeAutoLoginFlow,
     isRegistered,
@@ -8054,7 +8134,7 @@ export default function ClienteFrontendScreen() {
       return;
     }
 
-    router.replace('/cliente-scanner');
+    router.replace('/');
   };
 
   const openFrontendSettings = useCallback(() => {
@@ -8085,7 +8165,7 @@ export default function ClienteFrontendScreen() {
       return;
     }
 
-    router.replace('/cliente-scanner');
+    router.replace('/');
   }, [router]);
 
   const performFrontendLogout = async () => {
@@ -8409,20 +8489,20 @@ export default function ClienteFrontendScreen() {
             adjustsFontSizeToFit
             minimumFontScale={0.72}
           >
-            € {item.prezzo.toFixed(2)}
+            € {formatMoneyValue(item.prezzo)}
           </Text>
           {selected ? (
             <View style={styles.serviceSelectedBadge}>
               <Text style={styles.serviceSelectedBadgeText}>Scelto</Text>
             </View>
           ) : null}
-          {item.prezzoOriginale && item.prezzoOriginale > item.prezzo ? (
+          {toSafeMoneyValue(item.prezzoOriginale) > toSafeMoneyValue(item.prezzo) ? (
             <View style={styles.discountRow}>
               <View style={styles.discountBadge}>
                 <Text style={styles.discountBadgeText}>Sconto</Text>
               </View>
               <Text style={styles.servicePriceOriginal}>
-                € {item.prezzoOriginale.toFixed(2)}
+                € {formatMoneyValue(item.prezzoOriginale)}
               </Text>
             </View>
           ) : null}
@@ -8919,13 +8999,13 @@ export default function ClienteFrontendScreen() {
             </Text>
           </View>
 
-          {effectiveWorkspace?.salonName?.trim() ? (
+          {connectedSalonBadgeLabel ? (
             <View style={styles.connectedSalonBadge}>
               <Text style={styles.connectedSalonBadgeEyebrow}>
                 {isManualRegistrationFlow ? 'Salone collegato per la registrazione' : 'Salone collegato'}
               </Text>
               <Text style={styles.connectedSalonBadgeName}>
-                {effectiveWorkspace.salonName.trim()}
+                {connectedSalonBadgeLabel}
               </Text>
             </View>
           ) : null}
@@ -9027,7 +9107,7 @@ export default function ClienteFrontendScreen() {
           </Text>
           <TouchableOpacity
             style={styles.frontendSalonWarningButton}
-            onPress={() => router.replace('/cliente-scanner')}
+            onPress={() => router.replace('/')}
             activeOpacity={0.9}
           >
             <Text style={styles.frontendSalonWarningButtonText}>Vai a Inserisci codice salone</Text>
@@ -9516,7 +9596,23 @@ export default function ClienteFrontendScreen() {
                       styles.accessModeButton,
                       activeAccessMode === 'login' && styles.accessModeButtonActive,
                     ]}
-                    onPress={() => setAccessMode('login')}
+                    onPress={() => {
+                      if (activeAccessMode === 'login') {
+                        if (profile.email.trim() || profile.telefono.trim()) {
+                          Keyboard.dismiss();
+                          setProfileSaveError('');
+                          void loginFrontendCliente();
+                          return;
+                        }
+
+                        requestAnimationFrame(() => {
+                          scrollToField(emailInputRef);
+                        });
+                        return;
+                      }
+
+                      setAccessMode('login');
+                    }}
                     activeOpacity={0.9}
                   >
                     <Text
@@ -10292,7 +10388,7 @@ export default function ClienteFrontendScreen() {
               <Text style={styles.summaryText}>Operatore: {operatoreNome || '—'}</Text>
             ) : null}
             <Text style={styles.summaryText}>
-              Prezzo: {servizioSelezionato ? `€ ${servizioSelezionato.prezzo.toFixed(2)}` : '—'}
+              Prezzo: {servizioSelezionato ? `€ ${formatMoneyValue(servizioSelezionato.prezzo)}` : '—'}
             </Text>
             {Platform.OS === 'web' ? (
               <button
