@@ -5,10 +5,10 @@ import {
     ScrollView,
     StyleSheet,
     Text,
-    TouchableOpacity,
     useWindowDimensions,
     View,
 } from 'react-native';
+import { HapticTouchable } from './ui/haptic-touchable';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 const IS_ANDROID = Platform.OS === 'android';
@@ -202,8 +202,8 @@ function StepVisual({
   if (visual === 'qr') {
     return (
       <View style={[shellStyle, styles.visualShellCentered]}>
-        <View style={styles.qrCard}>
-          <View style={styles.qrGrid}>
+        <View style={[styles.qrCard, compact && styles.qrCardCompact]}>
+          <View style={[styles.qrGrid, compact && styles.qrGridCompact]}>
             {Array.from({ length: 25 }, (_, index) => (
               <View
                 key={`qr-${index}`}
@@ -212,7 +212,7 @@ function StepVisual({
             ))}
           </View>
         </View>
-        <View style={styles.qrCaptionChip}>
+        <View style={[styles.qrCaptionChip, compact && styles.qrCaptionChipCompact]}>
           <Ionicons name="phone-portrait-outline" size={18} color="#f8fafc" />
             <Text
               numberOfLines={1}
@@ -230,10 +230,10 @@ function StepVisual({
 
   if (visual === 'agenda') {
     return (
-      <View style={shellStyle}>
-        <View style={styles.agendaHeaderRow}>
+      <View style={[shellStyle, compact && styles.agendaShellCompact]}>
+        <View style={[styles.agendaHeaderRow, compact && styles.agendaHeaderRowCompact]}>
           <Text style={styles.panelTitle}>Agenda</Text>
-          <View style={styles.agendaBadge}>
+          <View style={[styles.agendaBadge, compact && styles.agendaBadgeCompact]}>
             <Text
               numberOfLines={1}
               ellipsizeMode="clip"
@@ -245,21 +245,21 @@ function StepVisual({
             </Text>
           </View>
         </View>
-        <View style={styles.agendaGrid}>
-          <View style={styles.timeRail}>
+        <View style={[styles.agendaGrid, compact && styles.agendaGridCompact]}>
+          <View style={[styles.timeRail, compact && styles.timeRailCompact]}>
             <Text style={styles.timeText}>09:00</Text>
             <Text style={styles.timeText}>10:00</Text>
             <Text style={styles.timeText}>11:00</Text>
           </View>
-          <View style={styles.agendaColumn}>
-            <View style={styles.blockTall} />
-            <View style={styles.freeSlot} />
-            <View style={styles.blockSmall} />
+          <View style={[styles.agendaColumn, compact && styles.agendaColumnCompact]}>
+            <View style={[styles.blockTall, compact && styles.blockTallCompact]} />
+            <View style={[styles.freeSlot, compact && styles.freeSlotCompact]} />
+            <View style={[styles.blockSmall, compact && styles.blockSmallCompact]} />
           </View>
-          <View style={styles.agendaColumn}>
-            <View style={styles.freeSlot} />
-            <View style={styles.blockWide} />
-            <View style={styles.freeSlot} />
+          <View style={[styles.agendaColumn, compact && styles.agendaColumnCompact]}>
+            <View style={[styles.freeSlot, compact && styles.freeSlotCompact]} />
+            <View style={[styles.blockWide, compact && styles.blockWideCompact]} />
+            <View style={[styles.freeSlot, compact && styles.freeSlotCompact]} />
           </View>
         </View>
       </View>
@@ -330,7 +330,9 @@ export function OnboardingModal({ visible, onClose, onComplete }: OnboardingModa
 
   const isCompactHeight = height < 760;
   const cardMaxWidth = Math.min(width - 28, 560);
-  const cardMaxHeight = Math.min(height * 0.8, 680);
+  const cardFixedHeight = Math.min(height * (isCompactHeight ? 0.68 : 0.72), isCompactHeight ? 500 : 600);
+  const overlayTop = isCompactHeight ? 58 : 64;
+  const popupTopOffset = isCompactHeight ? 76 : 82;
   const currentStep = ONBOARDING_STEPS[currentIndex];
   const progressLabel = `${currentIndex + 1} / ${ONBOARDING_STEPS.length}`;
 
@@ -354,26 +356,42 @@ export function OnboardingModal({ visible, onClose, onComplete }: OnboardingModa
   };
 
   return (
-    <View style={styles.modalRoot} pointerEvents="box-none">
+    <View style={styles.modalRoot}>
       <View style={styles.scrim} />
+      <View pointerEvents="none" style={styles.scrimVignetteTop} />
+      <View pointerEvents="none" style={styles.scrimVignetteBottom} />
 
       <SafeAreaView style={styles.safeArea} edges={['top', 'bottom', 'left', 'right']}>
-        <View style={styles.overlayHeader}>
+        <View style={[styles.overlayHeader, { top: overlayTop }]}>
           <View style={styles.overlayBadge}>
             <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.82} style={styles.overlayBadgeText}>Onboarding</Text>
           </View>
-          <TouchableOpacity style={styles.skipButton} onPress={onClose} activeOpacity={0.86}>
+          <HapticTouchable
+            style={styles.skipButton}
+            onPress={onClose}
+            hapticType="light"
+            pressInHapticType="light"
+            activeOpacity={0.9}
+          >
             <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.82} style={styles.skipText}>Salta</Text>
-          </TouchableOpacity>
+          </HapticTouchable>
         </View>
 
-        <View style={styles.centerLayer}>
+        <View
+          style={[
+            styles.centerLayer,
+            {
+              paddingTop: popupTopOffset,
+              paddingBottom: isCompactHeight ? 34 : 40,
+            },
+          ]}
+        >
           <View
             style={[
               styles.cardShell,
               {
                 maxWidth: cardMaxWidth,
-                maxHeight: cardMaxHeight,
+                height: cardFixedHeight,
               },
             ]}
           >
@@ -384,6 +402,7 @@ export function OnboardingModal({ visible, onClose, onComplete }: OnboardingModa
               contentContainerStyle={styles.cardScrollContent}
               showsVerticalScrollIndicator={false}
               bounces={false}
+              scrollEnabled={false}
             >
               <View style={styles.cardAccent} />
               <View style={[styles.visualWrap, isCompactHeight && styles.visualWrapCompact]}>
@@ -402,20 +421,24 @@ export function OnboardingModal({ visible, onClose, onComplete }: OnboardingModa
             </ScrollView>
 
             <View style={styles.footer}>
-              <View style={styles.dotsRow}>
+              <View pointerEvents="none" style={styles.dotsRow}>
                 {ONBOARDING_STEPS.map((step, index) => (
-                  <TouchableOpacity
+                  <View
                     key={step.key}
                     style={styles.dotButton}
-                    onPress={() => setCurrentIndex(index)}
-                    activeOpacity={0.85}
                   >
                     <View style={[styles.dot, index === currentIndex && styles.dotActive]} />
-                  </TouchableOpacity>
+                  </View>
                 ))}
               </View>
 
-              <TouchableOpacity style={styles.primaryButton} onPress={handleNext} activeOpacity={0.92}>
+              <HapticTouchable
+                style={styles.primaryButton}
+                onPress={handleNext}
+                hapticType="medium"
+                pressInHapticType="light"
+                activeOpacity={0.92}
+              >
                 <Text
                   numberOfLines={1}
                   ellipsizeMode="clip"
@@ -425,7 +448,7 @@ export function OnboardingModal({ visible, onClose, onComplete }: OnboardingModa
                 >
                   {currentStep.cta}
                 </Text>
-              </TouchableOpacity>
+              </HapticTouchable>
             </View>
           </View>
         </View>
@@ -443,26 +466,46 @@ const styles = StyleSheet.create({
   },
   scrim: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(8, 15, 26, 0.32)',
+    backgroundColor: 'rgba(7, 12, 22, 0.82)',
+  },
+  scrimVignetteTop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: '38%',
+    backgroundColor: 'rgba(7, 12, 22, 0.14)',
+  },
+  scrimVignetteBottom: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: '32%',
+    backgroundColor: 'rgba(7, 12, 22, 0.18)',
   },
   safeArea: {
     flex: 1,
+    position: 'relative',
   },
   overlayHeader: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    zIndex: 3,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingTop: 2,
-    paddingBottom: 8,
+    paddingHorizontal: 10,
+    paddingBottom: 0,
   },
   overlayBadge: {
     borderRadius: 999,
-    paddingHorizontal: IS_ANDROID ? 16 : 12,
-    paddingVertical: 7,
-    backgroundColor: 'rgba(255, 255, 255, 0.18)',
+    paddingHorizontal: IS_ANDROID ? 14 : 12,
+    paddingVertical: 8,
+    backgroundColor: '#111827',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.18)',
+    borderColor: 'rgba(255,255,255,0.08)',
   },
   overlayBadgeText: {
     fontSize: 11,
@@ -474,11 +517,11 @@ const styles = StyleSheet.create({
   },
   skipButton: {
     borderRadius: 999,
-    paddingHorizontal: IS_ANDROID ? 18 : 14,
-    paddingVertical: 9,
-    backgroundColor: 'rgba(15, 23, 42, 0.34)',
+    paddingHorizontal: IS_ANDROID ? 16 : 14,
+    paddingVertical: 8,
+    backgroundColor: '#111827',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.14)',
+    borderColor: 'rgba(255,255,255,0.08)',
   },
   skipText: {
     fontSize: 14,
@@ -489,9 +532,8 @@ const styles = StyleSheet.create({
   centerLayer: {
     flex: 1,
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
     paddingHorizontal: 14,
-    paddingBottom: 8,
   },
   cardShell: {
     width: '100%',
@@ -511,12 +553,13 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(244, 248, 252, 0.9)',
   },
   cardScroll: {
-    flexGrow: 0,
+    flex: 1,
   },
   cardScrollContent: {
+    flexGrow: 1,
     paddingHorizontal: 18,
-    paddingTop: 18,
-    paddingBottom: 18,
+    paddingTop: 12,
+    paddingBottom: 8,
   },
   cardAccent: {
     width: 44,
@@ -524,18 +567,19 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     alignSelf: 'center',
     backgroundColor: 'rgba(71, 85, 105, 0.28)',
-    marginBottom: 14,
+    marginBottom: 10,
   },
   visualWrap: {
-    height: 212,
-    marginBottom: 18,
+    height: 214,
+    marginBottom: 16,
   },
   visualWrapCompact: {
-    height: 172,
-    marginBottom: 14,
+    height: 188,
+    marginBottom: 12,
   },
   copyBlock: {
     alignItems: 'center',
+    paddingTop: 6,
   },
   progressText: {
     fontSize: 12,
@@ -543,26 +587,26 @@ const styles = StyleSheet.create({
     color: '#475569',
     letterSpacing: 0.8,
     textTransform: 'uppercase',
-    marginBottom: 8,
+    marginBottom: 6,
     paddingHorizontal: ANDROID_TEXT_BREATHING_ROOM,
   },
   title: {
-    fontSize: 30,
-    lineHeight: 36,
+    fontSize: 27,
+    lineHeight: 32,
     fontWeight: '900',
     color: '#0f172a',
     textAlign: 'center',
-    marginBottom: 10,
+    marginBottom: 6,
     paddingHorizontal: ANDROID_TEXT_BREATHING_ROOM,
   },
   titleCompact: {
-    fontSize: 25,
-    lineHeight: 31,
-    marginBottom: 8,
+    fontSize: 23,
+    lineHeight: 28,
+    marginBottom: 6,
   },
   body: {
-    fontSize: 16,
-    lineHeight: 24,
+    fontSize: 15,
+    lineHeight: 22,
     fontWeight: '600',
     color: '#334155',
     textAlign: 'center',
@@ -570,13 +614,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: ANDROID_TEXT_BREATHING_ROOM,
   },
   bodyCompact: {
-    fontSize: 15,
-    lineHeight: 22,
+    fontSize: 14,
+    lineHeight: 20,
   },
   footer: {
     paddingHorizontal: 18,
-    paddingTop: 12,
-    paddingBottom: 18,
+    paddingTop: 8,
+    paddingBottom: 12,
     borderTopWidth: 1,
     borderTopColor: 'rgba(255, 255, 255, 0.24)',
     backgroundColor: 'rgba(255, 255, 255, 0.12)',
@@ -585,7 +629,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 14,
+    marginBottom: 10,
   },
   dotButton: {
     paddingHorizontal: 5,
@@ -797,11 +841,22 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: 14,
   },
+  qrCardCompact: {
+    width: 98,
+    height: 98,
+    borderRadius: 18,
+    padding: 8,
+    marginBottom: 8,
+  },
   qrGrid: {
     width: 88,
     height: 88,
     flexDirection: 'row',
     flexWrap: 'wrap',
+  },
+  qrGridCompact: {
+    width: 70,
+    height: 70,
   },
   qrCell: {
     width: '20%',
@@ -824,6 +879,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: IS_ANDROID ? 16 : 12,
     paddingVertical: 8,
   },
+  qrCaptionChipCompact: {
+    paddingHorizontal: IS_ANDROID ? 14 : 10,
+    paddingVertical: 6,
+  },
   qrCaptionText: {
     fontSize: 12,
     fontWeight: '800',
@@ -836,6 +895,12 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 12,
   },
+  agendaShellCompact: {
+    padding: 10,
+  },
+  agendaHeaderRowCompact: {
+    marginBottom: 8,
+  },
   agendaBadge: {
     borderRadius: 999,
     backgroundColor: 'rgba(255, 255, 255, 0.1)',
@@ -843,6 +908,10 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255, 255, 255, 0.08)',
     paddingHorizontal: IS_ANDROID ? 14 : 10,
     paddingVertical: 6,
+  },
+  agendaBadgeCompact: {
+    paddingHorizontal: IS_ANDROID ? 12 : 8,
+    paddingVertical: 4,
   },
   agendaBadgeText: {
     fontSize: 11,
@@ -855,9 +924,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 8,
   },
+  agendaGridCompact: {
+    gap: 6,
+  },
   timeRail: {
     justifyContent: 'space-between',
     paddingVertical: 4,
+  },
+  timeRailCompact: {
+    paddingVertical: 2,
   },
   timeText: {
     fontSize: 10,
@@ -869,12 +944,19 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: 8,
   },
+  agendaColumnCompact: {
+    gap: 6,
+  },
   blockTall: {
     height: 64,
     borderRadius: 14,
     backgroundColor: '#deecff',
     borderWidth: 1,
     borderColor: '#bfd8ff',
+  },
+  blockTallCompact: {
+    height: 48,
+    borderRadius: 12,
   },
   blockSmall: {
     height: 34,
@@ -883,12 +965,20 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#f7bcbc',
   },
+  blockSmallCompact: {
+    height: 24,
+    borderRadius: 12,
+  },
   blockWide: {
     height: 50,
     borderRadius: 14,
     backgroundColor: '#e3f7e9',
     borderWidth: 1,
     borderColor: '#bbe7c8',
+  },
+  blockWideCompact: {
+    height: 38,
+    borderRadius: 12,
   },
   freeSlot: {
     height: 28,
@@ -897,6 +987,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderStyle: 'dashed',
     borderColor: 'rgba(255, 255, 255, 0.18)',
+  },
+  freeSlotCompact: {
+    height: 20,
+    borderRadius: 12,
   },
   speedCore: {
     width: 74,

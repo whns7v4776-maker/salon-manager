@@ -107,7 +107,7 @@ export function NumberPickerModal({
   useEffect(() => {
     if (!visible) return;
     setDraftValue(safeInitialValue);
-    setShowGrid(Platform.OS === 'android');
+    setShowGrid(Platform.OS !== 'ios');
   }, [safeInitialValue, visible]);
 
   const wheelValues = useMemo(
@@ -175,7 +175,14 @@ export function NumberPickerModal({
   if (!visible) return null;
 
   return (
-    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
+    <Modal
+      visible
+      transparent
+      animationType="fade"
+      presentationStyle="overFullScreen"
+      statusBarTranslucent
+      onRequestClose={onClose}
+    >
       <View style={styles.backdrop}>
         <HapticTouchable style={styles.dismissArea} activeOpacity={1} onPress={onClose} />
         <View style={styles.sheet}>

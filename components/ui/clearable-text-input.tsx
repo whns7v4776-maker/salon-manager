@@ -50,15 +50,17 @@ export const ClearableTextInput = forwardRef<TextInput, ClearableTextInputProps>
           ]}
         />
         {editable && hasValue ? (
-          <HapticTouchable
-            style={styles.clearButton}
-            onPress={() => onChangeText?.('')}
-            hapticType="error"
-            activeOpacity={0.85}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          >
-            <Ionicons name="close" size={16} color="#7f1d1d" />
-          </HapticTouchable>
+          <View pointerEvents="box-none" style={styles.clearButtonSlot}>
+            <HapticTouchable
+              style={styles.clearButton}
+              onPress={() => onChangeText?.('')}
+              hapticType="error"
+              activeOpacity={0.85}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Ionicons name="close" size={16} color="#7f1d1d" style={styles.clearIcon} />
+            </HapticTouchable>
+          </View>
         ) : null}
       </View>
     );
@@ -75,6 +77,13 @@ const styles = StyleSheet.create({
   inputPadding: {
     paddingRight: 42,
   },
+  clearButtonSlot: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    right: 10,
+    justifyContent: 'center',
+  },
   androidInputSafety: {
     includeFontPadding: true,
     textAlignVertical: 'center',
@@ -82,10 +91,6 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
   },
   clearButton: {
-    position: 'absolute',
-    right: 14,
-    top: '50%',
-    marginTop: -14,
     width: 28,
     height: 28,
     borderRadius: 999,
@@ -94,5 +99,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 1,
     borderColor: '#fecaca',
+  },
+  clearIcon: {
+    transform: [{ translateY: -0.5 }],
   },
 });

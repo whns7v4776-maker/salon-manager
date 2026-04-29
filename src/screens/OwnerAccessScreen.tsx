@@ -94,6 +94,7 @@ export function OwnerAccessScreen() {
   const [registerCustomCategoryOpen, setRegisterCustomCategoryOpen] = useState(false);
   const [registerEmail, setRegisterEmail] = useState('');
   const [registerPassword, setRegisterPassword] = useState('');
+  const [registerPasswordFocused, setRegisterPasswordFocused] = useState(false);
   const [resetEmail, setResetEmail] = useState('');
   const [recoveryPassword, setRecoveryPassword] = useState('');
   const [recoveryPasswordConfirm, setRecoveryPasswordConfirm] = useState('');
@@ -109,7 +110,8 @@ export function OwnerAccessScreen() {
     registerBusinessPhone?: string;
   }>({});
   const { focusField, scrollToField } = useKeyboardAwareScroll(scrollRef, {
-    topOffset: 36,
+    topOffset: Platform.OS === 'ios' ? 220 : 184,
+    focusScrollDelay: Platform.OS === 'ios' ? 64 : 56,
   });
   const registerActivityCategory = useMemo(() => {
     const seen = new Set<string>();
@@ -222,18 +224,20 @@ export function OwnerAccessScreen() {
       ? 'Chiudi registrazione'
       : 'Apri registrazione';
   const registerButtonLabel = isCompactWidth ? 'Crea' : 'Crea salone';
+  const registerEmailTopOffset = Platform.OS === 'ios' ? 188 : 156;
+  const registerPasswordTopOffset = Platform.OS === 'ios' ? 212 : 176;
 
-  const navigateToOwnerAgenda = React.useCallback(() => {
+  const navigateToOwnerBackoffice = React.useCallback(() => {
     if (
       Platform.OS === 'web' &&
       typeof window !== 'undefined' &&
       typeof window.location?.assign === 'function'
     ) {
-      window.location.assign('/agenda');
+      window.location.assign('/');
       return;
     }
 
-    router.replace('/agenda');
+    router.replace('/(tabs)/index');
   }, [router]);
 
   const scrollToRegisterCard = () => {
@@ -252,15 +256,52 @@ export function OwnerAccessScreen() {
     scrollToRegisterCard();
   };
 
+  const scrollToRegisterCredentials = React.useCallback(() => {
+    Keyboard.dismiss();
+    requestAnimationFrame(() => {
+      scrollToField(registerEmailRef, {
+        topOffset: registerEmailTopOffset,
+        scrollDelay: 0,
+      });
+    });
+  }, [registerEmailTopOffset, scrollToField]);
+
+  const keepRegisterCredentialVisible = React.useCallback(
+    (target: 'email' | 'password') => {
+      const targetRef = target === 'password' ? registerPasswordRef : registerEmailRef;
+      const targetTopOffset =
+        target === 'password' ? registerPasswordTopOffset : registerEmailTopOffset;
+
+      scrollToField(targetRef, {
+        topOffset: targetTopOffset,
+        scrollDelay: Platform.OS === 'ios' ? 72 : 56,
+      });
+    },
+    [registerEmailTopOffset, registerPasswordTopOffset, scrollToField]
+  );
+
+  const revealRegisterCredentials = React.useCallback(
+    (target: 'email' | 'password' = 'email') => {
+      requestAnimationFrame(() => {
+        keepRegisterCredentialVisible(target);
+      });
+    },
+    [keepRegisterCredentialVisible]
+  );
+
   const toggleRegistrationCategory = (option: string) => {
     setRegisterSelectedCategories((current) => {
       const normalizedOption = option.trim().toLowerCase();
       const exists = current.some((item) => item.trim().toLowerCase() === normalizedOption);
-      if (exists) {
-        return current.filter((item) => item.trim().toLowerCase() !== normalizedOption);
+      const next = exists
+        ? current.filter((item) => item.trim().toLowerCase() !== normalizedOption)
+        : [...current, option];
+
+      if (next.length > 0 && !registerCustomCategoryOpen) {
+        scrollToRegisterCredentials();
       }
 
-      return [...current, option];
+      return next;
     });
   };
 
@@ -289,7 +330,7 @@ export function OwnerAccessScreen() {
         return;
       }
 
-      navigateToOwnerAgenda();
+      navigateToOwnerBackoffice();
     } catch (error) {
       const fallbackError =
         error instanceof Error && error.message.trim()
@@ -436,11 +477,14 @@ export function OwnerAccessScreen() {
       <View style={styles.backgroundGlowBottom} />
       <KeyboardAvoidingView
         style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : Platform.OS === 'android' ? 'height' : undefined}
+        behavior={Platform.OS === 'android' ? 'height' : undefined}
       >
         <ScrollView
           ref={scrollRef}
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[
+            styles.scrollContent,
+            registerPasswordFocused && styles.scrollContentPasswordFocused,
+          ]}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
           onScrollBeginDrag={Keyboard.dismiss}
@@ -449,7 +493,7 @@ export function OwnerAccessScreen() {
           <View style={styles.heroCard}>
             <TouchableOpacity
               style={styles.heroBackButton}
-              onPress={() => router.replace('/cliente-scanner')}
+              onPress={() => router.replace('/')}
               activeOpacity={0.88}
             >
               <Ionicons name="chevron-back" size={22} color="#0F172A" />
@@ -1043,14 +1087,13 @@ export function OwnerAccessScreen() {
                   returnKeyType="next"
                   onSubmitEditing={() => {
                     if (registerActivityCategory.trim()) {
-                      focusField(registerEmailRef);
+                      scrollToRegisterCredentials();
                       return;
                     }
 
                     setRegisterCustomCategoryOpen(true);
                     requestAnimationFrame(() => {
                       scrollToField(registerActivityCategoryRef);
-                      registerActivityCategoryRef.current?.focus();
                     });
                   }}
                   blurOnSubmit={false}
@@ -1106,7 +1149,6 @@ export function OwnerAccessScreen() {
                         setRegisterCustomCategoryOpen((current) => !current);
                         requestAnimationFrame(() => {
                           scrollToField(registerActivityCategoryRef);
-                          registerActivityCategoryRef.current?.focus();
                         });
                       }}
                     >
@@ -1147,7 +1189,7 @@ export function OwnerAccessScreen() {
                       autoCapitalize="words"
                       onFocus={() => scrollToField(registerActivityCategoryRef)}
                       returnKeyType="next"
-                      onSubmitEditing={() => focusField(registerEmailRef)}
+                      onSubmitEditing={() => scrollToRegisterCredentials()}
                       blurOnSubmit={false}
                     />
                   ) : null}
@@ -1171,9 +1213,12 @@ export function OwnerAccessScreen() {
                       setFormErrors((current) => ({ ...current, registerEmail: undefined }));
                     }
                   }}
-                  onFocus={() => scrollToField(registerEmailRef)}
+                  onFocus={() => {
+                    setRegisterPasswordFocused(false);
+                    keepRegisterCredentialVisible('email');
+                  }}
                   returnKeyType="next"
-                  onSubmitEditing={() => focusField(registerPasswordRef)}
+                  onSubmitEditing={() => revealRegisterCredentials('password')}
                   blurOnSubmit={false}
                 />
                 {formErrors.registerEmail ? (
@@ -1194,7 +1239,11 @@ export function OwnerAccessScreen() {
                   textContentType="newPassword"
                   value={registerPassword}
                   onChangeText={setRegisterPassword}
-                  onFocus={() => scrollToField(registerPasswordRef)}
+                  onFocus={() => {
+                    setRegisterPasswordFocused(true);
+                    keepRegisterCredentialVisible('password');
+                  }}
+                  onBlur={() => setRegisterPasswordFocused(false)}
                   returnKeyType="done"
                   onSubmitEditing={Keyboard.dismiss}
                 />
@@ -1266,8 +1315,11 @@ const styles = StyleSheet.create(withAndroidStyleSafety({
     flexGrow: 1,
     paddingHorizontal: Platform.OS === 'android' ? 28 : 22,
     paddingTop: 68,
-    paddingBottom: 40,
+    paddingBottom: Platform.OS === 'ios' ? 260 : 220,
     alignItems: 'center',
+  },
+  scrollContentPasswordFocused: {
+    paddingBottom: Platform.OS === 'ios' ? 360 : 280,
   },
   heroCard: {
     width: '100%',

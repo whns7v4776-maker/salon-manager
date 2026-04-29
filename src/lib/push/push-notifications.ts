@@ -86,13 +86,18 @@ const resolveRpcName = async ({
   return authSession.session ? authName : publicName;
 };
 
+const hasAuthenticatedSession = async () => {
+  const { data: authSession } = await supabase.auth.getSession();
+  return !!authSession.session;
+};
+
 export const configurePushNotifications = () => {
   Notifications.setNotificationHandler({
     handleNotification: async () => ({
       shouldShowBanner: true,
       shouldShowList: true,
       shouldPlaySound: true,
-      shouldSetBadge: false,
+      shouldSetBadge: true,
     }),
   });
 };
@@ -146,12 +151,15 @@ export const scheduleLocalTestNotification = async ({
   }
 
   await ensureAndroidNotificationChannel();
+  const currentBadge = await Notifications.getBadgeCountAsync().catch(() => 0);
+  const nextBadge = Math.max(0, currentBadge + 1);
 
   await Notifications.scheduleNotificationAsync({
     content: {
       title,
       body,
       sound: true,
+      badge: nextBadge,
       data: {
         source: 'local_test',
         sentAt: new Date().toISOString(),
@@ -205,11 +213,15 @@ export const scheduleLocalRuntimeNotification = async ({
     runtimeLocalNotificationDedupeMap.set(dedupeKey, now);
   }
 
+  const currentBadge = await Notifications.getBadgeCountAsync().catch(() => 0);
+  const nextBadge = Math.max(0, currentBadge + 1);
+
   await Notifications.scheduleNotificationAsync({
     content: {
       title,
       body,
       sound: true,
+      badge: nextBadge,
       data: {
         ...data,
         dedupeKey: dedupeKey ?? null,
@@ -277,6 +289,10 @@ const upsertPushTokenBackend = async ({
     return false;
   }
 
+  if (recipientKind === 'owner' && audience !== 'auth') {
+    audience = 'auth';
+  }
+
   const rpcName = await resolveRpcName({
     authName: 'upsert_push_device',
     publicName: 'upsert_public_push_device',
@@ -300,7 +316,13 @@ const upsertPushTokenBackend = async ({
 
   const { error } = await supabase.rpc(rpcName, rpcPayload);
 
-  if (error) {
+  if (
+    error &&
+    !(
+      String(error.code ?? '').trim().toLowerCase() === 'pgrst002' ||
+      String(error.message ?? '').toLowerCase().includes('schema cache')
+    )
+  ) {
     console.log('Errore sincronizzazione push device:', error);
   }
 
@@ -395,11 +417,21 @@ export const queueWorkspacePushNotification = async ({
   const normalizedCustomerPhone = normalizePushPhone(customerPhone);
   const hasTargetedClient =
     audience !== 'auth' && (!!normalizedCustomerEmail || !!normalizedCustomerPhone);
+  const hasAuthSession = await hasAuthenticatedSession();
+
+  if (audience === 'auth' && !hasAuthSession) {
+    console.log('Push owner auth richiesta senza sessione auth locale: provo comunque ad accodarla sul workspace.', {
+      workspaceId,
+      eventType,
+    });
+  }
+
+  const ownerRpcName = 'queue_workspace_push';
 
   const rpcCalls =
     audience === 'all'
       ? [
-          supabase.rpc('queue_workspace_push', {
+          supabase.rpc(ownerRpcName, {
             p_workspace_id: workspaceId,
             p_event_type: eventType,
             p_title: title,
@@ -423,9 +455,9 @@ export const queueWorkspacePushNotification = async ({
             }
           ),
         ]
-      : hasTargetedClient
-        ? [
-            supabase.rpc('queue_public_customer_push', {
+        : hasTargetedClient
+          ? [
+              supabase.rpc('queue_public_customer_push', {
               p_workspace_id: workspaceId,
               p_event_type: eventType,
               p_title: title,
@@ -437,11 +469,13 @@ export const queueWorkspacePushNotification = async ({
           ]
         : [
             supabase.rpc(
-              await resolveRpcName({
-                authName: 'queue_workspace_push',
-                publicName: 'queue_public_workspace_push',
-                audience,
-              }),
+              audience === 'auth'
+                ? ownerRpcName
+                : await resolveRpcName({
+                    authName: 'queue_workspace_push',
+                    publicName: 'queue_public_workspace_push',
+                    audience,
+                  }),
               {
                 p_workspace_id: workspaceId,
                 p_event_type: eventType,
@@ -457,6 +491,20 @@ export const queueWorkspacePushNotification = async ({
   const failedResult = results.find((result) => result.error);
   if (failedResult?.error) {
     console.log('Errore accodamento push notification:', failedResult.error);
+    return false;
+  }
+
+  const queuedCount = results.reduce((count, result) => count + Number(result.data ?? 0), 0);
+  if (queuedCount <= 0) {
+    console.log('Push notification non accodata: nessun device destinatario attivo.', {
+      workspaceId,
+      eventType,
+      audience,
+      hasTargetedClient,
+      normalizedCustomerEmail,
+      normalizedCustomerPhone,
+      hasAuthSession,
+    });
     return false;
   }
 

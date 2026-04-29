@@ -1,12 +1,7 @@
-import {
-  assignFallbackOperatorsToAppointments,
-  getServiceDuration,
-  normalizeAvailabilitySettings,
-  normalizeRoleName,
-} from './booking';
+import { getServiceDuration, normalizeAvailabilitySettings, normalizeRoleName } from './booking';
 import { normalizeWorkspace, type SalonWorkspace } from './platform';
 import { normalizeServiceAccentKey } from './service-accents';
-import { supabase, supabaseAnonKey, supabaseUrl } from './supabase';
+import { supabase } from './supabase';
 
 export type ClientPortalSnapshot = {
   workspace: SalonWorkspace;
@@ -19,14 +14,6 @@ export type ClientPortalSnapshot = {
   serviceCardColorOverrides?: Record<string, string>;
   roleCardColorOverrides?: Record<string, string>;
 };
-
-export type ClientPortalAvailabilitySnapshot = {
-  workspace: Pick<
-    SalonWorkspace,
-    'id' | 'ownerEmail' | 'salonCode' | 'salonName' | 'updatedAt'
-  >;
-  availabilitySettings: ReturnType<typeof normalizeAvailabilitySettings>;
-} | null;
 
 export type PublicBookingOccupancyItem = {
   id: string;
@@ -43,49 +30,19 @@ export type PublicBookingOccupancyItem = {
 };
 
 const CLIENT_PORTAL_RPC_TIMEOUT_MS = 8000;
-const CLIENT_PORTAL_PUBLISH_TIMEOUT_MS = 8000;
+const CLIENT_PORTAL_SCHEMA_CACHE_RETRY_DELAYS_MS = [350, 700, 1200];
 
-const fetchPortalRpcRaw = async (
-  rpcName: 'get_client_portal_snapshot' | 'get_client_portal_availability_settings',
-  payload: Record<string, unknown>
-) => {
-  const response = await fetch(`${supabaseUrl}/rest/v1/rpc/${rpcName}`, {
-    method: 'POST',
-    cache: 'no-store',
-    headers: {
-      'Content-Type': 'application/json',
-      'Cache-Control': 'no-cache, no-store, max-age=0',
-      Pragma: 'no-cache',
-      apikey: supabaseAnonKey,
-      Authorization: `Bearer ${supabaseAnonKey}`,
-    },
-    body: JSON.stringify(payload),
-  });
+const isSupabaseSchemaCacheLookupError = (error: unknown) => {
+  const code = typeof error === 'object' && error !== null ? String((error as { code?: unknown }).code ?? '') : '';
+  const message =
+    typeof error === 'object' && error !== null
+      ? String((error as { message?: unknown }).message ?? '')
+      : String(error ?? '');
 
-  const responseText = await response.text();
-
-  if (!response.ok) {
-    throw new Error(`client_portal_raw_fetch_failed:${response.status}`);
-  }
-
-  const contentType = response.headers.get('content-type')?.toLowerCase() ?? '';
-  const trimmedResponseText = responseText.trim();
-
-  if (
-    !contentType.includes('application/json') &&
-    !trimmedResponseText.startsWith('{') &&
-    !trimmedResponseText.startsWith('[') &&
-    !trimmedResponseText.startsWith('null')
-  ) {
-    throw new Error('client_portal_raw_invalid_payload');
-  }
-
-  try {
-    return trimmedResponseText ? JSON.parse(trimmedResponseText) : null;
-  } catch {
-    throw new Error('client_portal_raw_invalid_json');
-  }
+  return code === 'PGRST002' || /schema cache/i.test(message);
 };
+
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const normalizeNumber = (value: unknown): number | undefined => {
   if (typeof value === 'number' && Number.isFinite(value)) {
@@ -97,25 +54,6 @@ const normalizeNumber = (value: unknown): number | undefined => {
     if (Number.isFinite(parsed)) {
       return parsed;
     }
-  }
-
-  return undefined;
-};
-
-const normalizeOptionalBoolean = (value: unknown): boolean | undefined => {
-  if (typeof value === 'boolean') {
-    return value;
-  }
-
-  if (typeof value === 'number') {
-    if (value === 1) return true;
-    if (value === 0) return false;
-  }
-
-  if (typeof value === 'string') {
-    const normalized = value.trim().toLowerCase();
-    if (['true', 't', '1', 'yes'].includes(normalized)) return true;
-    if (['false', 'f', '0', 'no'].includes(normalized)) return false;
   }
 
   return undefined;
@@ -190,7 +128,6 @@ const normalizeAppointmentRecord = (item: Record<string, any>) => ({
   servizio: String(item.servizio ?? item.service_name ?? item.requested_service_name ?? '').trim(),
   prezzo: normalizeNumber(item.prezzo ?? item.price ?? item.requested_price) ?? 0,
   durataMinuti: normalizeNumber(item.durataMinuti ?? item.duration_minutes),
-  mestiereRichiesto: String(item.mestiereRichiesto ?? item.required_role ?? '').trim() || undefined,
   operatoreId: String(item.operatoreId ?? item.operator_id ?? '').trim() || undefined,
   operatoreNome: String(item.operatoreNome ?? item.operator_name ?? '').trim() || undefined,
   macchinarioIds: normalizeStringIdArray(item.macchinarioIds ?? item.machinery_ids),
@@ -204,7 +141,6 @@ const normalizeRequestRecord = (item: Record<string, any>) => ({
   servizio: String(item.servizio ?? item.requested_service_name ?? '').trim(),
   prezzo: normalizeNumber(item.prezzo ?? item.requested_price) ?? 0,
   durataMinuti: normalizeNumber(item.durataMinuti ?? item.requested_duration_minutes),
-  mestiereRichiesto: String(item.mestiereRichiesto ?? item.required_role ?? '').trim() || undefined,
   nome: String(item.nome ?? item.customer_name ?? '').trim(),
   cognome: String(item.cognome ?? item.customer_surname ?? '').trim(),
   email: String(item.email ?? item.customer_email ?? '').trim(),
@@ -222,13 +158,8 @@ const normalizeRequestRecord = (item: Record<string, any>) => ({
   origine: item.origine ?? item.origin,
   stato: String(item.stato ?? item.status ?? '').trim(),
   createdAt: String(item.createdAt ?? item.created_at ?? '').trim(),
-  viewedByCliente: normalizeOptionalBoolean(item.viewedByCliente ?? item.viewed_by_customer),
-  viewedBySalon: normalizeOptionalBoolean(item.viewedBySalon ?? item.viewed_by_salon),
-  // Important invariant: preserve the explicit cancellation source coming from the
-  // backend snapshot. If we drop it here, downstream normalizers may infer the wrong
-  // origin and incorrectly surface "annullata dal cliente" for salon-side cancellations.
-  cancellationSource:
-    String(item.cancellationSource ?? item.cancellation_source ?? '').trim() || undefined,
+  viewedByCliente: item.viewedByCliente ?? item.viewed_by_customer,
+  viewedBySalon: item.viewedBySalon ?? item.viewed_by_salon,
 });
 
 const normalizeServiceRecord = (item: Record<string, any>) => ({
@@ -268,17 +199,13 @@ const normalizePortalSnapshot = (data: Record<string, any> | null): ClientPortal
           .map(normalizeRequestRecord)
       : [],
     availabilitySettings: normalizeAvailabilitySettings(data.availabilitySettings ?? {}),
-    serviceCardColorOverrides: normalizeServiceColorOverrideMap(
-      data.serviceCardColorOverrides ?? data.service_card_color_overrides
-    ),
-    roleCardColorOverrides: normalizeRoleColorOverrideMap(
-      data.roleCardColorOverrides ?? data.role_card_color_overrides
-    ),
+    serviceCardColorOverrides: normalizeServiceColorOverrideMap(data.serviceCardColorOverrides),
+    roleCardColorOverrides: normalizeRoleColorOverrideMap(data.roleCardColorOverrides),
   };
 };
 
 export const fetchClientPortalSnapshot = async (salonCode: string) => {
-  try {
+  for (let attempt = 0; attempt <= CLIENT_PORTAL_SCHEMA_CACHE_RETRY_DELAYS_MS.length; attempt += 1) {
     const rpcTask = Promise.resolve(
       supabase.rpc('get_client_portal_snapshot', {
         p_salon_code: salonCode,
@@ -292,161 +219,50 @@ export const fetchClientPortalSnapshot = async (salonCode: string) => {
       rpcTask.finally(() => clearTimeout(timer)).catch(() => undefined);
     });
 
-    const { data, error } = await Promise.race([rpcTask, timeoutTask]);
+    let raceResult:
+      | {
+          data: unknown;
+          error: unknown;
+        }
+      | null = null;
 
-    if (error) {
+    try {
+      raceResult = (await Promise.race([rpcTask, timeoutTask])) as {
+        data: unknown;
+        error: unknown;
+      };
+    } catch (error) {
+      if (error instanceof Error && error.message === 'client_portal_snapshot_timeout') {
+        console.log('Client portal snapshot timeout:', salonCode);
+        return null;
+      }
+
       throw error;
     }
 
-    return normalizePortalSnapshot((data ?? null) as Record<string, any> | null);
-  } catch (error) {
-    const message =
-      error instanceof Error ? error.message.trim().toLowerCase() : String(error).trim().toLowerCase();
+    const { data, error } = raceResult ?? { data: null, error: null };
+
+    if (!error) {
+      return normalizePortalSnapshot((data ?? null) as Record<string, any> | null);
+    }
 
     if (
-      !message.includes('client_portal_snapshot_timeout') &&
-      !message.includes('client_portal_raw_invalid_payload') &&
-      !message.includes('client_portal_raw_invalid_json') &&
-      !message.includes('jwt') &&
-      !message.includes('session') &&
-      !message.includes('auth')
+      isSupabaseSchemaCacheLookupError(error) &&
+      attempt < CLIENT_PORTAL_SCHEMA_CACHE_RETRY_DELAYS_MS.length
     ) {
-      throw error;
+      await wait(CLIENT_PORTAL_SCHEMA_CACHE_RETRY_DELAYS_MS[attempt]!);
+      continue;
     }
 
-    const fallbackData = await fetchPortalRpcRaw('get_client_portal_snapshot', {
-      p_salon_code: salonCode,
-    });
-    return normalizePortalSnapshot((fallbackData ?? null) as Record<string, any> | null);
-  }
-};
-
-export const fetchClientPortalAvailabilitySettings = async (
-  salonCode: string
-): Promise<ClientPortalAvailabilitySnapshot> => {
-  try {
-    const data = await fetchPortalRpcRaw('get_client_portal_availability_settings', {
-      p_salon_code: salonCode,
-    });
-
-    if (!data || typeof data !== 'object') {
-      return null;
-    }
-
-    const workspacePayload =
-      data.workspace && typeof data.workspace === 'object'
-        ? (data.workspace as Record<string, unknown>)
-        : {};
-
-    return {
-      workspace: {
-        id: String(workspacePayload.id ?? '').trim(),
-        ownerEmail: String(workspacePayload.ownerEmail ?? '').trim().toLowerCase(),
-        salonCode: String(workspacePayload.salonCode ?? '').trim().toLowerCase(),
-        salonName: String(workspacePayload.salonName ?? '').trim(),
-        updatedAt: String(workspacePayload.updatedAt ?? '').trim(),
-      },
-      availabilitySettings: normalizeAvailabilitySettings(data.availabilitySettings ?? {}),
-    };
-  } catch (error) {
-    const message =
-      error instanceof Error ? error.message.trim().toLowerCase() : String(error).trim().toLowerCase();
-
-    if (
-      !message.includes('client_portal_raw_fetch_failed') &&
-      !message.includes('client_portal_availability_timeout') &&
-      !message.includes('client_portal_raw_invalid_payload') &&
-      !message.includes('client_portal_raw_invalid_json')
-    ) {
-      throw error;
-    }
-
-    const rpcTask = Promise.resolve(
-      supabase.rpc('get_client_portal_availability_settings', {
-        p_salon_code: salonCode,
-      })
-    );
-    const timeoutTask = new Promise<never>((_, reject) => {
-      const timer = setTimeout(() => {
-        reject(new Error('client_portal_availability_timeout'));
-      }, CLIENT_PORTAL_RPC_TIMEOUT_MS);
-
-      rpcTask.finally(() => clearTimeout(timer)).catch(() => undefined);
-    });
-
-    const result = await Promise.race([rpcTask, timeoutTask]);
-
-    if (result.error || !result.data || typeof result.data !== 'object') {
-      return null;
-    }
-
-    const workspacePayload =
-      result.data.workspace && typeof result.data.workspace === 'object'
-        ? (result.data.workspace as Record<string, unknown>)
-        : {};
-
-    return {
-      workspace: {
-        id: String(workspacePayload.id ?? '').trim(),
-        ownerEmail: String(workspacePayload.ownerEmail ?? '').trim().toLowerCase(),
-        salonCode: String(workspacePayload.salonCode ?? '').trim().toLowerCase(),
-        salonName: String(workspacePayload.salonName ?? '').trim(),
-        updatedAt: String(workspacePayload.updatedAt ?? '').trim(),
-      },
-      availabilitySettings: normalizeAvailabilitySettings(result.data.availabilitySettings ?? {}),
-    };
-  }
-};
-
-export const updateClientPortalAvailabilitySettings = async ({
-  ownerEmail,
-  salonCode,
-  availabilitySettings,
-}: {
-  ownerEmail: string;
-  salonCode: string;
-  availabilitySettings: ReturnType<typeof normalizeAvailabilitySettings>;
-}): Promise<ClientPortalAvailabilitySnapshot> => {
-  const rpcTask = Promise.resolve(
-    supabase.rpc('update_client_portal_availability_settings', {
-      p_owner_email: ownerEmail,
-      p_salon_code: salonCode,
-      p_availability_settings: availabilitySettings,
-    })
-  );
-  const timeoutTask = new Promise<never>((_, reject) => {
-    const timer = setTimeout(() => {
-      reject(new Error('client_portal_availability_update_timeout'));
-    }, CLIENT_PORTAL_PUBLISH_TIMEOUT_MS);
-
-    rpcTask.finally(() => clearTimeout(timer)).catch(() => undefined);
-  });
-
-  const { data, error } = await Promise.race([rpcTask, timeoutTask]);
-
-  if (error) {
     throw error;
   }
 
-  if (!data || typeof data !== 'object') {
-    return null;
-  }
+  return null;
+};
 
-  const workspacePayload =
-    data.workspace && typeof data.workspace === 'object'
-      ? (data.workspace as Record<string, unknown>)
-      : {};
-
-  return {
-    workspace: {
-      id: String(workspacePayload.id ?? '').trim(),
-      ownerEmail: String(workspacePayload.ownerEmail ?? '').trim().toLowerCase(),
-      salonCode: String(workspacePayload.salonCode ?? '').trim().toLowerCase(),
-      salonName: String(workspacePayload.salonName ?? '').trim(),
-      updatedAt: String(workspacePayload.updatedAt ?? '').trim(),
-    },
-    availabilitySettings: normalizeAvailabilitySettings(data.availabilitySettings ?? {}),
-  };
+export const fetchClientPortalAvailabilitySettings = async (salonCode: string) => {
+  const snapshot = await fetchClientPortalSnapshot(salonCode);
+  return snapshot?.availabilitySettings ?? normalizeAvailabilitySettings();
 };
 
 export const derivePublicBookingOccupancyFromSnapshot = (
@@ -489,6 +305,7 @@ export const derivePublicBookingOccupancyFromSnapshot = (
       [item.data, item.ora.toLowerCase(), item.cliente.toLowerCase(), item.servizio.toLowerCase()].join('|')
     )
   );
+  const seenRequestKeys = new Set<string>();
 
   const materializedRequests = requests
     .filter((item): item is Record<string, any> => !!item && typeof item === 'object')
@@ -498,11 +315,6 @@ export const derivePublicBookingOccupancyFromSnapshot = (
       return stato === 'In attesa' || stato === 'Accettata';
     })
     .filter((item) => {
-      const stato = String(item.stato ?? '').trim();
-      if (stato !== 'Accettata') {
-        return true;
-      }
-
       const requestKey = [
         dateValue,
         String(item.ora ?? '').trim().toLowerCase(),
@@ -512,7 +324,16 @@ export const derivePublicBookingOccupancyFromSnapshot = (
         String(item.servizio ?? '').trim().toLowerCase(),
       ].join('|');
 
-      return !appointmentKeys.has(requestKey);
+      if (appointmentKeys.has(requestKey)) {
+        return false;
+      }
+
+      if (seenRequestKeys.has(requestKey)) {
+        return false;
+      }
+
+      seenRequestKeys.add(requestKey);
+      return true;
     })
     .map((item) => ({
       id: `${String(item.stato ?? '').trim() === 'Accettata' ? 'accepted' : 'pending'}-${String(item.id ?? '').trim()}`,
@@ -536,13 +357,7 @@ export const derivePublicBookingOccupancyFromSnapshot = (
     }))
     .filter((item) => item.ora && item.servizio);
 
-  return assignFallbackOperatorsToAppointments({
-    appointments: [...normalizedAppointments, ...materializedRequests],
-    services: services as any[],
-    operators: (Array.isArray(snapshot.operatori) ? snapshot.operatori : []) as any[],
-    settings: snapshot.availabilitySettings,
-    preserveExplicitOperatorAssignments: true,
-  }) as PublicBookingOccupancyItem[];
+  return [...normalizedAppointments, ...materializedRequests];
 };
 
 export const fetchPublicBookingOccupancy = async (
@@ -572,6 +387,9 @@ export const publishClientPortalSnapshot = async (snapshot: ClientPortalSnapshot
       postalCode: snapshot.workspace.postalCode,
       subscriptionPlan: snapshot.workspace.subscriptionPlan,
       subscriptionStatus: snapshot.workspace.subscriptionStatus,
+      cashSectionDisabled: snapshot.workspace.cashSectionDisabled,
+      autoAcceptBookingRequests: snapshot.workspace.autoAcceptBookingRequests,
+      autoAcceptBookingRequestsUpdatedAt: snapshot.workspace.autoAcceptBookingRequestsUpdatedAt,
       customerReminderHoursBefore: snapshot.workspace.customerReminderHoursBefore,
       createdAt: snapshot.workspace.createdAt,
       updatedAt: snapshot.workspace.updatedAt,
@@ -586,20 +404,9 @@ export const publishClientPortalSnapshot = async (snapshot: ClientPortalSnapshot
     roleCardColorOverrides: snapshot.roleCardColorOverrides ?? {},
   };
 
-  const rpcTask = Promise.resolve(
-    supabase.rpc('upsert_client_portal_snapshot', {
-      p_payload: payload,
-    })
-  );
-  const timeoutTask = new Promise<never>((_, reject) => {
-    const timer = setTimeout(() => {
-      reject(new Error('client_portal_publish_timeout'));
-    }, CLIENT_PORTAL_PUBLISH_TIMEOUT_MS);
-
-    rpcTask.finally(() => clearTimeout(timer)).catch(() => undefined);
+  const { data, error } = await supabase.rpc('upsert_client_portal_snapshot', {
+    p_payload: payload,
   });
-
-  const { data, error } = await Promise.race([rpcTask, timeoutTask]);
 
   if (error) {
     throw error;

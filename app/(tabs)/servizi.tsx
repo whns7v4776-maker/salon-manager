@@ -9,6 +9,7 @@ import {
     InteractionManager,
     Keyboard,
     LayoutAnimation,
+    Modal,
     Platform,
     StyleSheet,
     Text,
@@ -205,24 +206,39 @@ const DEFAULT_OPERATOR_WEEKDAY_VALUES = WEEKDAY_OPTIONS.filter((item) => item.va
 );
 const OPERATOR_PHOTO_QUALITY = 0.82;
 const COLOR_SCALE = [
-  '#ffd6d6',
-  '#ffe2c7',
-  '#fff0bf',
-  '#eadfcb',
-  '#e3d3bf',
-  '#dcfce7',
-  '#d1fae5',
-  '#ccfbf1',
-  '#dcfcef',
-  '#cbeff0',
-  '#d6e8ff',
-  '#d9ddff',
-  '#e6d6ff',
-  '#f4d6ff',
-  '#ffd9ee',
-  '#ffdcd1',
-  '#ffe8d9',
-  '#f8f1cf',
+  '#F9CACA',
+  '#F7D7B8',
+  '#F5E2A8',
+  '#DDE6B8',
+  '#CDECCF',
+  '#BFE9D7',
+  '#B7E8E1',
+  '#B8E0F2',
+  '#BFD3F6',
+  '#C9CBF8',
+  '#D8C4F4',
+  '#E7C2F2',
+  '#F3C4E7',
+  '#F7C6D8',
+  '#F3D2C2',
+  '#E6D6C3',
+  '#DDD4CC',
+  '#CFCFCF',
+];
+
+const AUTO_ROLE_COLOR_SEQUENCE = [
+  '#F9CACA',
+  '#F5E2A8',
+  '#CDECCF',
+  '#B8E0F2',
+  '#C9CBF8',
+  '#E7C2F2',
+  '#F7C6D8',
+  '#E6D6C3',
+  '#BFE9D7',
+  '#DDE6B8',
+  '#F3D2C2',
+  '#DDD4CC',
 ];
 
 const isIsoDateInput = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value.trim());
@@ -389,6 +405,52 @@ function AnimatedChevron({ expanded }: { expanded: boolean }) {
   );
 }
 
+type SuccessDialogState = {
+  visible: boolean;
+  title: string;
+  message: string;
+  accent: 'service' | 'operator';
+};
+
+const CLOSED_SUCCESS_DIALOG: SuccessDialogState = {
+  visible: false,
+  title: '',
+  message: '',
+  accent: 'service',
+};
+
+type NoticeDialogState = {
+  visible: boolean;
+  title: string;
+  message: string;
+  accent: 'service' | 'operator';
+};
+
+type ConfirmDialogState = {
+  visible: boolean;
+  title: string;
+  message: string;
+  accent: 'service' | 'operator';
+  confirmLabel: string;
+  onConfirm: (() => void) | null;
+};
+
+const CLOSED_NOTICE_DIALOG: NoticeDialogState = {
+  visible: false,
+  title: '',
+  message: '',
+  accent: 'service',
+};
+
+const CLOSED_CONFIRM_DIALOG: ConfirmDialogState = {
+  visible: false,
+  title: '',
+  message: '',
+  accent: 'service',
+  confirmLabel: '',
+  onConfirm: null,
+};
+
 export default function ServiziScreen() {
   const responsive = useResponsiveLayout();
   const {
@@ -450,11 +512,14 @@ export default function ServiziScreen() {
   const [cardColorMode, setCardColorMode] = useState<'service' | 'role'>('service');
   const [selectedServiceColorTargetId, setSelectedServiceColorTargetId] = useState('');
   const [selectedRoleColorTarget, setSelectedRoleColorTarget] = useState('');
+  const [successDialog, setSuccessDialog] = useState<SuccessDialogState>(CLOSED_SUCCESS_DIALOG);
+  const [noticeDialog, setNoticeDialog] = useState<NoticeDialogState>(CLOSED_NOTICE_DIALOG);
+  const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState>(CLOSED_CONFIRM_DIALOG);
   const [serviceNumberPickerTarget, setServiceNumberPickerTarget] = useState<
     'price' | 'originalPrice' | 'duration' | null
   >(null);
   const swipeableRefs = useRef<Record<string, Swipeable | null>>({});
-  const listRef = useRef<FlatList<ServizioItem> | null>(null);
+  const listRef = useRef<FlatList<any> | null>(null);
   const serviceFormOffsetRef = useRef(0);
   const operatorFormOffsetRef = useRef(0);
   const serviceNameRef = useRef<TextInput | null>(null);
@@ -468,12 +533,9 @@ export default function ServiziScreen() {
   const machineryCustomRoleRef = useRef<TextInput | null>(null);
   const machineryCategoryRef = useRef<TextInput | null>(null);
   const { focusField, scrollToField, scrollToNode } = useKeyboardAwareScroll(listRef, {
-    topOffset: responsive.isDesktop ? 44 : 28,
+    topOffset: responsive.isDesktop ? 44 : 136,
+    shouldScrollNode: (node) => node !== serviceNameRef.current,
   });
-  const openServicePricePicker = useCallback(() => {
-    Keyboard.dismiss();
-    setServiceNumberPickerTarget('price');
-  }, []);
   const openOperatorRolePicker = useCallback(() => {
     Keyboard.dismiss();
     runSoftLayoutAnimation();
@@ -486,11 +548,11 @@ export default function ServiziScreen() {
             listRef.current?.scrollToOffset({
               offset: Math.max(
                 0,
-                operatorFormOffsetRef.current + (responsive.isDesktop ? 180 : 250)
+                operatorFormOffsetRef.current + (responsive.isDesktop ? 120 : 150)
               ),
               animated: true,
             });
-          }, 130);
+          }, 90);
         });
       }
 
@@ -509,11 +571,11 @@ export default function ServiziScreen() {
             listRef.current?.scrollToOffset({
               offset: Math.max(
                 0,
-                serviceFormOffsetRef.current + (responsive.isDesktop ? 250 : 320)
+                serviceFormOffsetRef.current + (responsive.isDesktop ? 120 : 150)
               ),
               animated: true,
             });
-          }, 130);
+          }, 90);
         });
       }
 
@@ -528,6 +590,87 @@ export default function ServiziScreen() {
 
     Keyboard.dismiss();
   }, [focusField, operatorCustomRoleOpen]);
+
+  const closeSuccessDialog = useCallback(() => {
+    setSuccessDialog(CLOSED_SUCCESS_DIALOG);
+  }, []);
+
+  const closeNoticeDialog = useCallback(() => {
+    setNoticeDialog(CLOSED_NOTICE_DIALOG);
+  }, []);
+
+  const closeConfirmDialog = useCallback(() => {
+    setConfirmDialog(CLOSED_CONFIRM_DIALOG);
+  }, []);
+
+  const openSuccessDialog = useCallback(
+    ({
+      title,
+      message,
+      accent,
+    }: {
+      title: string;
+      message: string;
+      accent: 'service' | 'operator';
+    }) => {
+      Keyboard.dismiss();
+      setSuccessDialog({
+        visible: true,
+        title,
+        message,
+        accent,
+      });
+    },
+    []
+  );
+
+  const openNoticeDialog = useCallback(
+    ({
+      title,
+      message,
+      accent,
+    }: {
+      title: string;
+      message: string;
+      accent: 'service' | 'operator';
+    }) => {
+      Keyboard.dismiss();
+      setNoticeDialog({
+        visible: true,
+        title,
+        message,
+        accent,
+      });
+    },
+    []
+  );
+
+  const openConfirmDialog = useCallback(
+    ({
+      title,
+      message,
+      accent,
+      confirmLabel,
+      onConfirm,
+    }: {
+      title: string;
+      message: string;
+      accent: 'service' | 'operator';
+      confirmLabel: string;
+      onConfirm: () => void;
+    }) => {
+      Keyboard.dismiss();
+      setConfirmDialog({
+        visible: true,
+        title,
+        message,
+        accent,
+        confirmLabel,
+        onConfirm,
+      });
+    },
+    []
+  );
   const handleKeyboardNext = useCallback(() => {
     const focusedInput = (
       TextInput.State as unknown as {
@@ -535,13 +678,33 @@ export default function ServiziScreen() {
       }
     ).currentlyFocusedInput?.();
 
-    if (focusedInput === serviceNameRef.current && !serviceCustomRoleOpen) {
-      openServicePricePicker();
+    if (focusedInput === serviceNameRef.current) {
+      setServiceNumberPickerTarget('price');
+      return;
+    }
+
+    if (focusedInput === serviceCustomRoleRef.current) {
+      if (prezzoOriginale.trim() !== '') {
+        setServiceNumberPickerTarget('originalPrice');
+        return;
+      }
+      Keyboard.dismiss();
       return;
     }
 
     if (focusedInput === operatorNameRef.current && !operatorCustomRoleOpen) {
       openOperatorRolePicker();
+      return;
+    }
+
+    if (focusedInput === operatorCustomRoleRef.current) {
+      setDatePickerTarget('start');
+      return;
+    }
+
+    if (focusedInput === machineryNameRef.current && !machineryCustomRoleOpen) {
+      setMachineryRolePickerOpen(true);
+      setMachineryCustomRoleOpen(false);
       return;
     }
 
@@ -560,10 +723,10 @@ export default function ServiziScreen() {
     );
   }, [
     focusField,
+    machineryCustomRoleOpen,
     openOperatorRolePicker,
-    openServicePricePicker,
     operatorCustomRoleOpen,
-    serviceCustomRoleOpen,
+    prezzoOriginale,
   ]);
 
   const closeAllSwipeables = useCallback(() => {
@@ -624,8 +787,28 @@ export default function ServiziScreen() {
     return merged
       .map((item) => item.trim())
       .filter(Boolean)
-      .filter((item, index, array) => array.findIndex((entry) => normalizeRoleName(entry) === normalizeRoleName(item)) === index);
+      .filter((item, index, array) => array.findIndex((entry) => normalizeRoleName(entry) === normalizeRoleName(item)) === index)
+      .sort((first, second) =>
+        first.localeCompare(second, 'it', { sensitivity: 'base' })
+      );
   }, [operatori, servizi]);
+
+  const sortedOperatori = useMemo(
+    () =>
+      [...operatori].sort((first, second) => {
+        const firstRole = normalizeRoleName(first.mestiere ?? '');
+        const secondRole = normalizeRoleName(second.mestiere ?? '');
+
+        if (firstRole !== secondRole) {
+          if (!firstRole) return 1;
+          if (!secondRole) return -1;
+          return firstRole.localeCompare(secondRole, 'it', { sensitivity: 'base' });
+        }
+
+        return first.nome.localeCompare(second.nome, 'it', { sensitivity: 'base' });
+      }),
+    [operatori]
+  );
 
   const sortedServizi = useMemo(
     () =>
@@ -643,6 +826,57 @@ export default function ServiziScreen() {
       }),
     [servizi]
   );
+
+  const serviceGridRows = useMemo(() => {
+    const rows: Array<{
+      key: string;
+      roleName: string;
+      items: ServizioItem[];
+      showHeader: boolean;
+    }> = [];
+
+    let currentRoleKey: string | null = null;
+    let currentRoleLabel = '';
+    let currentItems: ServizioItem[] = [];
+    let rowIndexForRole = 0;
+
+    const flushCurrentRow = (showHeader: boolean) => {
+      if (currentItems.length === 0) return;
+
+      rows.push({
+        key: `${currentRoleKey ?? 'senza-mestiere'}-${rowIndexForRole}`,
+        roleName: currentRoleLabel,
+        items: currentItems,
+        showHeader,
+      });
+
+      rowIndexForRole += 1;
+      currentItems = [];
+    };
+
+    sortedServizi.forEach((item) => {
+      const nextRoleKey = normalizeRoleName(item.mestiereRichiesto ?? '');
+      const nextRoleLabel = item.mestiereRichiesto ?? '';
+
+      if (currentRoleKey !== nextRoleKey) {
+        flushCurrentRow(rowIndexForRole === 0);
+        currentRoleKey = nextRoleKey;
+        currentRoleLabel = nextRoleLabel;
+        currentItems = [];
+        rowIndexForRole = 0;
+      }
+
+      currentItems.push(item);
+
+      if (currentItems.length === 2) {
+        flushCurrentRow(rowIndexForRole === 0);
+      }
+    });
+
+    flushCurrentRow(rowIndexForRole === 0);
+
+    return rows;
+  }, [sortedServizi]);
 
   const missingOperatorRoles = useMemo(
     () =>
@@ -677,6 +911,35 @@ export default function ServiziScreen() {
       );
     },
     [servizi]
+  );
+
+  const ensureRoleColorAssigned = useCallback(
+    (roleName: string) => {
+      const normalizedRole = normalizeRoleName(roleName);
+      if (!normalizedRole) return;
+      if (roleCardColorOverrides[normalizedRole]) return;
+
+      const usedColors = new Set(
+        Object.values(roleCardColorOverrides).map((item) => item.trim().toLowerCase())
+      );
+      const nextColor =
+        AUTO_ROLE_COLOR_SEQUENCE.find((item) => !usedColors.has(item.trim().toLowerCase())) ??
+        AUTO_ROLE_COLOR_SEQUENCE[
+          Object.keys(roleCardColorOverrides).length % AUTO_ROLE_COLOR_SEQUENCE.length
+        ];
+
+      setRoleCardColorOverrides((current) => {
+        if (current[normalizedRole]) {
+          return current;
+        }
+
+        return {
+          ...current,
+          [normalizedRole]: nextColor,
+        };
+      });
+    },
+    [roleCardColorOverrides, setRoleCardColorOverrides]
   );
 
   const resetForm = () => {
@@ -852,10 +1115,11 @@ export default function ServiziScreen() {
     );
 
     if (duplicato) {
-      Alert.alert(
-        tApp(appLanguage, 'services_duplicate_title'),
-        tApp(appLanguage, 'services_duplicate_body')
-      );
+      openNoticeDialog({
+        title: tApp(appLanguage, 'services_duplicate_title'),
+        message: tApp(appLanguage, 'services_duplicate_body'),
+        accent: 'service',
+      });
       return;
     }
 
@@ -869,10 +1133,12 @@ export default function ServiziScreen() {
       isIsoDateInput(serviceDiscountStartDate) && isIsoDateInput(serviceDiscountEndDate);
 
     if (hasDiscountModuleEnabled && hasAnyDiscountDate && !hasCompleteDiscountDateRange) {
-      Alert.alert(
-        'Periodo sconto incompleto',
-        'Se vuoi impostare la validita dello sconto devi selezionare sia la data inizio che la data fine.'
-      );
+      openNoticeDialog({
+        title: 'Periodo sconto incompleto',
+        message:
+          'Se vuoi impostare la validita dello sconto devi selezionare sia la data inizio che la data fine.',
+        accent: 'service',
+      });
       return;
     }
 
@@ -881,10 +1147,11 @@ export default function ServiziScreen() {
       hasCompleteDiscountDateRange &&
       serviceDiscountStartDate.trim() > serviceDiscountEndDate.trim()
     ) {
-      Alert.alert(
-        'Periodo sconto non valido',
-        'La data fine dello sconto deve essere uguale o successiva alla data inizio.'
-      );
+      openNoticeDialog({
+        title: 'Periodo sconto non valido',
+        message: 'La data fine dello sconto deve essere uguale o successiva alla data inizio.',
+        accent: 'service',
+      });
       return;
     }
 
@@ -895,10 +1162,11 @@ export default function ServiziScreen() {
     const nextMestiereRichiesto = mestiereRichiesto.trim();
 
     if (!nextMestiereRichiesto) {
-      Alert.alert(
-        'Mestiere obbligatorio',
-        'Per salvare il servizio devi selezionare o scrivere il mestiere richiesto.'
-      );
+      openNoticeDialog({
+        title: 'Mestiere obbligatorio',
+        message: 'Per salvare il servizio devi selezionare o scrivere il mestiere richiesto.',
+        accent: 'service',
+      });
       return;
     }
 
@@ -918,7 +1186,11 @@ export default function ServiziScreen() {
           ? `Hai gli slot impostati a ${currentSlotInterval} min, ma questo servizio dura ${durataMinuti} min. Cosi va fuori griglia slot e non puo essere salvato.\n\nPrima cambia il passo slot a ${suggestedSlotInterval} min nella configurazione agenda, poi salva il servizio.`
           : `Hai gli slot impostati a ${currentSlotInterval} min, ma questo servizio dura ${durataMinuti} min. Cosi va fuori griglia slot e non puo essere salvato.\n\nTi conviene cambiare la durata del servizio a ${lowerCompatibleDuration > 0 ? lowerCompatibleDuration : currentSlotInterval} min oppure ${upperCompatibleDuration} min.`;
 
-      Alert.alert('Durata fuori griglia slot', mismatchMessage);
+      openNoticeDialog({
+        title: 'Durata fuori griglia slot',
+        message: mismatchMessage,
+        accent: 'service',
+      });
       return;
     }
 
@@ -978,15 +1250,18 @@ export default function ServiziScreen() {
       operators: operatori,
     });
 
+    ensureRoleColorAssigned(nextMestiereRichiesto);
+
     resetForm();
 
     if (!isEditingService) {
-      Alert.alert(
-        'Servizio aggiunto',
-        missingOperatorWarning
+      openSuccessDialog({
+        title: 'Servizio aggiunto',
+        message: missingOperatorWarning
           ? `Servizio inserito correttamente.\n\nOperatore da collegare:\nHai salvato il servizio con mestiere "${nextMestiereRichiesto}" in un salone con più mestieri, ma non esiste ancora nessun operatore con quel mestiere. Se non lo imposti, dal frontend il cliente potrebbe non trovare slot prenotabili.`
-          : 'Servizio inserito correttamente.'
-      );
+          : 'Servizio inserito correttamente.',
+        accent: 'service',
+      });
     }
   };
 
@@ -1005,10 +1280,6 @@ export default function ServiziScreen() {
     setServiceCustomRoleOpen(!!item.mestiereRichiesto);
     setServiceRolePickerOpen(false);
     setIsServiceFormExpanded(true);
-    setTimeout(() => {
-      scrollToField(serviceNameRef);
-      focusField(serviceNameRef);
-    }, 180);
   };
 
   const salvaOperatore = () => {
@@ -1022,22 +1293,26 @@ export default function ServiziScreen() {
     );
 
     if (duplicateOperator) {
-      Alert.alert(
-        tApp(appLanguage, 'services_operator_duplicate_title'),
-        tApp(appLanguage, 'services_operator_duplicate_body')
-      );
+      openNoticeDialog({
+        title: tApp(appLanguage, 'services_operator_duplicate_title'),
+        message: tApp(appLanguage, 'services_operator_duplicate_body'),
+        accent: 'operator',
+      });
       return;
     }
 
     if (!hasMatchingServiceTarget(mestiereOperatore.trim())) {
-      Alert.alert(
-        'Target servizio mancante',
-        'Puoi salvare questo operatore solo se esiste già almeno un servizio con lo stesso target/mestiere scritto in modo identico.'
-      );
+      openNoticeDialog({
+        title: 'Target servizio mancante',
+        message:
+          'Puoi salvare questo operatore solo se esiste già almeno un servizio con lo stesso target/mestiere scritto in modo identico.',
+        accent: 'operator',
+      });
       return;
     }
 
     if (operatoreInModifica) {
+      ensureRoleColorAssigned(mestiereOperatore.trim());
       setOperatori((current) =>
         current.map((item) =>
           item.id === operatoreInModifica
@@ -1056,8 +1331,13 @@ export default function ServiziScreen() {
             : item
         )
       );
-      Alert.alert('Operatore aggiornato', 'Operatore salvato correttamente.');
+      openSuccessDialog({
+        title: 'Operatore aggiornato',
+        message: 'Operatore salvato correttamente.',
+        accent: 'operator',
+      });
     } else {
+      ensureRoleColorAssigned(mestiereOperatore.trim());
       setOperatori((current) => [
         {
           id: `operatore-${Date.now()}`,
@@ -1073,7 +1353,11 @@ export default function ServiziScreen() {
         },
         ...current,
       ]);
-      Alert.alert('Operatore aggiunto', 'Operatore inserito correttamente.');
+      openSuccessDialog({
+        title: 'Operatore aggiunto',
+        message: 'Operatore inserito correttamente.',
+        accent: 'operator',
+      });
     }
 
     resetOperatoreForm();
@@ -1096,10 +1380,6 @@ export default function ServiziScreen() {
     setAvailabilityEndDate('');
     setDatePickerTarget(null);
     setIsOperatorFormExpanded(true);
-    setTimeout(() => {
-      scrollToField(operatorNameRef);
-      focusField(operatorNameRef);
-    }, 180);
   };
 
   const toggleOperatorWeekday = (weekday: number) => {
@@ -1361,31 +1641,26 @@ export default function ServiziScreen() {
     const hasFutureEntries =
       appuntamentiFuturiCollegati.length > 0 || richiesteAccettateFutureCollegate.length > 0;
 
-    Alert.alert(
-      tApp(appLanguage, 'services_operator_delete_title'),
-      hasFutureEntries
+    openConfirmDialog({
+      title: tApp(appLanguage, 'services_operator_delete_title'),
+      message: hasFutureEntries
         ? `${operatoreDaEliminare.nome} verra rimosso dagli operatori attivi. Gli appuntamenti e le richieste gia salvati resteranno nello storico e in agenda come corsia orfana finche non li riassegni o li chiudi.`
         : hasLinkedEntries
           ? tApp(appLanguage, 'services_operator_delete_body_linked', {
               operatorName: operatoreDaEliminare.nome,
             })
-        : tApp(appLanguage, 'services_operator_delete_body_simple', {
-            operatorName: operatoreDaEliminare.nome,
-          }),
-      [
-        { text: tApp(appLanguage, 'common_cancel'), style: 'cancel' },
-        {
-          text: tApp(appLanguage, 'common_delete'),
-          style: 'destructive',
-          onPress: () => {
-            setOperatori((current) => current.filter((item) => item.id !== id));
-            if (operatoreInModifica === id) {
-              resetOperatoreForm();
-            }
-          },
-        },
-      ]
-    );
+          : tApp(appLanguage, 'services_operator_delete_body_simple', {
+              operatorName: operatoreDaEliminare.nome,
+            }),
+      accent: 'operator',
+      confirmLabel: tApp(appLanguage, 'common_delete'),
+      onConfirm: () => {
+        setOperatori((current) => current.filter((item) => item.id !== id));
+        if (operatoreInModifica === id) {
+          resetOperatoreForm();
+        }
+      },
+    });
   };
 
   const confermaElimina = (item: ServizioItem) => {
@@ -1401,25 +1676,20 @@ export default function ServiziScreen() {
     const hasLinkedBookings =
       appuntamentiCollegati.length > 0 || richiesteCollegate.length > 0;
 
-    Alert.alert(
-      tApp(appLanguage, 'services_delete_title'),
-      hasLinkedBookings
+    openConfirmDialog({
+      title: tApp(appLanguage, 'services_delete_title'),
+      message: hasLinkedBookings
         ? tApp(appLanguage, 'services_delete_body_linked', { serviceName: item.nome })
         : tApp(appLanguage, 'services_delete_body_simple', { serviceName: item.nome }),
-      [
-        { text: tApp(appLanguage, 'common_cancel'), style: 'cancel' },
-        {
-          text: tApp(appLanguage, 'agenda_delete_confirm'),
-          style: 'destructive',
-          onPress: () => {
-            setServizi(servizi.filter((servizio) => servizio.id !== item.id));
-            if (servizioInModifica === item.id) {
-              resetForm();
-            }
-          },
-        },
-      ]
-    );
+      accent: 'service',
+      confirmLabel: tApp(appLanguage, 'agenda_delete_confirm'),
+      onConfirm: () => {
+        setServizi(servizi.filter((servizio) => servizio.id !== item.id));
+        if (servizioInModifica === item.id) {
+          resetForm();
+        }
+      },
+    });
   };
 
   const quickNotesCard = (
@@ -1517,12 +1787,14 @@ export default function ServiziScreen() {
             {tApp(appLanguage, 'services_no_operators')}
           </Text>
         ) : (
-          operatori.map((item) => {
+          sortedOperatori.map((item, index) => {
             const normalizedRole = normalizeRoleName(item.mestiere);
             const roleOverride = roleCardColorOverrides[normalizedRole];
             const accent = roleOverride
               ? getCustomAccent(roleOverride)
               : getServiceAccentByMeta({ roleName: item.mestiere });
+            const previousRole = index > 0 ? normalizeRoleName(sortedOperatori[index - 1]?.mestiere) : '';
+            const isFirstOfRole = index === 0 || previousRole !== normalizedRole;
 
             return (
               <Animated.View
@@ -1531,6 +1803,19 @@ export default function ServiziScreen() {
                 exiting={FadeOut.duration(150)}
                 layout={LinearTransition.duration(180)}
               >
+                {isFirstOfRole ? (
+                  <View style={styles.roleSectionHeader}>
+                    <View
+                      style={[
+                        styles.roleSectionHeaderDot,
+                        { backgroundColor: accent.border },
+                      ]}
+                    />
+                    <Text style={styles.roleSectionHeaderText}>
+                      {formatRoleLabelForDisplay(item.mestiere) || 'Senza mestiere'}
+                    </Text>
+                  </View>
+                ) : null}
                 <Swipeable
                   ref={(ref) => {
                     swipeableRefs.current[`operator-${item.id}`] = ref;
@@ -1627,14 +1912,117 @@ export default function ServiziScreen() {
     </View>
   );
 
+  const cardColorsCard = (
+    <View style={styles.formCard}>
+      <Text style={styles.cardTitle} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.72}>
+        Personalizza Colori Card
+      </Text>
+      <Text style={styles.helperTextInline}>
+        Configura colore card per singolo servizio o per mestiere assegnato, senza cambiare layout.
+      </Text>
+
+      <View style={styles.colorModeRow}>
+        <HapticTouchable
+          style={[styles.colorModeChip, cardColorMode === 'service' && styles.colorModeChipActive]}
+          onPress={() => setCardColorMode('service')}
+          activeOpacity={0.9}
+        >
+          <Text style={[styles.colorModeChipText, cardColorMode === 'service' && styles.colorModeChipTextActive]}>
+            Per Servizio
+          </Text>
+        </HapticTouchable>
+        <HapticTouchable
+          style={[styles.colorModeChip, cardColorMode === 'role' && styles.colorModeChipActive]}
+          onPress={() => setCardColorMode('role')}
+          activeOpacity={0.9}
+        >
+          <Text style={[styles.colorModeChipText, cardColorMode === 'role' && styles.colorModeChipTextActive]}>
+            Per Mestiere
+          </Text>
+        </HapticTouchable>
+      </View>
+
+      {cardColorMode === 'service' ? (
+        <View style={styles.colorTargetWrap}>
+          {servizi.map((item, index) => {
+            const selected = selectedServiceColorTargetId === item.id;
+            return (
+              <HapticTouchable
+                key={`card-color-service-${item.id}-${item.nome}-${index}`}
+                style={[styles.colorTargetChip, selected && styles.colorTargetChipActive]}
+                onPress={() => setSelectedServiceColorTargetId(item.id)}
+                activeOpacity={0.9}
+              >
+                <Text style={[styles.colorTargetChipText, selected && styles.colorTargetChipTextActive]} numberOfLines={1}>
+                  {item.nome}
+                </Text>
+              </HapticTouchable>
+            );
+          })}
+        </View>
+      ) : (
+        <View style={styles.colorTargetWrap}>
+          {roleOptions.map((role) => {
+            const selected = normalizeRoleName(selectedRoleColorTarget) === normalizeRoleName(role);
+            return (
+              <HapticTouchable
+                key={`card-color-role-${role}`}
+                style={[styles.colorTargetChip, selected && styles.colorTargetChipActive]}
+                onPress={() => setSelectedRoleColorTarget(role)}
+                activeOpacity={0.9}
+              >
+                <Text style={[styles.colorTargetChipText, selected && styles.colorTargetChipTextActive]} numberOfLines={1}>
+                  {role}
+                </Text>
+              </HapticTouchable>
+            );
+          })}
+        </View>
+      )}
+
+      <View style={styles.colorPaletteWrap}>
+        {COLOR_SCALE.map((hex) => {
+          const isSelected = selectedColorPreview === hex;
+          return (
+            <HapticTouchable
+              key={`card-color-${hex}`}
+              style={[styles.colorDot, isSelected && styles.colorDotSelected]}
+              onPress={() => applyCardColorOverride(hex)}
+              activeOpacity={0.9}
+              disabled={!currentColorTarget}
+            >
+              <View style={[styles.colorDotInner, { backgroundColor: hex }]} />
+            </HapticTouchable>
+          );
+        })}
+      </View>
+
+      <HapticTouchable
+        style={styles.buttonLight}
+        onPress={handleProtectedResetPress}
+        onLongPress={resetAutomaticServiceColors}
+        delayLongPress={650}
+        activeOpacity={0.9}
+      >
+        <Text style={styles.buttonLightText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.72}>
+          Reimposta colori automatici
+        </Text>
+      </HapticTouchable>
+      <Text style={styles.helperTextInline}>
+        Tieni premuto per ripristinare i colori automatici.
+      </Text>
+    </View>
+  );
+
   return (
     <View style={styles.container}>
       <FlatList
         ref={listRef}
-        data={sortedServizi}
-        numColumns={2}
-        keyExtractor={(item) => item.id}
+        data={serviceGridRows}
+        keyExtractor={(item) => item.key}
         showsVerticalScrollIndicator
+        bounces={false}
+        alwaysBounceVertical={false}
         indicatorStyle="black"
         scrollIndicatorInsets={{ right: 2 }}
         contentContainerStyle={[
@@ -1646,7 +2034,6 @@ export default function ServiziScreen() {
           Keyboard.dismiss();
           closeAllSwipeables();
         }}
-        columnWrapperStyle={styles.serviceGridRow}
         keyboardShouldPersistTaps="handled"
         ListHeaderComponent={
           <View style={[styles.pageShell, { maxWidth: responsive.contentMaxWidth }]}>
@@ -1713,12 +2100,11 @@ export default function ServiziScreen() {
                 placeholderTextColor="#9a9a9a"
                 value={nome}
                 onChangeText={setNome}
-                onFocus={() => scrollToField(serviceNameRef)}
                 returnKeyType="next"
                 onSubmitEditing={() =>
                   serviceCustomRoleOpen
                     ? focusField(serviceCustomRoleRef)
-                    : openServicePricePicker()
+                    : Keyboard.dismiss()
                 }
                 blurOnSubmit={!serviceCustomRoleOpen}
                   />
@@ -1758,17 +2144,26 @@ export default function ServiziScreen() {
                     onPress={openServiceRolePicker}
                     activeOpacity={0.9}
                   >
-                    <Text
-                      style={[
-                        styles.roleSelectorText,
-                        !mestiereRichiesto && styles.roleSelectorPlaceholder,
-                      ]}
-                    >
-                      {mestiereRichiesto || tApp(appLanguage, 'services_required_role_placeholder')}
-                    </Text>
-                    <Text style={styles.roleSelectorChevron}>
-                      {serviceRolePickerOpen ? '▴' : '▾'}
-                    </Text>
+                  <Text
+                    style={[
+                      styles.roleSelectorText,
+                      !mestiereRichiesto && styles.roleSelectorPlaceholder,
+                    ]}
+                  >
+                    {mestiereRichiesto || tApp(appLanguage, 'services_required_role_placeholder')}
+                  </Text>
+                  <View
+                    style={[
+                      styles.roleSelectorChevronBadge,
+                      serviceRolePickerOpen && styles.roleSelectorChevronBadgeActive,
+                    ]}
+                  >
+                    <Ionicons
+                      name={serviceRolePickerOpen ? 'chevron-up' : 'chevron-down'}
+                      size={16}
+                      color={serviceRolePickerOpen ? '#FFFFFF' : '#475569'}
+                    />
+                  </View>
                   </HapticTouchable>
 
                   {serviceRolePickerOpen ? (
@@ -1822,7 +2217,6 @@ export default function ServiziScreen() {
                       placeholderTextColor="#9a9a9a"
                       value={mestiereRichiesto}
                       onChangeText={setMestiereRichiesto}
-                      onFocus={() => scrollToField(serviceCustomRoleRef)}
                       returnKeyType="done"
                       onSubmitEditing={Keyboard.dismiss}
                     />
@@ -2085,7 +2479,6 @@ export default function ServiziScreen() {
                   placeholderTextColor="#9a9a9a"
                   value={nomeOperatore}
                   onChangeText={setNomeOperatore}
-                  onFocus={() => scrollToField(operatorNameRef)}
                   returnKeyType="next"
                   onSubmitEditing={handleOperatorNameSubmit}
                   blurOnSubmit={!operatorCustomRoleOpen}
@@ -2103,9 +2496,18 @@ export default function ServiziScreen() {
                   >
                     {mestiereOperatore || tApp(appLanguage, 'services_operator_role_placeholder')}
                   </Text>
-                  <Text style={styles.roleSelectorChevron}>
-                    {operatorRolePickerOpen ? '▴' : '▾'}
-                  </Text>
+                  <View
+                    style={[
+                      styles.roleSelectorChevronBadge,
+                      operatorRolePickerOpen && styles.roleSelectorChevronBadgeActive,
+                    ]}
+                  >
+                    <Ionicons
+                      name={operatorRolePickerOpen ? 'chevron-up' : 'chevron-down'}
+                      size={16}
+                      color={operatorRolePickerOpen ? '#FFFFFF' : '#475569'}
+                    />
+                  </View>
                 </HapticTouchable>
 
                 {operatorRolePickerOpen ? (
@@ -2159,7 +2561,6 @@ export default function ServiziScreen() {
                     placeholderTextColor="#9a9a9a"
                     value={mestiereOperatore}
                     onChangeText={setMestiereOperatore}
-                    onFocus={() => scrollToField(operatorCustomRoleRef)}
                     returnKeyType="done"
                     onSubmitEditing={Keyboard.dismiss}
                   />
@@ -2384,298 +2785,422 @@ export default function ServiziScreen() {
 
             {multiRoleNoOperatorWarningCard}
 
-            <View style={styles.formCard}>
-              <Text style={styles.cardTitle} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.72}>
-                Personalizza Colori Card
-              </Text>
-              <Text style={styles.helperTextInline}>
-                Configura colore card per singolo servizio o per mestiere assegnato, senza cambiare layout.
-              </Text>
-
-              <View style={styles.colorModeRow}>
-                <HapticTouchable
-                  style={[styles.colorModeChip, cardColorMode === 'service' && styles.colorModeChipActive]}
-                  onPress={() => setCardColorMode('service')}
-                  activeOpacity={0.9}
-                >
-                  <Text style={[styles.colorModeChipText, cardColorMode === 'service' && styles.colorModeChipTextActive]}>
-                    Per Servizio
-                  </Text>
-                </HapticTouchable>
-                <HapticTouchable
-                  style={[styles.colorModeChip, cardColorMode === 'role' && styles.colorModeChipActive]}
-                  onPress={() => setCardColorMode('role')}
-                  activeOpacity={0.9}
-                >
-                  <Text style={[styles.colorModeChipText, cardColorMode === 'role' && styles.colorModeChipTextActive]}>
-                    Per Mestiere
-                  </Text>
-                </HapticTouchable>
-              </View>
-
-              {cardColorMode === 'service' ? (
-                <View style={styles.colorTargetWrap}>
-                  {servizi.map((item, index) => {
-                    const selected = selectedServiceColorTargetId === item.id;
-                    return (
-                      <HapticTouchable
-                        key={`card-color-service-${item.id}-${item.nome}-${index}`}
-                        style={[styles.colorTargetChip, selected && styles.colorTargetChipActive]}
-                        onPress={() => setSelectedServiceColorTargetId(item.id)}
-                        activeOpacity={0.9}
-                      >
-                        <Text style={[styles.colorTargetChipText, selected && styles.colorTargetChipTextActive]} numberOfLines={1}>
-                          {item.nome}
-                        </Text>
-                      </HapticTouchable>
-                    );
-                  })}
-                </View>
-              ) : (
-                <View style={styles.colorTargetWrap}>
-                  {roleOptions.map((role) => {
-                    const selected = normalizeRoleName(selectedRoleColorTarget) === normalizeRoleName(role);
-                    return (
-                      <HapticTouchable
-                        key={`card-color-role-${role}`}
-                        style={[styles.colorTargetChip, selected && styles.colorTargetChipActive]}
-                        onPress={() => setSelectedRoleColorTarget(role)}
-                        activeOpacity={0.9}
-                      >
-                        <Text style={[styles.colorTargetChipText, selected && styles.colorTargetChipTextActive]} numberOfLines={1}>
-                          {role}
-                        </Text>
-                      </HapticTouchable>
-                    );
-                  })}
-                </View>
-              )}
-
-              <View style={styles.colorPaletteWrap}>
-                {COLOR_SCALE.map((hex) => {
-                  const isSelected = selectedColorPreview === hex;
-                  return (
-                    <HapticTouchable
-                      key={`card-color-${hex}`}
-                      style={[styles.colorDot, isSelected && styles.colorDotSelected]}
-                      onPress={() => applyCardColorOverride(hex)}
-                      activeOpacity={0.9}
-                      disabled={!currentColorTarget}
-                    >
-                      <View style={[styles.colorDotInner, { backgroundColor: hex }]} />
-                    </HapticTouchable>
-                  );
-                })}
-              </View>
-
-              <HapticTouchable
-                style={styles.buttonLight}
-                onPress={handleProtectedResetPress}
-                onLongPress={resetAutomaticServiceColors}
-                delayLongPress={650}
-                activeOpacity={0.9}
-              >
-                <Text style={styles.buttonLightText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.72}>
-                  Reimposta colori automatici
+            {servizi.length === 0 ? (
+              <View style={styles.formCard}>
+                <Text style={styles.cardTitle} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.72}>
+                  {tApp(appLanguage, 'services_list')}
                 </Text>
-              </HapticTouchable>
-              <Text style={styles.helperTextInline}>
-                Tieni premuto per ripristinare i colori automatici.
-              </Text>
-            </View>
-
-            <Text style={styles.listTitle} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.72}>{tApp(appLanguage, 'services_list')}</Text>
-          </View>
-        }
-        renderItem={({ item }) => (
-          <View style={styles.serviceGridItem}>
-          <Swipeable
-            ref={(ref) => {
-              swipeableRefs.current[item.id] = ref;
-            }}
-            renderRightActions={() => (
-              <View style={styles.swipeActions}>
-                <HapticTouchable
-                  style={styles.editSwipeAction}
-                  onPress={() => avviaModifica(item)}
-                  activeOpacity={0.9}
-                >
-                  <Text style={styles.editSwipeText}>Modifica</Text>
-                </HapticTouchable>
-
-                <HapticTouchable
-                  style={styles.deleteSwipeAction}
-                  onPress={() => confermaElimina(item)}
-                  activeOpacity={0.9}
-                >
-                  <Text style={styles.deleteSwipeText}>Elimina</Text>
-                </HapticTouchable>
+                <Text style={styles.helperTextInline}>
+                  Nessun servizio inserito: aggiungi il primo servizio per costruire il listino del salone.
+                </Text>
+              </View>
+            ) : (
+              <View style={styles.servicesListSectionTop}>
+                <Text style={styles.listTitle} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.72}>
+                  {tApp(appLanguage, 'services_list')}
+                </Text>
+                <Text style={styles.servicesListIntroText}>
+                  Listino ordinato per mestiere, con card piu leggibili e azioni rapide sempre a portata di swipe.
+                </Text>
               </View>
             )}
-            friction={1.05}
-            overshootRight={false}
-            overshootFriction={10}
-            dragOffsetFromRightEdge={10}
-            rightThreshold={28}
-          >
-            {(() => {
-              const normalizedRole = normalizeRoleName(item.mestiereRichiesto ?? '');
-              const accent = resolveServiceAccent({
-                serviceId: item.id,
-                serviceName: item.nome,
-                roleName: item.mestiereRichiesto,
+          </View>
+        }
+        renderItem={({ item: row }) => {
+          const headerAccent = row.items[0]
+            ? resolveServiceAccent({
+                serviceId: row.items[0].id,
+                serviceName: row.items[0].nome,
+                roleName: row.items[0].mestiereRichiesto,
                 serviceColorOverrides: serviceCardColorOverrides,
                 roleColorOverrides: roleCardColorOverrides,
-              });
-              const serviceUsesOperators = doesServiceUseOperators(item.nome, servizi);
-              const serviceHasAssignedOperators =
-                !!normalizedRole &&
-                operatori.some(
-                  (operator) => normalizeRoleName(operator.mestiere) === normalizedRole
-                );
-              const showOperatorBadge = serviceUsesOperators && serviceHasAssignedOperators;
-              const showSalonBadge = !showOperatorBadge;
+              })
+            : null;
 
-              return (
-            <Animated.View
-              style={[
-                styles.itemCard,
-                styles.itemCardShell,
-                {
-                  maxWidth: responsive.contentMaxWidth,
-                  backgroundColor: accent.bg,
-                  borderColor: accent.border,
-                },
-              ]}
-              entering={FadeIn.duration(180)}
-              exiting={FadeOut.duration(150)}
-              layout={LinearTransition.duration(180)}
-            >
-              <View style={styles.itemLeft}>
-                <Text
-                  style={[styles.serviceName, { color: '#111111' }]}
-                  numberOfLines={1}
-                  adjustsFontSizeToFit
-                  minimumFontScale={0.68}
-                >
-                  {item.nome}
-                </Text>
-                <View style={styles.serviceMetaRow}>
-                  {item.mestiereRichiesto ? (
-                    <Animated.Text
-                      entering={FadeIn.duration(160)}
-                      style={[
-                        styles.serviceRoleBadge,
-                        {
-                          backgroundColor: 'rgba(255,255,255,0.72)',
-                          color: accent.text,
-                          borderColor: accent.border,
-                        },
-                      ]}
-                      numberOfLines={1}
-                      adjustsFontSizeToFit
-                      minimumFontScale={0.74}
-                    >
-                      {formatRoleLabelForDisplay(item.mestiereRichiesto)}
-                    </Animated.Text>
-                  ) : null}
-                  {showOperatorBadge ? (
-                    <View style={[styles.serviceOperatorInlineBadge, { borderColor: accent.border }]}>
-                      <Ionicons name="person" size={12} color={accent.text} />
-                    </View>
-                  ) : null}
-                  {showSalonBadge ? (
-                    <View style={styles.serviceSalonInlineBadge}>
-                      <Text style={styles.serviceSalonInlineBadgeText}>Salone</Text>
-                    </View>
-                  ) : null}
-                </View>
-                <Text
-                  style={[styles.serviceHint, { color: '#111111' }]}
-                  numberOfLines={1}
-                  adjustsFontSizeToFit
-                  minimumFontScale={0.72}
-                >
-                  {tApp(appLanguage, 'services_duration_label')}: {formatDurata(item.durataMinuti ?? 60, appLanguage)}
-                </Text>
-                {item.prezzoOriginale &&
-                item.prezzoOriginale > item.prezzo &&
-                item.scontoValidoDal &&
-                item.scontoValidoAl ? (
-                  <Text
-                    style={[styles.serviceHint, { color: '#111111' }]}
-                    numberOfLines={1}
-                    adjustsFontSizeToFit
-                    minimumFontScale={0.64}
-                  >
-                    Sconto valido: {item.scontoValidoDal} → {item.scontoValidoAl}
+          return (
+            <View style={styles.serviceGridRowWrap}>
+              {row.showHeader ? (
+                <View style={styles.serviceRoleGroupHeader}>
+                  <View
+                    style={[
+                      styles.roleSectionHeaderDot,
+                      { backgroundColor: headerAccent?.border ?? '#CBD5E1' },
+                    ]}
+                  />
+                  <Text style={styles.roleSectionHeaderText}>
+                    {formatRoleLabelForDisplay(row.roleName) || 'Senza mestiere'}
                   </Text>
-                ) : null}
-              </View>
+                </View>
+              ) : null}
 
-              <View style={styles.priceWrap}>
-                {item.prezzoOriginale && item.prezzoOriginale > item.prezzo ? (
-                  <>
-                    <Animated.View entering={FadeIn.duration(160)} style={styles.discountBadge}>
-                      <Text
-                        style={styles.discountBadgeText}
-                        numberOfLines={1}
-                        adjustsFontSizeToFit
-                        minimumFontScale={0.78}
+              <View style={styles.serviceGridRow}>
+                {row.items.map((item: ServizioItem) => {
+                  const normalizedRole = normalizeRoleName(item.mestiereRichiesto ?? '');
+                  const accent = resolveServiceAccent({
+                    serviceId: item.id,
+                    serviceName: item.nome,
+                    roleName: item.mestiereRichiesto,
+                    serviceColorOverrides: serviceCardColorOverrides,
+                    roleColorOverrides: roleCardColorOverrides,
+                  });
+                  const serviceUsesOperators = doesServiceUseOperators(item.nome, servizi);
+                  const serviceHasAssignedOperators =
+                    !!normalizedRole &&
+                    operatori.some(
+                      (operator) => normalizeRoleName(operator.mestiere) === normalizedRole
+                    );
+                  const showOperatorBadge = serviceUsesOperators && serviceHasAssignedOperators;
+                  const showSalonBadge = !showOperatorBadge;
+
+                  return (
+                    <View key={item.id} style={styles.serviceGridItem}>
+                      <Swipeable
+                        ref={(ref) => {
+                          swipeableRefs.current[item.id] = ref;
+                        }}
+                        renderRightActions={() => (
+                          <View style={styles.swipeActions}>
+                            <HapticTouchable
+                              style={styles.editSwipeAction}
+                              onPress={() => avviaModifica(item)}
+                              activeOpacity={0.9}
+                            >
+                              <Text style={styles.editSwipeText}>Modifica</Text>
+                            </HapticTouchable>
+
+                            <HapticTouchable
+                              style={styles.deleteSwipeAction}
+                              onPress={() => confermaElimina(item)}
+                              activeOpacity={0.9}
+                            >
+                              <Text style={styles.deleteSwipeText}>Elimina</Text>
+                            </HapticTouchable>
+                          </View>
+                        )}
+                        friction={1.05}
+                        overshootRight={false}
+                        overshootFriction={10}
+                        dragOffsetFromRightEdge={10}
+                        rightThreshold={28}
                       >
-                        Sconto
-                      </Text>
-                    </Animated.View>
-                    <Text
-                      style={[styles.servicePriceOriginal, { color: '#111111' }]}
-                      numberOfLines={1}
-                      adjustsFontSizeToFit
-                      minimumFontScale={0.78}
-                    >
-                      € {item.prezzoOriginale.toFixed(2)}
-                    </Text>
-                  </>
-                ) : null}
-                <Text
-                  style={[styles.servicePrice, { color: '#111111' }]}
-                  numberOfLines={1}
-                  adjustsFontSizeToFit
-                  minimumFontScale={0.74}
-                >
-                  € {item.prezzo.toFixed(2)}
-                </Text>
+                        <Animated.View
+                          style={styles.serviceCardSurface}
+                          entering={FadeIn.duration(180)}
+                          exiting={FadeOut.duration(150)}
+                          layout={LinearTransition.duration(180)}
+                        >
+                          <Animated.View
+                            style={[
+                              styles.itemCard,
+                              styles.itemCardShell,
+                              {
+                                maxWidth: responsive.contentMaxWidth,
+                                backgroundColor: accent.bg,
+                                borderColor: accent.border,
+                              },
+                            ]}
+                          >
+                            <View style={styles.itemLeft}>
+                              <Text
+                                style={[styles.serviceName, { color: '#111111' }]}
+                                numberOfLines={1}
+                                adjustsFontSizeToFit
+                                minimumFontScale={0.68}
+                              >
+                                {item.nome}
+                              </Text>
+                              <View style={styles.serviceMetaRow}>
+                                {item.mestiereRichiesto ? (
+                                  <Animated.Text
+                                    entering={FadeIn.duration(160)}
+                                    style={[
+                                      styles.serviceRoleBadge,
+                                      {
+                                        backgroundColor: 'rgba(255,255,255,0.72)',
+                                        color: accent.text,
+                                        borderColor: accent.border,
+                                      },
+                                    ]}
+                                    numberOfLines={1}
+                                    adjustsFontSizeToFit
+                                    minimumFontScale={0.74}
+                                  >
+                                    {formatRoleLabelForDisplay(item.mestiereRichiesto)}
+                                  </Animated.Text>
+                                ) : null}
+                                {showOperatorBadge ? (
+                                  <View style={[styles.serviceOperatorInlineBadge, { borderColor: accent.border }]}>
+                                    <Ionicons name="person" size={12} color={accent.text} />
+                                  </View>
+                                ) : null}
+                                {showSalonBadge ? (
+                                  <View style={styles.serviceSalonInlineBadge}>
+                                    <Text style={styles.serviceSalonInlineBadgeText}>Salone</Text>
+                                  </View>
+                                ) : null}
+                              </View>
+                              <Text
+                                style={[styles.serviceHint, { color: '#111111' }]}
+                                numberOfLines={1}
+                                adjustsFontSizeToFit
+                                minimumFontScale={0.72}
+                              >
+                                {tApp(appLanguage, 'services_duration_label')}: {formatDurata(item.durataMinuti ?? 60, appLanguage)}
+                              </Text>
+                              {item.prezzoOriginale &&
+                              item.prezzoOriginale > item.prezzo &&
+                              item.scontoValidoDal &&
+                              item.scontoValidoAl ? (
+                                <Text
+                                  style={[styles.serviceHint, { color: '#111111' }]}
+                                  numberOfLines={1}
+                                  adjustsFontSizeToFit
+                                  minimumFontScale={0.64}
+                                >
+                                  Sconto valido: {item.scontoValidoDal} → {item.scontoValidoAl}
+                                </Text>
+                              ) : null}
+                            </View>
+
+                            <View style={styles.priceWrap}>
+                              {item.prezzoOriginale && item.prezzoOriginale > item.prezzo ? (
+                                <>
+                                  <Animated.View entering={FadeIn.duration(160)} style={styles.discountBadge}>
+                                    <Text
+                                      style={styles.discountBadgeText}
+                                      numberOfLines={1}
+                                      adjustsFontSizeToFit
+                                      minimumFontScale={0.78}
+                                    >
+                                      Sconto
+                                    </Text>
+                                  </Animated.View>
+                                  <Text
+                                    style={[styles.servicePriceOriginal, { color: '#111111' }]}
+                                    numberOfLines={1}
+                                    adjustsFontSizeToFit
+                                    minimumFontScale={0.78}
+                                  >
+                                    € {item.prezzoOriginale.toFixed(2)}
+                                  </Text>
+                                </>
+                              ) : null}
+                              <Text
+                                style={[styles.servicePrice, { color: '#111111' }]}
+                                numberOfLines={1}
+                                adjustsFontSizeToFit
+                                minimumFontScale={0.74}
+                              >
+                                € {item.prezzo.toFixed(2)}
+                              </Text>
+                            </View>
+                            <View
+                              style={[
+                                styles.serviceSwipeHintRow,
+                                { backgroundColor: accent.border },
+                              ]}
+                            >
+                              <View style={styles.serviceSwipeHintInline}>
+                                <Ionicons name="arrow-back-outline" size={13} color={accent.text} />
+                                <Text style={[styles.serviceSwipeHintText, { color: accent.text }]}>
+                                  Scorri per azioni rapide
+                                </Text>
+                              </View>
+                            </View>
+                          </Animated.View>
+                        </Animated.View>
+                      </Swipeable>
+                    </View>
+                  );
+                })}
+                {row.items.length === 1 ? <View style={styles.serviceGridSpacer} /> : null}
               </View>
-              <View
-                style={[
-                  styles.serviceSwipeHintRow,
-                  { backgroundColor: accent.border },
-                ]}
-              >
-                <View
-                  style={[
-                    styles.serviceSwipeHintInline,
-                  ]}
-                >
-                  <Ionicons name="arrow-back-outline" size={13} color={accent.text} />
-                  <Text style={[styles.serviceSwipeHintText, { color: accent.text }]}>
-                    Scorri per azioni rapide
-                  </Text>
-                </View>
-              </View>
-            </Animated.View>
-              );
-            })()}
-          </Swipeable>
-          </View>
-        )}
+            </View>
+          );
+        }}
         ListFooterComponent={
           <View>
+            {servizi.length > 0 ? <View style={styles.servicesListSectionBottom} /> : null}
             {operatorsListCard}
+            {cardColorsCard}
             {quickNotesCard}
             <View style={{ height: 18 }} />
           </View>
         }
       />
+      <Modal
+        visible={successDialog.visible}
+        transparent
+        animationType="fade"
+        onRequestClose={closeSuccessDialog}
+      >
+        <View style={styles.successDialogOverlay}>
+          <View style={styles.successDialogBackdrop} />
+          <Animated.View
+            entering={FadeIn.duration(180)}
+            exiting={FadeOut.duration(140)}
+            style={styles.successDialogShell}
+          >
+            <View
+              style={[
+                styles.successDialogCard,
+                successDialog.accent === 'service'
+                  ? styles.successDialogCardService
+                  : styles.successDialogCardOperator,
+              ]}
+            >
+              <View style={styles.successDialogHandle} />
+              <View style={styles.successDialogIconRow}>
+                <View
+                  style={[
+                    styles.successDialogIconWrap,
+                    successDialog.accent === 'service'
+                      ? styles.successDialogIconWrapService
+                      : styles.successDialogIconWrapOperator,
+                  ]}
+                >
+                  <Ionicons
+                    name={successDialog.accent === 'service' ? 'sparkles' : 'people'}
+                    size={20}
+                    color="#0F172A"
+                  />
+                </View>
+                <View style={styles.successDialogTitleWrap}>
+                  <Text style={styles.successDialogEyebrow}>
+                    {successDialog.accent === 'service' ? 'Servizi' : 'Operatori'}
+                  </Text>
+                  <Text style={styles.successDialogTitle}>{successDialog.title}</Text>
+                </View>
+              </View>
+              <Text style={styles.successDialogBody}>{successDialog.message}</Text>
+              <HapticTouchable
+                style={styles.successDialogButton}
+                onPress={closeSuccessDialog}
+                pressScale={0.98}
+                pressOpacity={0.98}
+              >
+                <Text style={styles.successDialogButtonText}>Continua</Text>
+              </HapticTouchable>
+            </View>
+          </Animated.View>
+        </View>
+      </Modal>
+      <Modal
+        visible={noticeDialog.visible}
+        transparent
+        animationType="fade"
+        onRequestClose={closeNoticeDialog}
+      >
+        <View style={styles.successDialogOverlay}>
+          <View style={styles.successDialogBackdrop} />
+          <Animated.View entering={FadeIn.duration(180)} exiting={FadeOut.duration(140)} style={styles.successDialogShell}>
+            <View
+              style={[
+                styles.successDialogCard,
+                noticeDialog.accent === 'service'
+                  ? styles.successDialogCardService
+                  : styles.successDialogCardOperator,
+              ]}
+            >
+              <View style={styles.successDialogHandle} />
+              <View style={styles.successDialogIconRow}>
+                <View
+                  style={[
+                    styles.successDialogIconWrap,
+                    noticeDialog.accent === 'service'
+                      ? styles.successDialogIconWrapService
+                      : styles.successDialogIconWrapOperator,
+                  ]}
+                >
+                  <Ionicons name="alert-circle" size={20} color="#0F172A" />
+                </View>
+                <View style={styles.successDialogTitleWrap}>
+                  <Text style={styles.successDialogEyebrow}>
+                    {noticeDialog.accent === 'service' ? 'Servizi' : 'Operatori'}
+                  </Text>
+                  <Text style={styles.successDialogTitle}>{noticeDialog.title}</Text>
+                </View>
+              </View>
+              <Text style={styles.successDialogBody}>{noticeDialog.message}</Text>
+              <HapticTouchable
+                style={styles.successDialogButton}
+                onPress={closeNoticeDialog}
+                pressScale={0.98}
+                pressOpacity={0.98}
+              >
+                <Text style={styles.successDialogButtonText}>Ho capito</Text>
+              </HapticTouchable>
+            </View>
+          </Animated.View>
+        </View>
+      </Modal>
+      <Modal
+        visible={confirmDialog.visible}
+        transparent
+        animationType="fade"
+        onRequestClose={closeConfirmDialog}
+      >
+        <View style={styles.successDialogOverlay}>
+          <View style={styles.successDialogBackdrop} />
+          <Animated.View entering={FadeIn.duration(180)} exiting={FadeOut.duration(140)} style={styles.successDialogShell}>
+            <View
+              style={[
+                styles.successDialogCard,
+                confirmDialog.accent === 'service'
+                  ? styles.successDialogCardService
+                  : styles.successDialogCardOperator,
+              ]}
+            >
+              <View style={styles.successDialogHandle} />
+              <View style={styles.successDialogIconRow}>
+                <View
+                  style={[
+                    styles.successDialogIconWrap,
+                    confirmDialog.accent === 'service'
+                      ? styles.successDialogIconWrapService
+                      : styles.successDialogIconWrapOperator,
+                  ]}
+                >
+                  <Ionicons name="trash" size={20} color="#0F172A" />
+                </View>
+                <View style={styles.successDialogTitleWrap}>
+                  <Text style={styles.successDialogEyebrow}>
+                    {confirmDialog.accent === 'service' ? 'Servizi' : 'Operatori'}
+                  </Text>
+                  <Text style={styles.successDialogTitle}>{confirmDialog.title}</Text>
+                </View>
+              </View>
+              <Text style={styles.successDialogBody}>{confirmDialog.message}</Text>
+              <View style={styles.confirmDialogActions}>
+                <HapticTouchable
+                  style={styles.confirmDialogSecondaryButton}
+                  onPress={closeConfirmDialog}
+                  pressScale={0.98}
+                  pressOpacity={0.98}
+                >
+                  <Text style={styles.confirmDialogSecondaryButtonText}>
+                    {tApp(appLanguage, 'common_cancel')}
+                  </Text>
+                </HapticTouchable>
+                <HapticTouchable
+                  style={styles.confirmDialogPrimaryButton}
+                  onPress={() => {
+                    const handler = confirmDialog.onConfirm;
+                    closeConfirmDialog();
+                    handler?.();
+                  }}
+                  pressScale={0.98}
+                  pressOpacity={0.98}
+                >
+                  <Text style={styles.confirmDialogPrimaryButtonText}>
+                    {confirmDialog.confirmLabel}
+                  </Text>
+                </HapticTouchable>
+              </View>
+            </View>
+          </Animated.View>
+        </View>
+      </Modal>
       <KeyboardNextToolbar onNext={handleKeyboardNext} label="Next" />
     </View>
   );
@@ -2685,6 +3210,136 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#F3F6FA',
+  },
+  successDialogOverlay: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 22,
+  },
+  successDialogBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(15, 23, 42, 0.36)',
+  },
+  successDialogShell: {
+    width: '100%',
+    maxWidth: 430,
+  },
+  successDialogCard: {
+    borderRadius: 30,
+    paddingHorizontal: 22,
+    paddingTop: 14,
+    paddingBottom: 18,
+    borderWidth: 1,
+    shadowColor: '#0F172A',
+    shadowOpacity: 0.18,
+    shadowRadius: 30,
+    shadowOffset: { width: 0, height: 18 },
+    elevation: 12,
+  },
+  successDialogCardService: {
+    backgroundColor: '#101724',
+    borderColor: 'rgba(191, 219, 254, 0.18)',
+  },
+  successDialogCardOperator: {
+    backgroundColor: '#13211F',
+    borderColor: 'rgba(167, 243, 208, 0.18)',
+  },
+  successDialogHandle: {
+    alignSelf: 'center',
+    width: 74,
+    height: 6,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    marginBottom: 18,
+  },
+  successDialogIconRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  successDialogIconWrap: {
+    width: 54,
+    height: 54,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 14,
+  },
+  successDialogIconWrapService: {
+    backgroundColor: '#D9EAFE',
+  },
+  successDialogIconWrapOperator: {
+    backgroundColor: '#D6F5E8',
+  },
+  successDialogTitleWrap: {
+    flex: 1,
+  },
+  successDialogEyebrow: {
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 1.3,
+    textTransform: 'uppercase',
+    color: 'rgba(255,255,255,0.62)',
+    marginBottom: 4,
+  },
+  successDialogTitle: {
+    fontSize: 26,
+    lineHeight: 30,
+    fontWeight: '900',
+    color: '#FFFFFF',
+  },
+  successDialogBody: {
+    fontSize: 17,
+    lineHeight: 27,
+    color: 'rgba(255,255,255,0.78)',
+    marginBottom: 20,
+  },
+  successDialogButton: {
+    minHeight: 58,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255,255,255,0.14)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  successDialogButtonText: {
+    fontSize: 20,
+    fontWeight: '900',
+    color: '#FFFFFF',
+  },
+  confirmDialogActions: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  confirmDialogSecondaryButton: {
+    flex: 1,
+    minHeight: 58,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  confirmDialogSecondaryButtonText: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: 'rgba(255,255,255,0.86)',
+  },
+  confirmDialogPrimaryButton: {
+    flex: 1,
+    minHeight: 58,
+    borderRadius: 22,
+    backgroundColor: '#F87171',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  confirmDialogPrimaryButtonText: {
+    fontSize: 18,
+    fontWeight: '900',
+    color: '#FFFFFF',
   },
   content: {
     paddingTop: 54,
@@ -2810,12 +3465,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: IS_ANDROID ? 20 : 16,
     paddingVertical: 16,
     marginBottom: 14,
-    shadowColor: '#000',
-    shadowOpacity: 0.06,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 4,
-    borderWidth: 0,
+    shadowColor: '#0F172A',
+    shadowOpacity: 0.08,
+    shadowRadius: 28,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(15, 23, 42, 0.04)',
   },
   desktopTopGrid: {
     width: '100%',
@@ -3000,11 +3656,20 @@ const styles = StyleSheet.create({
     color: '#9a9a9a',
     fontWeight: '500',
   },
-  roleSelectorChevron: {
-    fontSize: 18,
-    color: '#475569',
-    fontWeight: '800',
+  roleSelectorChevronBadge: {
+    width: 30,
+    height: 30,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#EEF2F7',
+    borderWidth: 1,
+    borderColor: 'rgba(15, 23, 42, 0.08)',
     marginLeft: 8,
+  },
+  roleSelectorChevronBadgeActive: {
+    backgroundColor: '#0F172A',
+    borderColor: '#0F172A',
   },
   rolePickerPanel: {
     backgroundColor: '#FFFFFF',
@@ -3308,12 +3973,61 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   listTitle: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: '800',
     color: '#0F172A',
-    marginTop: 8,
+    marginTop: 0,
     marginBottom: 6,
     textAlign: 'center',
+  },
+  servicesListSectionTop: {
+    width: '100%',
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
+    paddingHorizontal: IS_ANDROID ? 20 : 18,
+    paddingVertical: 16,
+    marginTop: 8,
+    marginBottom: 0,
+    shadowColor: '#0F172A',
+    shadowOpacity: 0.07,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 5,
+    borderWidth: 1,
+    borderColor: 'rgba(15, 23, 42, 0.04)',
+  },
+  servicesListIntroText: {
+    fontSize: 13,
+    lineHeight: 20,
+    color: '#64748B',
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  servicesListSectionBottom: {
+    width: '100%',
+    height: 18,
+    backgroundColor: '#FFFFFF',
+    borderBottomLeftRadius: 28,
+    borderBottomRightRadius: 28,
+    marginTop: -6,
+    marginBottom: 14,
+    shadowColor: '#0F172A',
+    shadowOpacity: 0.07,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 5,
+    borderWidth: 1,
+    borderTopWidth: 0,
+    borderColor: 'rgba(15, 23, 42, 0.04)',
+  },
+  serviceGridRowWrap: {
+    width: '100%',
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 8,
+    paddingBottom: 12,
   },
   swipeHintRow: {
     flexDirection: 'row',
@@ -3338,11 +4052,28 @@ const styles = StyleSheet.create({
     flexShrink: 1,
   },
   serviceGridRow: {
+    flexDirection: 'row',
     justifyContent: 'space-between',
     width: '100%',
+    alignItems: 'stretch',
+    gap: 10,
   },
   serviceGridItem: {
-    width: '48.9%',
+    flex: 1,
+    minWidth: 0,
+  },
+  serviceGridSpacer: {
+    flex: 1,
+  },
+  serviceRoleGroupHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginBottom: 12,
+    paddingHorizontal: 4,
+    marginTop: 2,
+    width: '100%',
   },
   swipeActions: {
     flexDirection: 'row',
@@ -3376,23 +4107,34 @@ const styles = StyleSheet.create({
   },
   itemCard: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 24,
-    minHeight: 132,
-    paddingHorizontal: IS_ANDROID ? 16 : 14,
-    paddingVertical: 14,
-    marginBottom: 12,
-    shadowColor: '#000',
-    shadowOpacity: 0.06,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 4,
+    borderRadius: 30,
+    minHeight: 188,
+    paddingHorizontal: IS_ANDROID ? 14 : 12,
+    paddingVertical: 18,
+    marginBottom: 0,
     alignItems: 'center',
     justifyContent: 'space-between',
-    borderWidth: 0,
+    borderWidth: 1,
     position: 'relative',
+    shadowColor: '#94A3B8',
+    shadowOpacity: 0.11,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 3,
   },
   itemCardShell: {
     width: '100%',
+  },
+  serviceCardSurface: {
+    width: '100%',
+    backgroundColor: 'transparent',
+    borderRadius: 0,
+    padding: 0,
+    shadowOpacity: 0,
+    elevation: 0,
+    borderWidth: 0,
+    position: 'relative',
+    overflow: 'visible',
   },
   itemLeft: {
     alignItems: 'center',
@@ -3401,16 +4143,16 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   serviceName: {
-    fontSize: 15,
+    fontSize: 18,
     fontWeight: '900',
     color: '#0F172A',
-    marginBottom: 5,
+    marginBottom: 8,
     textAlign: 'center',
     paddingHorizontal: IS_ANDROID ? 6 : 0,
     width: '100%',
   },
   serviceHint: {
-    fontSize: IS_ANDROID ? 11 : 12,
+    fontSize: IS_ANDROID ? 12 : 13,
     color: '#64748B',
     fontWeight: '700',
     textAlign: 'center',
@@ -3421,29 +4163,31 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    flexWrap: 'wrap',
     gap: 8,
     width: '100%',
-    marginBottom: 8,
+    marginBottom: 12,
+    paddingHorizontal: 2,
   },
   serviceRoleBadge: {
     backgroundColor: 'rgba(255,255,255,0.72)',
     color: '#64748B',
     fontSize: IS_ANDROID ? 10 : 11,
     fontWeight: '800',
-    paddingHorizontal: IS_ANDROID ? 18 : 12,
-    paddingVertical: 5,
+    paddingHorizontal: IS_ANDROID ? 16 : 13,
+    paddingVertical: 6,
     borderRadius: 999,
     overflow: 'hidden',
     marginBottom: 0,
     textAlign: 'center',
     borderWidth: 0,
-    minWidth: IS_ANDROID ? 92 : undefined,
-    maxWidth: '78%',
+    minWidth: IS_ANDROID ? 86 : undefined,
+    maxWidth: '58%',
     alignSelf: 'center',
   },
   serviceOperatorInlineBadge: {
-    width: 24,
-    height: 24,
+    width: 26,
+    height: 26,
     borderRadius: 999,
     backgroundColor: 'rgba(255,255,255,0.82)',
     borderWidth: 1,
@@ -3451,17 +4195,17 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   serviceSalonInlineBadge: {
-    minWidth: 68,
-    height: 24,
+    minWidth: 86,
+    height: 28,
     borderRadius: 999,
     backgroundColor: '#0f172a',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 10,
+    paddingHorizontal: 14,
   },
   serviceSalonInlineBadgeText: {
     color: '#ffffff',
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: '800',
     textAlign: 'center',
   },
@@ -3475,11 +4219,11 @@ const styles = StyleSheet.create({
     width: '100%',
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 7,
-    minHeight: 22,
-    borderRadius: 10,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
+    marginTop: 12,
+    minHeight: 44,
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
   },
   serviceSwipeHintInline: {
     flexDirection: 'row',
@@ -3489,7 +4233,7 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   serviceSwipeHintText: {
-    fontSize: 9.5,
+    fontSize: 11,
     fontWeight: '800',
     textAlign: 'center',
   },
@@ -3518,7 +4262,7 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   servicePrice: {
-    fontSize: IS_ANDROID ? 16 : 17,
+    fontSize: IS_ANDROID ? 18 : 19,
     fontWeight: '900',
     color: '#0F172A',
     textAlign: 'center',
@@ -3527,18 +4271,40 @@ const styles = StyleSheet.create({
   operatorsList: {
     marginTop: 8,
   },
+  roleSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 8,
+    marginBottom: 8,
+    paddingHorizontal: 4,
+  },
+  roleSectionHeaderDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 999,
+  },
+  roleSectionHeaderText: {
+    fontSize: 12,
+    fontWeight: '900',
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    color: '#64748B',
+    textAlign: 'center',
+  },
   operatorCard: {
     backgroundColor: '#FFFFFF',
     borderRadius: 20,
     paddingHorizontal: IS_ANDROID ? 20 : 16,
     paddingVertical: 12,
     marginBottom: 14,
-    borderWidth: 0,
-    shadowColor: '#000',
-    shadowOpacity: 0.05,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 3,
+    borderWidth: 1,
+    borderColor: 'rgba(15, 23, 42, 0.04)',
+    shadowColor: '#0F172A',
+    shadowOpacity: 0.08,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 5,
   },
   operatorCardMainRow: {
     width: '100%',

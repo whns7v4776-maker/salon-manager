@@ -15,10 +15,15 @@ import Animated, {
 import { ModuleHeroHeader } from '../../components/module-hero-header';
 import { HapticTouchable } from '../../components/ui/haptic-touchable';
 import { useAppContext } from '../../src/context/AppContext';
-import { formatDateLong, getTodayDateString } from '../../src/lib/booking';
+import {
+  formatDateLong,
+  getTodayDateString,
+  normalizeAvailabilitySettings,
+} from '../../src/lib/booking';
 import { haptic } from '../../src/lib/haptics';
 import { tApp } from '../../src/lib/i18n';
 import { useResponsiveLayout } from '../../src/lib/responsive';
+import { supabase } from '../../src/lib/supabase';
 
 const buildDialablePhone = (value: string) => value.replace(/[^\d+]/g, '');
 const buildWhatsappUrl = (value: string) => {
@@ -34,6 +39,16 @@ const formatRequestDateKey = (value: string) => value || getTodayDateString();
 const AUTO_ACCEPT_DELAY_MS = 15000;
 const IS_ANDROID = Platform.OS === 'android';
 const IS_WEB = Platform.OS === 'web';
+const isUuidLike = (value?: string | null) =>
+  !!value &&
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+const buildViewedRequestSignature = (item: {
+  id: string;
+  stato?: string | null;
+  cancellationSource?: string | null;
+}) => `${item.id}:${item.stato ?? 'unknown'}:${item.cancellationSource ?? 'none'}`;
+const buildViewedRequestSyncSignature = (requestIds: string[], viewedSignatures: string[]) =>
+  `${requestIds.slice().sort().join('|')}::${viewedSignatures.slice().sort().join('|')}`;
 
 type RequestGroup = {
   date: string;
@@ -117,10 +132,12 @@ export default function PrenotazioniScreen() {
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>(collapsedSections);
   const [viewedRequestIds, setViewedRequestIds] = useState<string[]>([]);
   const [hasLoadedViewedRequestIds, setHasLoadedViewedRequestIds] = useState(false);
+  const viewedRequestBackendSyncRef = useRef('');
   const {
     richiestePrenotazione,
     setRichiestePrenotazione,
     availabilitySettings,
+    updateAvailabilitySettingsPersisted,
     updateGuidedSlotsSettingsPersisted,
     salonWorkspace,
     updateSalonWorkspacePersisted,
@@ -138,7 +155,32 @@ export default function PrenotazioniScreen() {
     (
       updater: (current: typeof availabilitySettings) => typeof availabilitySettings
     ) => {
-      void updateGuidedSlotsSettingsPersisted((current) => {
+      const persistGuidedSlotsSettings =
+        typeof updateGuidedSlotsSettingsPersisted === 'function'
+          ? updateGuidedSlotsSettingsPersisted
+          : async (
+              fallbackUpdater:
+                | typeof availabilitySettings
+                | ((current: typeof availabilitySettings) => typeof availabilitySettings)
+            ) => {
+              await updateAvailabilitySettingsPersisted((current) => {
+                const resolved =
+                  typeof fallbackUpdater === 'function'
+                    ? (
+                        fallbackUpdater as (
+                          current: typeof availabilitySettings
+                        ) => typeof availabilitySettings
+                      )(current)
+                    : fallbackUpdater;
+
+                return normalizeAvailabilitySettings({
+                  ...current,
+                  ...resolved,
+                });
+              });
+            };
+
+      void persistGuidedSlotsSettings((current) => {
         const resolvedSettings = updater(current);
 
         return {
@@ -147,7 +189,7 @@ export default function PrenotazioniScreen() {
         };
       });
     },
-    [updateGuidedSlotsSettingsPersisted]
+    [updateAvailabilitySettingsPersisted, updateGuidedSlotsSettingsPersisted]
   );
 
   const confirmOwnerWebAction = useCallback(
@@ -241,10 +283,10 @@ export default function PrenotazioniScreen() {
       });
 
       return Array.from(byDate.entries())
-        .sort(([left], [right]) => left.localeCompare(right))
+        .sort(([left], [right]) => right.localeCompare(left))
         .map(([date, groupedItems]) => ({
           date,
-          items: groupedItems.sort((left, right) => left.ora.localeCompare(right.ora)),
+          items: groupedItems.sort((left, right) => right.ora.localeCompare(left.ora)),
         }));
     },
     []
@@ -259,9 +301,12 @@ export default function PrenotazioniScreen() {
   );
 
   const persistViewedRequestIds = useCallback(
-    async (ids: string[]) => {
+    async (
+      requestSignatures: string[],
+      backendRequestIds: string[]
+    ) => {
       const normalizedEmail = salonAccountEmail.trim().toLowerCase();
-      if (!normalizedEmail || ids.length === 0) return;
+      if (!normalizedEmail || requestSignatures.length === 0) return;
 
       const storageKey = `salon_manager_viewed_request_ids__${normalizedEmail}`;
 
@@ -271,14 +316,38 @@ export default function PrenotazioniScreen() {
         const currentIds = Array.isArray(parsed)
           ? parsed.filter((item): item is string => typeof item === 'string')
           : [];
-        const merged = Array.from(new Set([...currentIds, ...ids]));
+        const merged = Array.from(new Set([...currentIds, ...requestSignatures]));
         await AsyncStorage.setItem(storageKey, JSON.stringify(merged));
         setViewedRequestIds(merged);
       } catch {
         // Non bloccare UX notifiche in caso di errore storage locale.
       }
+
+      if (!salonWorkspace.id || backendRequestIds.length === 0) {
+        return;
+      }
+
+      try {
+        const { error } = await supabase
+          .from('booking_requests')
+          .update({ viewed_by_salon: true })
+          .eq('workspace_id', salonWorkspace.id)
+          .in('id', backendRequestIds);
+
+        if (error) {
+          throw error;
+        }
+
+        setRichiestePrenotazione((current) =>
+          current.map((item) =>
+            backendRequestIds.includes(item.id) ? { ...item, viewedBySalon: true } : item
+          )
+        );
+      } catch (error) {
+        console.log('Errore sync viewed_by_salon richieste:', error);
+      }
     },
-    [salonAccountEmail]
+    [salonAccountEmail, salonWorkspace.id, setRichiestePrenotazione]
   );
 
   useEffect(() => {
@@ -322,6 +391,80 @@ export default function PrenotazioniScreen() {
     };
   }, [salonAccountEmail]);
 
+  useEffect(() => {
+    if (!hasLoadedViewedRequestIds || viewedRequestIds.length === 0) {
+      viewedRequestBackendSyncRef.current = '';
+      return;
+    }
+
+    const matchingRequestIds = richiestePrenotazione
+      .filter(
+        (item) =>
+          item.viewedBySalon !== true &&
+          viewedRequestIds.includes(buildViewedRequestSignature(item))
+      )
+      .map((item) => item.id)
+      .filter(Boolean);
+
+    if (matchingRequestIds.length === 0) {
+      viewedRequestBackendSyncRef.current = '';
+      return;
+    }
+
+    const syncSignature = buildViewedRequestSyncSignature(matchingRequestIds, viewedRequestIds);
+    if (viewedRequestBackendSyncRef.current === syncSignature) {
+      return;
+    }
+    viewedRequestBackendSyncRef.current = syncSignature;
+
+    setRichiestePrenotazione((current) => {
+      let hasChanges = false;
+      const nextRequests = current.map((item) => {
+        if (
+          item.viewedBySalon !== true &&
+          viewedRequestIds.includes(buildViewedRequestSignature(item))
+        ) {
+          hasChanges = true;
+          return { ...item, viewedBySalon: true };
+        }
+
+        return item;
+      });
+
+      return hasChanges ? nextRequests : current;
+    });
+
+    const backendRequestIds = Array.from(
+      new Set(matchingRequestIds.filter((id) => isUuidLike(id)))
+    );
+
+    if (!salonWorkspace.id || backendRequestIds.length === 0) {
+      return;
+    }
+
+    void (async () => {
+      try {
+        const { error } = await supabase
+          .from('booking_requests')
+          .update({ viewed_by_salon: true })
+          .eq('workspace_id', salonWorkspace.id)
+          .in('id', backendRequestIds);
+
+        if (error) {
+          throw error;
+        }
+      } catch (error) {
+        console.log('Errore riallineamento viewed_by_salon richieste:', error);
+      }
+    })();
+  }, [
+    hasLoadedViewedRequestIds,
+    richiestePrenotazione,
+    salonWorkspace.id,
+    setRichiestePrenotazione,
+    viewedRequestIds,
+  ]);
+
   const isFrontendRequest = useCallback(
     (item: (typeof richiestePrenotazione)[number]) => (item.origine ?? 'frontend') === 'frontend',
     []
@@ -331,26 +474,34 @@ export default function PrenotazioniScreen() {
     (item: (typeof richiestePrenotazione)[number]) =>
       isFrontendRequest(item) &&
       item.viewedBySalon !== true &&
-      !viewedRequestIds.includes(item.id),
+      !viewedRequestIds.includes(buildViewedRequestSignature(item)),
     [isFrontendRequest, viewedRequestIds]
   );
 
   const markRequestsAsViewed = useCallback(
-    (ids: string[]) => {
-      const nextIds = Array.from(new Set(ids.filter(Boolean)));
-      if (nextIds.length === 0) return;
-      setViewedRequestIds((current) => Array.from(new Set([...current, ...nextIds])));
-      void persistViewedRequestIds(nextIds);
+    (items: Array<(typeof richiestePrenotazione)[number]>) => {
+      const nextItems = items.filter((item) => Boolean(item?.id));
+      if (nextItems.length === 0) return;
+
+      const nextSignatures = Array.from(
+        new Set(nextItems.map((item) => buildViewedRequestSignature(item)))
+      );
+      const backendRequestIds = Array.from(
+        new Set(nextItems.map((item) => item.id).filter((id) => isUuidLike(id)))
+      );
+
+      setViewedRequestIds((current) => Array.from(new Set([...current, ...nextSignatures])));
+      void persistViewedRequestIds(nextSignatures, backendRequestIds);
     },
     [persistViewedRequestIds]
   );
 
   const markFrontendRequestsAsViewed = useCallback(() => {
-    const markedIds = richiestePrenotazione
-      .filter((item) => isUnreadRequest(item) && item.stato === 'In attesa')
-      .map((item) => item.id);
+    const markedItems = richiestePrenotazione.filter(
+      (item) => isUnreadRequest(item) && item.stato === 'In attesa'
+    );
 
-    markRequestsAsViewed(markedIds);
+    markRequestsAsViewed(markedItems);
   }, [isUnreadRequest, markRequestsAsViewed, richiestePrenotazione]);
 
   useEffect(() => {
@@ -360,29 +511,27 @@ export default function PrenotazioniScreen() {
   }, [expandedSections.pending, markFrontendRequestsAsViewed]);
 
   const markCancelledRequestsAsViewed = useCallback(() => {
-    const markedCancelledIds = richiestePrenotazione
-      .filter(
-        (item) => isUnreadRequest(item) && item.stato === 'Annullata' && !isCancelledBySalon(item)
-      )
-      .map((item) => item.id);
+    const markedCancelledItems = richiestePrenotazione.filter(
+      (item) => isUnreadRequest(item) && item.stato === 'Annullata' && !isCancelledBySalon(item)
+    );
 
-    markRequestsAsViewed(markedCancelledIds);
+    markRequestsAsViewed(markedCancelledItems);
   }, [isCancelledBySalon, isUnreadRequest, markRequestsAsViewed, richiestePrenotazione]);
 
   const markAcceptedRequestsAsViewed = useCallback(() => {
-    const markedAcceptedIds = richiestePrenotazione
-      .filter((item) => isUnreadRequest(item) && item.stato === 'Accettata')
-      .map((item) => item.id);
+    const markedAcceptedItems = richiestePrenotazione.filter(
+      (item) => isUnreadRequest(item) && item.stato === 'Accettata'
+    );
 
-    markRequestsAsViewed(markedAcceptedIds);
+    markRequestsAsViewed(markedAcceptedItems);
   }, [isUnreadRequest, markRequestsAsViewed, richiestePrenotazione]);
 
   const markSalonDeclinedRequestsAsViewed = useCallback(() => {
-    const markedDeclinedIds = richiestePrenotazione
-      .filter((item) => isUnreadRequest(item) && (item.stato === 'Rifiutata' || isCancelledBySalon(item)))
-      .map((item) => item.id);
+    const markedDeclinedItems = richiestePrenotazione.filter(
+      (item) => isUnreadRequest(item) && (item.stato === 'Rifiutata' || isCancelledBySalon(item))
+    );
 
-    markRequestsAsViewed(markedDeclinedIds);
+    markRequestsAsViewed(markedDeclinedItems);
   }, [isCancelledBySalon, isUnreadRequest, markRequestsAsViewed, richiestePrenotazione]);
 
   useEffect(() => {
@@ -735,6 +884,7 @@ export default function PrenotazioniScreen() {
                       <Text style={styles.infoValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>€ {item.prezzo.toFixed(2)}</Text>
                     </View>
                   </View>
+                  <View style={styles.requestDivider} />
                   <View style={styles.contactPanel}>
                     {item.operatoreNome ? (
                       <Text style={styles.contactLine}>Operatore: {item.operatoreNome}</Text>
@@ -851,6 +1001,7 @@ export default function PrenotazioniScreen() {
                       <Text style={styles.historySummaryValue}>€ {item.prezzo.toFixed(2)}</Text>
                     </View>
                   </View>
+                  <View style={styles.requestDivider} />
                   <View style={styles.contactPanel}>
                     {item.operatoreNome ? (
                       <Text style={styles.contactLine}>Operatore: {item.operatoreNome}</Text>
@@ -1914,16 +2065,16 @@ const styles = StyleSheet.create({
   },
   requestCard: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 22,
-    padding: IS_ANDROID ? 20 : 16,
-    marginBottom: 14,
-    borderWidth: 0,
-    borderColor: 'transparent',
+    borderRadius: 20,
+    padding: IS_ANDROID ? 16 : 14,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(226, 232, 240, 0.92)',
     shadowColor: '#000',
-    shadowOpacity: 0.06,
-    shadowOffset: { width: 0, height: 8 },
-    shadowRadius: 18,
-    elevation: 4,
+    shadowOpacity: 0.05,
+    shadowOffset: { width: 0, height: 10 },
+    shadowRadius: 24,
+    elevation: 3,
   },
   wideCard: {
     maxWidth: 980,
@@ -1933,13 +2084,13 @@ const styles = StyleSheet.create({
   requestTopRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    gap: 8,
+    alignItems: 'flex-start',
+    gap: 10,
     marginBottom: 10,
   },
   requestHeaderText: {
     flex: 1,
-    paddingRight: 4,
+    paddingRight: 6,
     alignItems: 'flex-start',
   },
   requestName: {
@@ -1952,31 +2103,32 @@ const styles = StyleSheet.create({
   },
   requestMeta: {
     fontSize: 12,
-    lineHeight: 18,
+    lineHeight: 16,
     fontWeight: '700',
     color: '#64748B',
     textAlign: 'left',
-    marginTop: 2,
+    marginTop: 4,
   },
   pendingBadge: {
-    backgroundColor: '#EAF1FB',
+    backgroundColor: '#EEF4FF',
     borderRadius: 999,
-    paddingHorizontal: IS_ANDROID ? 16 : 10,
-    paddingVertical: 5,
-    minWidth: 74,
+    paddingHorizontal: IS_ANDROID ? 14 : 10,
+    paddingVertical: 4,
+    minWidth: 66,
     maxWidth: IS_ANDROID ? '48%' : '44%',
-    borderWidth: 0,
-    borderColor: 'transparent',
+    borderWidth: 1,
+    borderColor: 'rgba(147, 197, 253, 0.35)',
     alignItems: 'center',
     justifyContent: 'center',
+    alignSelf: 'flex-start',
   },
   pendingBadgeCancelled: {
-    backgroundColor: '#FDECEC',
-    borderColor: 'transparent',
+    backgroundColor: '#FFF1F2',
+    borderColor: 'rgba(248, 113, 113, 0.2)',
   },
   pendingBadgeText: {
-    color: '#0F172A',
-    fontSize: 11,
+    color: '#1D4ED8',
+    fontSize: 10,
     fontWeight: '900',
     paddingHorizontal: IS_ANDROID ? 4 : 0,
     width: '100%',
@@ -1989,81 +2141,93 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 10,
     justifyContent: 'space-between',
-    marginTop: 6,
+    marginTop: 0,
     marginBottom: 10,
   },
   infoBox: {
     flex: 1,
-    backgroundColor: 'transparent',
-    borderRadius: 0,
-    paddingHorizontal: 0,
-    paddingVertical: 0,
-    borderWidth: 0,
-    borderColor: 'transparent',
+    backgroundColor: '#F8FBFF',
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(191, 219, 254, 0.7)',
     alignItems: 'flex-start',
+    minHeight: 50,
+    justifyContent: 'center',
   },
   infoLabel: {
-    fontSize: 13,
-    lineHeight: 16,
+    fontSize: 11,
+    lineHeight: 14,
     color: '#64748B',
-    fontWeight: '700',
-    marginBottom: 2,
+    fontWeight: '800',
+    marginBottom: 4,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
   },
   infoValue: {
     fontSize: 15,
-    lineHeight: 20,
+    lineHeight: 19,
     color: '#0F172A',
-    fontWeight: '600',
+    fontWeight: '800',
     textAlign: 'left',
+  },
+  requestDivider: {
+    height: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.06)',
+    marginBottom: 10,
   },
   contactPanel: {
-    backgroundColor: 'transparent',
-    borderRadius: 0,
-    borderWidth: 0,
-    borderColor: 'transparent',
-    paddingHorizontal: 0,
-    paddingVertical: 0,
-    marginBottom: 8,
+    backgroundColor: '#FBFDFF',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(226, 232, 240, 0.9)',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 10,
   },
   contactLine: {
-    fontSize: 13,
-    lineHeight: 18,
+    fontSize: 12.5,
+    lineHeight: 17,
     color: '#64748B',
     textAlign: 'left',
-    marginTop: 4,
+    marginTop: 0,
+    marginBottom: 4,
   },
   quickActionsRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    justifyContent: 'flex-start',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    columnGap: 10,
+    columnGap: 8,
     rowGap: 8,
-    marginTop: 10,
+    marginTop: 0,
   },
   quickActionChip: {
-    backgroundColor: '#0F172A',
-    borderRadius: 12,
-    paddingHorizontal: IS_ANDROID ? 20 : 16,
-    paddingVertical: 10,
-    borderWidth: 0,
-    borderColor: 'transparent',
-    minWidth: 112,
+    backgroundColor: '#111827',
+    borderRadius: 14,
+    paddingHorizontal: IS_ANDROID ? 14 : 12,
+    paddingVertical: 9,
+    borderWidth: 1,
+    borderColor: 'rgba(15, 23, 42, 0.08)',
+    minWidth: 0,
+    flexGrow: 1,
+    flexBasis: '47%',
     alignItems: 'center',
     justifyContent: 'center',
   },
   quickActionChipWhatsapp: {
-    backgroundColor: '#EAF7F0',
-    borderColor: 'transparent',
+    backgroundColor: '#ECFDF3',
+    borderColor: 'rgba(34, 197, 94, 0.18)',
   },
   quickActionChipInstagram: {
-    backgroundColor: '#F8FAFC',
-    borderColor: 'transparent',
+    backgroundColor: '#F5F3FF',
+    borderColor: 'rgba(167, 139, 250, 0.16)',
   },
   quickActionChipText: {
-    fontSize: 12,
-    lineHeight: 16,
-    fontWeight: '600',
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: '800',
     color: '#FFFFFF',
     paddingHorizontal: IS_ANDROID ? 4 : 0,
   },
@@ -2071,11 +2235,11 @@ const styles = StyleSheet.create({
     color: '#166534',
   },
   quickActionChipInstagramText: {
-    color: '#0F172A',
+    color: '#6D28D9',
   },
   noteText: {
     fontSize: 11,
-    lineHeight: 16,
+    lineHeight: 15,
     color: '#64748B',
     marginTop: 8,
     textAlign: 'left',
@@ -2083,60 +2247,62 @@ const styles = StyleSheet.create({
   actionsRow: {
     flexDirection: 'row',
     marginTop: 10,
+    columnGap: 10,
   },
   acceptButton: {
     flex: 1,
     backgroundColor: '#0F172A',
-    borderRadius: 12,
+    borderRadius: 14,
     paddingVertical: 10,
     alignItems: 'center',
-    marginRight: 8,
-    borderWidth: 0,
-    borderColor: 'transparent',
+    borderWidth: 1,
+    borderColor: 'rgba(15, 23, 42, 0.08)',
   },
   acceptButtonText: {
     color: '#FFFFFF',
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: '800',
   },
   rejectButton: {
     flex: 1,
-    backgroundColor: '#FDECEC',
-    borderRadius: 12,
+    backgroundColor: '#FFF1F2',
+    borderRadius: 14,
     paddingVertical: 10,
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(248, 113, 113, 0.18)',
   },
   rejectButtonText: {
     color: '#B91C1C',
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: '800',
   },
   actionButtonDisabled: {
     opacity: 0.58,
   },
   historyCard: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 22,
-    padding: IS_ANDROID ? 20 : 16,
-    marginBottom: 14,
-    borderWidth: 0,
-    borderColor: 'transparent',
+    borderRadius: 20,
+    padding: IS_ANDROID ? 16 : 14,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(226, 232, 240, 0.92)',
     shadowColor: '#000',
-    shadowOpacity: 0.06,
-    shadowOffset: { width: 0, height: 8 },
-    shadowRadius: 18,
-    elevation: 4,
+    shadowOpacity: 0.05,
+    shadowOffset: { width: 0, height: 10 },
+    shadowRadius: 24,
+    elevation: 3,
   },
   historyHeaderRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
-    gap: 6,
-    marginBottom: 4,
+    gap: 10,
+    marginBottom: 10,
   },
   historyHeaderText: {
     flex: 1,
-    paddingRight: 4,
+    paddingRight: 6,
   },
   historyTitle: {
     fontSize: 16,
@@ -2148,60 +2314,64 @@ const styles = StyleSheet.create({
   },
   historyMeta: {
     fontSize: 12,
-    lineHeight: 18,
+    lineHeight: 16,
     color: '#64748B',
     fontWeight: '700',
     textAlign: 'left',
-    marginTop: 2,
+    marginTop: 4,
   },
   historySummaryRow: {
     flexDirection: 'row',
     gap: 10,
     justifyContent: 'space-between',
-    marginTop: 6,
+    marginTop: 0,
     marginBottom: 10,
   },
   historySummaryChip: {
     flex: 1,
-    backgroundColor: 'transparent',
-    borderRadius: 0,
-    paddingHorizontal: 0,
-    paddingVertical: 0,
-    borderWidth: 0,
-    borderColor: 'transparent',
+    backgroundColor: '#F8FBFF',
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(191, 219, 254, 0.7)',
     alignItems: 'flex-start',
+    minHeight: 50,
+    justifyContent: 'center',
   },
   historySummaryLabel: {
-    fontSize: 13,
-    lineHeight: 16,
-    fontWeight: '700',
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: '800',
     color: '#64748B',
-    marginBottom: 2,
+    marginBottom: 4,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
   },
   historySummaryValue: {
     fontSize: 15,
-    lineHeight: 20,
-    fontWeight: '600',
+    lineHeight: 19,
+    fontWeight: '800',
     color: '#0F172A',
   },
   historyBadge: {
     alignSelf: 'flex-start',
     borderRadius: 999,
-    paddingHorizontal: IS_ANDROID ? 16 : 10,
-    paddingVertical: 5,
+    paddingHorizontal: IS_ANDROID ? 14 : 10,
+    paddingVertical: 4,
     maxWidth: IS_ANDROID ? '48%' : '44%',
-    borderWidth: 0,
+    borderWidth: 1,
   },
   historyBadgeAccepted: {
-    backgroundColor: '#EAF7F0',
-    borderColor: 'transparent',
+    backgroundColor: '#ECFDF3',
+    borderColor: 'rgba(34, 197, 94, 0.18)',
   },
   historyBadgeRejected: {
-    backgroundColor: '#FDECEC',
-    borderColor: 'transparent',
+    backgroundColor: '#FFF1F2',
+    borderColor: 'rgba(248, 113, 113, 0.18)',
   },
   historyBadgeText: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '900',
     width: '100%',
     textAlign: 'center',

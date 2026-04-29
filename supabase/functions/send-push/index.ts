@@ -226,6 +226,12 @@ Deno.serve(async (request) => {
       sound: 'default',
       title: row.title,
       body: row.body,
+      badge:
+        typeof row.payload?.badgeCount === 'number'
+          ? Math.max(0, Math.trunc(row.payload.badgeCount))
+          : typeof row.payload?.badge === 'number'
+            ? Math.max(0, Math.trunc(row.payload.badge))
+            : 1,
       data: row.payload ?? {},
       priority: 'high',
     }));

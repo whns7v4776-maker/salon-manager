@@ -19,6 +19,7 @@ import {
     TextInput,
     View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import QRCode from 'react-native-qrcode-svg';
 import Reanimated, {
   Easing,
@@ -30,13 +31,11 @@ import Reanimated, {
   withTiming,
 } from 'react-native-reanimated';
 import { ModuleHeroHeader } from '../../components/module-hero-header';
-import { OnboardingModal } from '../../components/onboarding-modal';
 import { ClearableTextInput } from '../../components/ui/clearable-text-input';
 import { HapticTouchable } from '../../components/ui/haptic-touchable';
-import { KeyboardNextToolbar } from '../../components/ui/keyboard-next-toolbar';
 import { useAppContext } from '../../src/context/AppContext';
 import { salonNameFontOptions } from '../../src/lib/fonts';
-import { focusNextInput, useKeyboardAwareScroll } from '../../src/lib/form-navigation';
+import { useKeyboardAwareScroll } from '../../src/lib/form-navigation';
 import { tApp } from '../../src/lib/i18n';
 import { formatSalonAddress, normalizeSalonCode } from '../../src/lib/platform';
 import { useResponsiveLayout } from '../../src/lib/responsive';
@@ -229,9 +228,9 @@ function AnimatedChevron({
 export default function HomeScreen() {
   const router = useRouter();
   const responsive = useResponsiveLayout();
+  const insets = useSafeAreaInsets();
   const scrollRef = useRef<ScrollView | null>(null);
   const [clientAccessSectionY, setClientAccessSectionY] = useState(0);
-  const settingsTapLockRef = useRef(false);
   const salonNameFieldRef = useRef<TextInput | null>(null);
   const activityCategoryFieldRef = useRef<TextInput | null>(null);
   const businessPhoneFieldRef = useRef<TextInput | null>(null);
@@ -252,8 +251,8 @@ export default function HomeScreen() {
     updateSalonWorkspacePersisted,
     switchSalonAccount,
     appLanguage,
-    showOnboarding,
-    completeOnboarding,
+    ownerProfileNeedsCompletion,
+    consumeOwnerProfileNeedsCompletion,
   } = useAppContext();
 
   const [loadingSalon, setLoadingSalon] = useState(false);
@@ -295,22 +294,8 @@ export default function HomeScreen() {
     accountEmail?: string;
   }>({});
   const { focusField, scrollToField } = useKeyboardAwareScroll(scrollRef, {
-    topOffset: responsive.isDesktop ? 52 : 32,
+    topOffset: responsive.isDesktop ? 112 : 192,
   });
-  const handleKeyboardNext = useCallback(() => {
-    focusNextInput(
-      [
-        salonNameFieldRef,
-        activityCategoryFieldRef,
-        businessPhoneFieldRef,
-        streetLineFieldRef,
-        cityFieldRef,
-        postalCodeFieldRef,
-        accountEmailFieldRef,
-      ],
-      focusField
-    );
-  }, [focusField]);
 
   const scrollToQrSection = useCallback(() => {
     requestAnimationFrame(() => {
@@ -858,6 +843,28 @@ export default function HomeScreen() {
   }, [salonAccountEmail]);
 
   useEffect(() => {
+    if (!ownerProfileNeedsCompletion) {
+      return;
+    }
+
+    if (!consumeOwnerProfileNeedsCompletion()) {
+      return;
+    }
+
+    setShowProfileSection(true);
+    setIsEditingSalonProfile(true);
+
+    requestAnimationFrame(() => {
+      scrollRef.current?.scrollTo({ y: 0, animated: true });
+    });
+
+    Alert.alert(
+      'Completa il profilo salone',
+      'Per allineare il backend servono categoria attività, via e nome strada, comune e CAP. Ti ho aperto direttamente la sezione profilo.'
+    );
+  }, [consumeOwnerProfileNeedsCompletion, ownerProfileNeedsCompletion]);
+
+  useEffect(() => {
     if (isEditingSalonProfile) {
       return;
     }
@@ -1144,8 +1151,9 @@ const clientQrValue =
   publicClientLinkHealth === 'ready'
     ? salonClientLink
     : 'https://configura-public-client-base-url.invalid';
-const canShareClientAccess = publicClientLinkStatus.canShare;
-const clientAccessStatusCopy = publicClientLinkStatus.message;
+  const canShareClientAccess = publicClientLinkStatus.canShare;
+  const clientAccessStatusCopy = publicClientLinkStatus.message;
+  const contentTopPadding = Math.max(insets.top + 16, 54);
 
 const openFrontendPreviewForAdmin = useCallback(() => {
   router.push({
@@ -1230,6 +1238,7 @@ const openQrPrintPreview = useCallback(() => {
         style={styles.container}
         contentContainerStyle={[
           styles.content,
+          { paddingTop: contentTopPadding },
           { paddingHorizontal: responsive.horizontalPadding },
         ]}
         showsVerticalScrollIndicator
@@ -1248,32 +1257,9 @@ const openQrPrintPreview = useCallback(() => {
             salonNameDisplayStyle={salonNameDisplayStyleInput}
             salonNameFontVariant={salonNameFontVariantInput}
             onTitleLongPress={() => setShowAdminPanel((current) => !current)}
-            rightAccessory={
-              <HapticTouchable
-                style={styles.settingsButton}
-                onPress={() => {
-                  if (settingsTapLockRef.current) {
-                    return;
-                  }
-
-                  settingsTapLockRef.current = true;
-                  Haptics.selectionAsync().catch(() => null);
-                  router.push('/impostazioni');
-                  setTimeout(() => {
-                    settingsTapLockRef.current = false;
-                  }, 420);
-                }}
-                pressScale={0.98}
-                pressOpacity={0.98}
-              >
-                <Image
-                  source={require('../../assets/header-impostazioni-icon.png')}
-                  style={styles.settingsIconImage}
-                  resizeMode="contain"
-                />
-              </HapticTouchable>
-            }
           />
+
+          <Text style={styles.subtitle}>{tApp(appLanguage, 'home_subtitle')}</Text>
 
           <View style={styles.heroTopRow}>
             <View style={[styles.heroMetaCard, styles.heroMetaCardToday]}>
@@ -1339,119 +1325,119 @@ const openQrPrintPreview = useCallback(() => {
               </Text>
             </View>
           </View>
-
-          <Text style={styles.subtitle}>{tApp(appLanguage, 'home_subtitle')}</Text>
-        </View>
-
-        <View style={styles.insightGrid}>
-          <View
-            style={[
-              styles.insightCard,
-              responsive.isTablet && styles.halfWidthCard,
-              responsive.isDesktop && styles.desktopThirdCard,
-            ]}
-          >
-            <Text style={[styles.insightTitle, styles.insightTitlePlum]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>{tApp(appLanguage, 'tab_clients')}</Text>
-            <Text
-              numberOfLines={1}
-              adjustsFontSizeToFit
-              minimumFontScale={0.72}
-              style={[styles.insightNumber, styles.insightNumberPlum]}
+          <View style={styles.insightGrid}>
+            <View
+              style={[
+                styles.insightCard,
+                responsive.isTablet && styles.halfWidthCard,
+                responsive.isDesktop && styles.desktopThirdCard,
+              ]}
             >
-              {numeroClienti}
+              <Text style={[styles.insightTitle, styles.insightTitlePlum]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>{tApp(appLanguage, 'tab_clients')}</Text>
+              <Text
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                minimumFontScale={0.72}
+                style={[styles.insightNumber, styles.insightNumberPlum]}
+              >
+                {numeroClienti}
+              </Text>
+              <Text style={[styles.insightHint, styles.insightHintPlum]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.64}>
+                {ultimoCliente
+                  ? `Ultimo: ${ultimoCliente.nome}`
+                  : tApp(appLanguage, 'home_no_customer')}
+              </Text>
+            </View>
+
+            <View
+              style={[
+                styles.insightCardMint,
+                responsive.isTablet && styles.halfWidthCard,
+                responsive.isDesktop && styles.desktopThirdCard,
+              ]}
+            >
+              <Text style={[styles.insightTitle, styles.insightTitleMint]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>{tApp(appLanguage, 'home_total_income')}</Text>
+              <Text
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                minimumFontScale={0.72}
+                style={[styles.insightNumber, styles.insightNumberMint]}
+              >
+                € {incassoTotale.toFixed(0)}
+              </Text>
+              <Text style={[styles.insightHint, styles.insightHintMint]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.64}>
+                {tApp(appLanguage, 'home_registered_movements')}
+              </Text>
+            </View>
+          </View>
+
+          <View style={[styles.priorityCard, responsive.isDesktop && styles.desktopPriorityCard]}>
+            <Text style={styles.priorityEyebrow}>{tApp(appLanguage, 'home_next_priority')}</Text>
+            <Text
+              style={[
+                styles.priorityTitle,
+                !prossimoAppuntamento && styles.priorityTitleFallback,
+              ]}
+              numberOfLines={2}
+              adjustsFontSizeToFit
+              minimumFontScale={0.46}
+              ellipsizeMode="clip"
+            >
+              {prossimoAppuntamento
+                ? `${prossimoAppuntamento.ora} · ${prossimoAppuntamento.cliente}`
+                : tApp(appLanguage, 'home_no_appointment_today')}
             </Text>
-            <Text style={[styles.insightHint, styles.insightHintPlum]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.64}>
-              {ultimoCliente
-                ? `Ultimo: ${ultimoCliente.nome}`
-                : tApp(appLanguage, 'home_no_customer')}
+            <Text
+              style={styles.priorityText}
+              numberOfLines={2}
+              adjustsFontSizeToFit
+              minimumFontScale={0.76}
+              ellipsizeMode="clip"
+            >
+              {prossimoAppuntamento
+                ? `${prossimoAppuntamento.servizio} · € ${prossimoAppuntamento.prezzo.toFixed(2)}`
+                : tApp(appLanguage, 'home_free_today')}
             </Text>
           </View>
 
-          <View
-            style={[
-              styles.insightCardMint,
-              responsive.isTablet && styles.halfWidthCard,
-              responsive.isDesktop && styles.desktopThirdCard,
-            ]}
-          >
-            <Text style={[styles.insightTitle, styles.insightTitleMint]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>{tApp(appLanguage, 'home_total_income')}</Text>
-            <Text
-              numberOfLines={1}
-              adjustsFontSizeToFit
-              minimumFontScale={0.72}
-              style={[styles.insightNumber, styles.insightNumberMint]}
-            >
-              € {incassoTotale.toFixed(0)}
-            </Text>
-            <Text style={[styles.insightHint, styles.insightHintMint]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.64}>
-              {tApp(appLanguage, 'home_registered_movements')}
-            </Text>
-          </View>
-        </View>
+          <View style={styles.sectionRow}>
+            <View style={[styles.infoCardSun, responsive.isTablet && styles.infoCardResponsive]}>
+              <Text style={[styles.infoLabel, styles.infoLabelSun]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.58}>{tApp(appLanguage, 'home_collected')}</Text>
+              <Text
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                minimumFontScale={0.72}
+                style={[styles.infoValue, styles.infoValueSun]}
+              >
+                {appuntamentiIncassati}
+              </Text>
+            </View>
 
-        <View style={[styles.priorityCard, responsive.isDesktop && styles.desktopPriorityCard]}>
-          <Text style={styles.priorityEyebrow}>{tApp(appLanguage, 'home_next_priority')}</Text>
-          <Text
-            style={styles.priorityTitle}
-            numberOfLines={1}
-            adjustsFontSizeToFit
-            minimumFontScale={0.72}
-            ellipsizeMode="clip"
-          >
-            {prossimoAppuntamento
-              ? `${prossimoAppuntamento.ora} · ${prossimoAppuntamento.cliente}`
-              : tApp(appLanguage, 'home_no_appointment_today')}
-          </Text>
-          <Text
-            style={styles.priorityText}
-            numberOfLines={2}
-            adjustsFontSizeToFit
-            minimumFontScale={0.76}
-            ellipsizeMode="clip"
-          >
-            {prossimoAppuntamento
-              ? `${prossimoAppuntamento.servizio} · € ${prossimoAppuntamento.prezzo.toFixed(2)}`
-              : tApp(appLanguage, 'home_free_today')}
-          </Text>
-        </View>
-
-        <View style={styles.sectionRow}>
-          <View style={[styles.infoCardSun, responsive.isTablet && styles.infoCardResponsive]}>
-            <Text style={[styles.infoLabel, styles.infoLabelSun]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.58}>{tApp(appLanguage, 'home_collected')}</Text>
-            <Text
-              numberOfLines={1}
-              adjustsFontSizeToFit
-              minimumFontScale={0.72}
-              style={[styles.infoValue, styles.infoValueSun]}
+            <View
+              style={[styles.infoCardLavender, responsive.isTablet && styles.infoCardResponsive]}
             >
-              {appuntamentiIncassati}
-            </Text>
-          </View>
+              <Text style={[styles.infoLabel, styles.infoLabelLavender]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.58}>{tApp(appLanguage, 'home_bookings')}</Text>
+              <Text
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                minimumFontScale={0.72}
+                style={[styles.infoValue, styles.infoValueLavender]}
+              >
+                {numeroAppuntamenti}
+              </Text>
+            </View>
 
-          <View
-            style={[styles.infoCardLavender, responsive.isTablet && styles.infoCardResponsive]}
-          >
-            <Text style={[styles.infoLabel, styles.infoLabelLavender]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.58}>{tApp(appLanguage, 'home_bookings')}</Text>
-            <Text
-              numberOfLines={1}
-              adjustsFontSizeToFit
-              minimumFontScale={0.72}
-              style={[styles.infoValue, styles.infoValueLavender]}
-            >
-              {numeroAppuntamenti}
-            </Text>
-          </View>
-
-          <View style={[styles.infoCardPeach, responsive.isTablet && styles.infoCardResponsive]}>
-            <Text style={[styles.infoLabel, styles.infoLabelPeach]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.58}>{tApp(appLanguage, 'home_to_collect')}</Text>
-            <Text
-              numberOfLines={1}
-              adjustsFontSizeToFit
-              minimumFontScale={0.72}
-              style={[styles.infoValue, styles.infoValuePeach]}
-            >
-              {appuntamentiDaIncassare}
-            </Text>
+            <View style={[styles.infoCardPeach, responsive.isTablet && styles.infoCardResponsive]}>
+              <Text style={[styles.infoLabel, styles.infoLabelPeach]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.58}>{tApp(appLanguage, 'home_to_collect')}</Text>
+              <Text
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                minimumFontScale={0.72}
+                style={[styles.infoValue, styles.infoValuePeach]}
+              >
+                {appuntamentiDaIncassare}
+              </Text>
+            </View>
           </View>
         </View>
 
@@ -1477,8 +1463,22 @@ const openQrPrintPreview = useCallback(() => {
         >
           <View style={styles.operatorAgendaCardHeader}>
             <View style={styles.operatorAgendaCardTextWrap}>
-              <Text style={styles.operatorAgendaCardTitle}>Appuntamenti per operatore</Text>
-              <Text style={styles.operatorAgendaCardText}>
+              <Text
+                style={styles.operatorAgendaCardTitle}
+                numberOfLines={1}
+                ellipsizeMode="clip"
+                adjustsFontSizeToFit
+                minimumFontScale={0.74}
+              >
+                Appuntamenti per operatore
+              </Text>
+              <Text
+                style={styles.operatorAgendaCardText}
+                numberOfLines={1}
+                ellipsizeMode="clip"
+                adjustsFontSizeToFit
+                minimumFontScale={0.66}
+              >
                 Quadro live del lavoro di oggi. Tocca la card per aprire il popup dettagliato.
               </Text>
             </View>
@@ -1495,16 +1495,64 @@ const openQrPrintPreview = useCallback(() => {
 
           <View style={styles.operatorAgendaStatsRow}>
             <View style={[styles.operatorAgendaStatPill, styles.operatorAgendaStatPillSky]}>
-              <Text style={styles.operatorAgendaStatValue}>{operatorsWithWorkToday}</Text>
-              <Text style={styles.operatorAgendaStatLabel}>Operatori attivi</Text>
+              <Text
+                style={styles.operatorAgendaStatValue}
+                numberOfLines={1}
+                ellipsizeMode="clip"
+                adjustsFontSizeToFit
+                minimumFontScale={0.72}
+              >
+                {operatorsWithWorkToday}
+              </Text>
+              <Text
+                style={styles.operatorAgendaStatLabel}
+                numberOfLines={1}
+                ellipsizeMode="clip"
+                adjustsFontSizeToFit
+                minimumFontScale={0.6}
+              >
+                Operatori attivi
+              </Text>
             </View>
             <View style={[styles.operatorAgendaStatPill, styles.operatorAgendaStatPillMint]}>
-              <Text style={styles.operatorAgendaStatValue}>{totalOperatorOpenTasks}</Text>
-              <Text style={styles.operatorAgendaStatLabel}>Lavori aperti</Text>
+              <Text
+                style={styles.operatorAgendaStatValue}
+                numberOfLines={1}
+                ellipsizeMode="clip"
+                adjustsFontSizeToFit
+                minimumFontScale={0.72}
+              >
+                {totalOperatorOpenTasks}
+              </Text>
+              <Text
+                style={styles.operatorAgendaStatLabel}
+                numberOfLines={1}
+                ellipsizeMode="clip"
+                adjustsFontSizeToFit
+                minimumFontScale={0.6}
+              >
+                Lavori aperti
+              </Text>
             </View>
             <View style={[styles.operatorAgendaStatPill, styles.operatorAgendaStatPillLavender]}>
-              <Text style={styles.operatorAgendaStatValue}>{totalOperatorPendingRequests}</Text>
-              <Text style={styles.operatorAgendaStatLabel}>Richieste live</Text>
+              <Text
+                style={styles.operatorAgendaStatValue}
+                numberOfLines={1}
+                ellipsizeMode="clip"
+                adjustsFontSizeToFit
+                minimumFontScale={0.72}
+              >
+                {totalOperatorPendingRequests}
+              </Text>
+              <Text
+                style={styles.operatorAgendaStatLabel}
+                numberOfLines={1}
+                ellipsizeMode="clip"
+                adjustsFontSizeToFit
+                minimumFontScale={0.6}
+              >
+                Richieste live
+              </Text>
             </View>
           </View>
 
@@ -1567,8 +1615,22 @@ const openQrPrintPreview = useCallback(() => {
         >
           <View style={styles.operatorAgendaCardHeader}>
             <View style={styles.operatorAgendaCardTextWrap}>
-              <Text style={styles.operatorAgendaCardTitle}>Appuntamenti per cliente</Text>
-              <Text style={styles.operatorAgendaCardText}>
+              <Text
+                style={styles.operatorAgendaCardTitle}
+                numberOfLines={1}
+                ellipsizeMode="clip"
+                adjustsFontSizeToFit
+                minimumFontScale={0.72}
+              >
+                Appuntamenti per cliente
+              </Text>
+              <Text
+                style={styles.operatorAgendaCardText}
+                numberOfLines={1}
+                ellipsizeMode="clip"
+                adjustsFontSizeToFit
+                minimumFontScale={0.62}
+              >
                 Cerca un cliente e apri il suo storico completo: passati, oggi, futuri e totale servizi.
               </Text>
             </View>
@@ -1585,16 +1647,64 @@ const openQrPrintPreview = useCallback(() => {
 
           <View style={styles.operatorAgendaStatsRow}>
             <View style={[styles.operatorAgendaStatPill, styles.operatorAgendaStatPillPlum]}>
-              <Text style={styles.operatorAgendaStatValue}>{customerInsightBoards.length}</Text>
-              <Text style={styles.operatorAgendaStatLabel}>Clienti con storico</Text>
+              <Text
+                style={styles.operatorAgendaStatValue}
+                numberOfLines={1}
+                ellipsizeMode="clip"
+                adjustsFontSizeToFit
+                minimumFontScale={0.72}
+              >
+                {customerInsightBoards.length}
+              </Text>
+              <Text
+                style={styles.operatorAgendaStatLabel}
+                numberOfLines={1}
+                ellipsizeMode="clip"
+                adjustsFontSizeToFit
+                minimumFontScale={0.56}
+              >
+                Clienti con storico
+              </Text>
             </View>
             <View style={[styles.operatorAgendaStatPill, styles.operatorAgendaStatPillSun]}>
-              <Text style={styles.operatorAgendaStatValue}>{customerBoardsWithFuture}</Text>
-              <Text style={styles.operatorAgendaStatLabel}>Clienti con futuro</Text>
+              <Text
+                style={styles.operatorAgendaStatValue}
+                numberOfLines={1}
+                ellipsizeMode="clip"
+                adjustsFontSizeToFit
+                minimumFontScale={0.72}
+              >
+                {customerBoardsWithFuture}
+              </Text>
+              <Text
+                style={styles.operatorAgendaStatLabel}
+                numberOfLines={1}
+                ellipsizeMode="clip"
+                adjustsFontSizeToFit
+                minimumFontScale={0.56}
+              >
+                Clienti con futuro
+              </Text>
             </View>
             <View style={[styles.operatorAgendaStatPill, styles.operatorAgendaStatPillRose]}>
-              <Text style={styles.operatorAgendaStatValue}>€ {totalCustomerDeliveredSpend.toFixed(0)}</Text>
-              <Text style={styles.operatorAgendaStatLabel}>Servizi fruiti</Text>
+              <Text
+                style={styles.operatorAgendaStatValue}
+                numberOfLines={1}
+                ellipsizeMode="clip"
+                adjustsFontSizeToFit
+                minimumFontScale={0.62}
+              >
+                € {totalCustomerDeliveredSpend.toFixed(0)}
+              </Text>
+              <Text
+                style={styles.operatorAgendaStatLabel}
+                numberOfLines={1}
+                ellipsizeMode="clip"
+                adjustsFontSizeToFit
+                minimumFontScale={0.56}
+              >
+                Servizi fruiti
+              </Text>
             </View>
           </View>
 
@@ -1829,11 +1939,23 @@ const openQrPrintPreview = useCallback(() => {
                       <Text style={styles.profileModuleCaption}>Nome, categoria e insegna.</Text>
                     </View>
                     <Reanimated.View
-                      style={styles.profileModuleBadge}
+                      style={[
+                        styles.profileModuleBadge,
+                        profileSections[0]?.completed
+                          ? styles.profileModuleBadgeComplete
+                          : styles.profileModuleBadgeIncomplete,
+                      ]}
                       entering={FadeIn.duration(130).easing(Easing.out(Easing.cubic))}
                       layout={LinearTransition.duration(150).easing(Easing.out(Easing.cubic))}
                     >
-                      <Text style={styles.profileModuleBadgeText}>
+                      <Text
+                        style={[
+                          styles.profileModuleBadgeText,
+                          profileSections[0]?.completed
+                            ? styles.profileModuleBadgeTextComplete
+                            : styles.profileModuleBadgeTextIncomplete,
+                        ]}
+                      >
                         {profileSections[0]?.completed ? 'Completo' : 'Da finire'}
                       </Text>
                     </Reanimated.View>
@@ -1936,11 +2058,23 @@ const openQrPrintPreview = useCallback(() => {
                       <Text style={styles.profileModuleCaption}>Numero aziendale chiaro e pronto all&apos;uso.</Text>
                     </View>
                     <Reanimated.View
-                      style={styles.profileModuleBadge}
+                      style={[
+                        styles.profileModuleBadge,
+                        profileSections[1]?.completed
+                          ? styles.profileModuleBadgeComplete
+                          : styles.profileModuleBadgeIncomplete,
+                      ]}
                       entering={FadeIn.duration(130).easing(Easing.out(Easing.cubic))}
                       layout={LinearTransition.duration(150).easing(Easing.out(Easing.cubic))}
                     >
-                      <Text style={styles.profileModuleBadgeText}>
+                      <Text
+                        style={[
+                          styles.profileModuleBadgeText,
+                          profileSections[1]?.completed
+                            ? styles.profileModuleBadgeTextComplete
+                            : styles.profileModuleBadgeTextIncomplete,
+                        ]}
+                      >
                         {profileSections[1]?.completed ? 'Completo' : 'Da finire'}
                       </Text>
                     </Reanimated.View>
@@ -1987,11 +2121,23 @@ const openQrPrintPreview = useCallback(() => {
                       <Text style={styles.profileModuleCaption}>Via, citta e CAP in un blocco compatto.</Text>
                     </View>
                     <Reanimated.View
-                      style={styles.profileModuleBadge}
+                      style={[
+                        styles.profileModuleBadge,
+                        profileSections[2]?.completed
+                          ? styles.profileModuleBadgeComplete
+                          : styles.profileModuleBadgeIncomplete,
+                      ]}
                       entering={FadeIn.duration(130).easing(Easing.out(Easing.cubic))}
                       layout={LinearTransition.duration(150).easing(Easing.out(Easing.cubic))}
                     >
-                      <Text style={styles.profileModuleBadgeText}>
+                      <Text
+                        style={[
+                          styles.profileModuleBadgeText,
+                          profileSections[2]?.completed
+                            ? styles.profileModuleBadgeTextComplete
+                            : styles.profileModuleBadgeTextIncomplete,
+                        ]}
+                      >
                         {profileSections[2]?.completed ? 'Completo' : 'Da finire'}
                       </Text>
                     </Reanimated.View>
@@ -2060,11 +2206,23 @@ const openQrPrintPreview = useCallback(() => {
                       <Text style={styles.profileModuleCaption}>Email di lavoro e workspace sempre allineati.</Text>
                     </View>
                     <Reanimated.View
-                      style={styles.profileModuleBadge}
+                      style={[
+                        styles.profileModuleBadge,
+                        profileSections[3]?.completed
+                          ? styles.profileModuleBadgeComplete
+                          : styles.profileModuleBadgeIncomplete,
+                      ]}
                       entering={FadeIn.duration(130).easing(Easing.out(Easing.cubic))}
                       layout={LinearTransition.duration(150).easing(Easing.out(Easing.cubic))}
                     >
-                      <Text style={styles.profileModuleBadgeText}>
+                      <Text
+                        style={[
+                          styles.profileModuleBadgeText,
+                          profileSections[3]?.completed
+                            ? styles.profileModuleBadgeTextComplete
+                            : styles.profileModuleBadgeTextIncomplete,
+                        ]}
+                      >
                         {profileSections[3]?.completed ? 'Completo' : 'Da finire'}
                       </Text>
                     </Reanimated.View>
@@ -2828,15 +2986,6 @@ const openQrPrintPreview = useCallback(() => {
           </View>
         </View>
       </Modal>
-
-      <OnboardingModal
-        visible={showOnboarding}
-        onClose={completeOnboarding}
-        onComplete={completeOnboarding}
-      />
-
-      <KeyboardNextToolbar onNext={handleKeyboardNext} label="Next" />
-
     </View>
   );
 }
@@ -2848,7 +2997,6 @@ const styles = StyleSheet.create({
   },
   content: {
     flexGrow: 1,
-    paddingTop: 54,
     paddingBottom: 140,
   },
   loadingWrap: {
@@ -2880,21 +3028,6 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 18 },
     elevation: 12,
   },
-  settingsButton: {
-    width: 52,
-    height: 52,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 16,
-    backgroundColor: '#F8FAFC',
-    borderWidth: 1,
-    borderColor: 'rgba(15, 23, 42, 0.08)',
-    marginTop: 14,
-  },
-  settingsIconImage: {
-    width: 28,
-    height: 28,
-  },
   settingsIcon: {
     textShadowColor: 'transparent',
     textShadowOffset: { width: 0, height: 0 },
@@ -2902,39 +3035,36 @@ const styles = StyleSheet.create({
   },
   heroTopRow: {
     flexDirection: 'row',
-    marginTop: 10,
-    marginBottom: 10,
-    gap: 10,
+    marginTop: 6,
+    marginBottom: 14,
+    gap: 14,
   },
   heroMetaCard: {
     flex: 1,
-    backgroundColor: '#F6F3EE',
-    borderRadius: 22,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    borderWidth: 1,
-    borderColor: '#E6DDD0',
+    backgroundColor: '#F3F1EA',
+    borderRadius: 26,
+    paddingHorizontal: 18,
+    paddingVertical: 18,
+    borderWidth: 0,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#8A7963',
-    shadowOpacity: 0.08,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 7 },
-    elevation: 3,
+    shadowColor: '#0F172A',
+    shadowOpacity: 0.06,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 4,
   },
   heroMetaCardToday: {
-    backgroundColor: '#FFF1BF',
-    borderColor: '#E6C86A',
+    backgroundColor: '#FFF1C7',
   },
   heroStatusCard: {
-    backgroundColor: '#E4F0FF',
-    borderColor: '#BBD5FF',
+    backgroundColor: '#F6EBEE',
   },
   heroDateLabelToday: {
-    color: '#8A6B12',
+    color: '#9A6A14',
   },
   heroDateValueToday: {
-    color: '#463616',
+    color: '#0F172A',
   },
   heroDateLabel: {
     fontSize: 13,
@@ -2955,62 +3085,60 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   statusHot: {
-    backgroundColor: '#FEF2F2',
-    borderColor: 'transparent',
-    borderTopColor: 'transparent',
+    backgroundColor: '#FDEBEC',
+    borderColor: 'rgba(220, 38, 38, 0.12)',
+    borderTopColor: 'rgba(220, 38, 38, 0.12)',
   },
   statusWarm: {
-    backgroundColor: '#ECFDF5',
-    borderColor: 'transparent',
-    borderTopColor: 'transparent',
+    backgroundColor: '#ECF8F1',
+    borderColor: 'rgba(22, 163, 74, 0.12)',
+    borderTopColor: 'rgba(22, 163, 74, 0.12)',
   },
   statusCalm: {
-    backgroundColor: '#DDEBFF',
-    borderColor: '#BBD5FF',
-    borderTopColor: '#BBD5FF',
+    backgroundColor: '#EAF2FF',
+    borderColor: 'rgba(37, 99, 235, 0.16)',
+    borderTopColor: 'rgba(37, 99, 235, 0.16)',
   },
   statusHotText: {
-    color: '#b42318',
+    color: '#C1332B',
   },
   statusWarmText: {
-    color: '#166534',
+    color: '#236B45',
   },
   statusCalmText: {
-    color: '#1E5FCF',
+    color: '#2A5DB8',
   },
   heroMetricsRow: {
     flexDirection: 'row',
-    gap: 12,
-    marginBottom: 14,
+    gap: 14,
+    marginBottom: 16,
   },
   heroMetricCardBlue: {
     flex: 1,
-    backgroundColor: '#F9E1F2',
-    borderRadius: 20,
-    paddingVertical: 14,
+    backgroundColor: '#EFE9FF',
+    borderRadius: 26,
+    paddingVertical: 18,
     paddingHorizontal: IS_ANDROID ? 20 : 10,
-    borderWidth: 1,
-    borderColor: '#EDB9DD',
+    borderWidth: 0,
     alignItems: 'center',
-    shadowColor: '#B45095',
-    shadowOpacity: 0.09,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 8 },
+    shadowColor: '#0F172A',
+    shadowOpacity: 0.06,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
     elevation: 4,
   },
   heroMetricCardRose: {
     flex: 1,
-    backgroundColor: '#F4E4D7',
-    borderRadius: 20,
-    paddingVertical: 14,
+    backgroundColor: '#FFF0E2',
+    borderRadius: 26,
+    paddingVertical: 18,
     paddingHorizontal: IS_ANDROID ? 20 : 10,
-    borderWidth: 1,
-    borderColor: '#DFC2AA',
+    borderWidth: 0,
     alignItems: 'center',
-    shadowColor: '#9D7655',
-    shadowOpacity: 0.09,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 8 },
+    shadowColor: '#0F172A',
+    shadowOpacity: 0.06,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
     elevation: 4,
   },
   heroMetricNumber: {
@@ -3024,10 +3152,10 @@ const styles = StyleSheet.create({
     alignSelf: IS_ANDROID ? 'stretch' : undefined,
   },
   heroMetricNumberBlue: {
-    color: '#B01F7C',
+    color: '#0F172A',
   },
   heroMetricNumberRose: {
-    color: '#5E3B20',
+    color: '#0F172A',
   },
   heroMetricLabel: {
     fontSize: 13,
@@ -3039,55 +3167,54 @@ const styles = StyleSheet.create({
     alignSelf: IS_ANDROID ? 'stretch' : undefined,
   },
   heroMetricLabelBlue: {
-    color: '#B05C93',
+    color: '#6C58B8',
   },
   heroMetricLabelRose: {
-    color: '#6F4A2C',
+    color: '#C46B26',
   },
   subtitle: {
     fontSize: 14,
     color: '#64748b',
     lineHeight: 20,
     textAlign: 'center',
-    marginTop: 2,
+    marginTop: 8,
+    marginBottom: 18,
   },
   insightGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'space-between',
-    marginBottom: 12,
-    gap: 10,
+    marginBottom: 16,
+    gap: 14,
   },
   insightCard: {
     flex: 1,
     minWidth: '47%',
-    backgroundColor: '#EEE7FF',
-    borderRadius: 20,
+    backgroundColor: '#FDEBEC',
+    borderRadius: 26,
     paddingHorizontal: IS_ANDROID ? 24 : 14,
-    paddingVertical: 14,
-    borderWidth: 1,
-    borderColor: '#D7C8F5',
+    paddingVertical: 18,
+    borderWidth: 0,
     alignItems: 'center',
-    shadowColor: '#9C8BCF',
-    shadowOpacity: 0.1,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 8 },
+    shadowColor: '#0F172A',
+    shadowOpacity: 0.06,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
     elevation: 4,
   },
   insightCardMint: {
     flex: 1,
     minWidth: '47%',
-    backgroundColor: '#EDF5DB',
-    borderRadius: 20,
+    backgroundColor: '#ECF6D9',
+    borderRadius: 26,
     paddingHorizontal: IS_ANDROID ? 24 : 14,
-    paddingVertical: 14,
-    borderWidth: 1,
-    borderColor: '#D6E2B2',
+    paddingVertical: 18,
+    borderWidth: 0,
     alignItems: 'center',
-    shadowColor: '#738247',
-    shadowOpacity: 0.1,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 8 },
+    shadowColor: '#0F172A',
+    shadowOpacity: 0.06,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
     elevation: 4,
   },
   halfWidthCard: {
@@ -3107,10 +3234,10 @@ const styles = StyleSheet.create({
     alignSelf: IS_ANDROID ? 'stretch' : undefined,
   },
   insightTitlePlum: {
-    color: '#6F58A8',
+    color: '#C1332B',
   },
   insightTitleMint: {
-    color: '#667B31',
+    color: '#678126',
   },
   insightNumber: {
     fontSize: IS_ANDROID ? 30 : 28,
@@ -3123,10 +3250,10 @@ const styles = StyleSheet.create({
     alignSelf: IS_ANDROID ? 'stretch' : undefined,
   },
   insightNumberPlum: {
-    color: '#5B3FA2',
+    color: '#0F172A',
   },
   insightNumberMint: {
-    color: '#304415',
+    color: '#0F172A',
   },
   insightHint: {
     fontSize: 13,
@@ -3139,18 +3266,20 @@ const styles = StyleSheet.create({
     alignSelf: IS_ANDROID ? 'stretch' : undefined,
   },
   insightHintPlum: {
-    color: '#7B68AA',
+    color: '#C1332B',
   },
   insightHintMint: {
-    color: '#6D7F38',
+    color: '#7A8E3B',
   },
   priorityCard: {
     backgroundColor: '#243245',
     borderRadius: 26,
     paddingHorizontal: IS_ANDROID ? 24 : 18,
-    paddingVertical: 20,
+    paddingVertical: 22,
+    minHeight: IS_ANDROID ? 152 : 140,
     marginBottom: 14,
     alignItems: 'center',
+    justifyContent: 'center',
     borderWidth: 1,
     borderColor: '#324763',
     shadowColor: '#1B2635',
@@ -3163,11 +3292,11 @@ const styles = StyleSheet.create({
     alignSelf: 'stretch',
   },
   priorityEyebrow: {
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '800',
     color: '#CBD5E1',
     letterSpacing: IS_ANDROID ? 1.6 : 2.8,
-    marginBottom: 8,
+    marginBottom: 10,
     textAlign: 'center',
     paddingHorizontal: IS_ANDROID ? 8 : 0,
     width: IS_ANDROID ? '100%' : undefined,
@@ -3179,72 +3308,78 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     textAlign: 'center',
     marginBottom: 8,
+    lineHeight: 28,
     paddingHorizontal: IS_ANDROID ? 10 : 0,
-    width: IS_ANDROID ? '100%' : undefined,
-    alignSelf: IS_ANDROID ? 'stretch' : undefined,
+    width: '100%',
+    maxWidth: '100%',
+    alignSelf: 'stretch',
+    flexShrink: 1,
+  },
+  priorityTitleFallback: {
+    fontSize: IS_ANDROID ? 22 : 23,
+    lineHeight: IS_ANDROID ? 25 : 27,
   },
   priorityText: {
-    fontSize: 14,
+    fontSize: 17,
     fontWeight: '700',
     color: '#E2E8F0',
-    lineHeight: 20,
+    lineHeight: 22,
     textAlign: 'center',
     paddingHorizontal: IS_ANDROID ? 10 : 0,
-    width: IS_ANDROID ? '100%' : undefined,
-    alignSelf: IS_ANDROID ? 'stretch' : undefined,
+    width: '100%',
+    maxWidth: '100%',
+    alignSelf: 'stretch',
+    flexShrink: 1,
   },
   sectionRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 10,
-    marginBottom: 12,
+    gap: 14,
+    marginBottom: 8,
   },
   infoCardSun: {
     flex: 1,
     minWidth: '30%',
-    backgroundColor: '#EEF4D3',
-    borderRadius: 22,
+    backgroundColor: '#EAF7EF',
+    borderRadius: 24,
     paddingHorizontal: IS_ANDROID ? 24 : 14,
-    paddingVertical: 14,
-    borderWidth: 1,
-    borderColor: '#D5E0A8',
+    paddingVertical: 18,
+    borderWidth: 0,
     alignItems: 'center',
-    shadowColor: '#6C8042',
-    shadowOpacity: 0.1,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 8 },
+    shadowColor: '#0F172A',
+    shadowOpacity: 0.06,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 9 },
     elevation: 5,
   },
   infoCardLavender: {
     flex: 1,
     minWidth: '30%',
-    backgroundColor: '#FFE7D6',
-    borderRadius: 22,
+    backgroundColor: '#F8EBD8',
+    borderRadius: 24,
     paddingHorizontal: IS_ANDROID ? 24 : 14,
-    paddingVertical: 14,
-    borderWidth: 1,
-    borderColor: '#F0C4A0',
+    paddingVertical: 18,
+    borderWidth: 0,
     alignItems: 'center',
-    shadowColor: '#C07A3C',
-    shadowOpacity: 0.1,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 8 },
+    shadowColor: '#0F172A',
+    shadowOpacity: 0.06,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 9 },
     elevation: 5,
   },
   infoCardPeach: {
     flex: 1,
     minWidth: '30%',
-    backgroundColor: '#FBE1E1',
-    borderRadius: 22,
+    backgroundColor: '#FCE7F3',
+    borderRadius: 24,
     paddingHorizontal: IS_ANDROID ? 24 : 14,
-    paddingVertical: 14,
-    borderWidth: 1,
-    borderColor: '#F0BDBD',
+    paddingVertical: 18,
+    borderWidth: 0,
     alignItems: 'center',
-    shadowColor: '#B85F5F',
-    shadowOpacity: 0.1,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 8 },
+    shadowColor: '#0F172A',
+    shadowOpacity: 0.06,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 9 },
     elevation: 5,
   },
   infoCardResponsive: {
@@ -3261,13 +3396,13 @@ const styles = StyleSheet.create({
     alignSelf: IS_ANDROID ? 'stretch' : undefined,
   },
   infoLabelSun: {
-    color: '#66792E',
+    color: '#2E8B72',
   },
   infoLabelLavender: {
-    color: '#C26A22',
+    color: '#B86A1F',
   },
   infoLabelPeach: {
-    color: '#B94A4A',
+    color: '#C2388F',
   },
   infoValue: {
     fontSize: IS_ANDROID ? 26 : 24,
@@ -3279,13 +3414,13 @@ const styles = StyleSheet.create({
     alignSelf: IS_ANDROID ? 'stretch' : undefined,
   },
   infoValueSun: {
-    color: '#334615',
+    color: '#0F172A',
   },
   infoValueLavender: {
-    color: '#A84D14',
+    color: '#0F172A',
   },
   infoValuePeach: {
-    color: '#A53232',
+    color: '#0F172A',
   },
   operatorAgendaCard: {
     marginTop: 0,
@@ -3318,6 +3453,7 @@ const styles = StyleSheet.create({
   },
   operatorAgendaCardTextWrap: {
     flex: 1,
+    minWidth: 0,
   },
   operatorAgendaCardTitle: {
     fontSize: 20,
@@ -3325,12 +3461,14 @@ const styles = StyleSheet.create({
     color: '#0F172A',
     marginBottom: 5,
     letterSpacing: -0.3,
+    flexShrink: 1,
   },
   operatorAgendaCardText: {
     fontSize: 13,
     lineHeight: 20,
     color: '#4E5A68',
     fontWeight: '700',
+    flexShrink: 1,
   },
   operatorAgendaCardAction: {
     flexDirection: 'row',
@@ -3404,12 +3542,14 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     color: '#0F172A',
     marginBottom: 4,
+    flexShrink: 1,
   },
   operatorAgendaStatLabel: {
     fontSize: 11,
     fontWeight: '800',
     color: '#5E6876',
     textAlign: 'center',
+    flexShrink: 1,
   },
   operatorAgendaPreviewStack: {
     gap: 10,
@@ -4532,10 +4672,18 @@ const styles = StyleSheet.create({
   profileModuleBadge: {
     backgroundColor: '#F8FAFC',
     borderRadius: 999,
-    borderWidth: 0,
+    borderWidth: 1,
     borderColor: 'transparent',
     paddingHorizontal: 10,
     paddingVertical: 6,
+  },
+  profileModuleBadgeComplete: {
+    backgroundColor: '#ECFDF5',
+    borderColor: '#BBF7D0',
+  },
+  profileModuleBadgeIncomplete: {
+    backgroundColor: '#FEF2F2',
+    borderColor: '#FECACA',
   },
   profileModuleBadgeText: {
     fontSize: 10,
@@ -4543,6 +4691,12 @@ const styles = StyleSheet.create({
     color: '#516173',
     letterSpacing: IS_ANDROID ? 0 : 0.2,
     includeFontPadding: true,
+  },
+  profileModuleBadgeTextComplete: {
+    color: '#166534',
+  },
+  profileModuleBadgeTextIncomplete: {
+    color: '#B91C1C',
   },
   compactFieldBlock: {
     width: '100%',

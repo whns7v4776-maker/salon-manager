@@ -54,7 +54,10 @@ export default function ClienteScannerScreen() {
 
   const handleOpenSalon = useCallback(
     (code: string) => {
-      router.replace(`/join/${encodeURIComponent(code)}`);
+      router.replace({
+        pathname: '/',
+        params: { salon: code },
+      });
     },
     [router]
   );
@@ -105,7 +108,7 @@ export default function ClienteScannerScreen() {
       <View style={styles.card}>
         <TouchableOpacity
           style={styles.backButton}
-          onPress={() => router.replace('/cliente')}
+          onPress={() => router.replace('/')}
           activeOpacity={0.9}
         >
           <Ionicons name="chevron-back" size={22} color="#0F172A" />
@@ -121,7 +124,7 @@ export default function ClienteScannerScreen() {
         {!canUseCamera ? (
           <TouchableOpacity
             style={styles.primaryButton}
-            onPress={() => router.replace('/cliente')}
+            onPress={() => router.replace('/')}
             activeOpacity={0.9}
           >
             <Text style={styles.primaryButtonText}>Continua senza fotocamera</Text>
@@ -157,7 +160,7 @@ export default function ClienteScannerScreen() {
 
         <TouchableOpacity
           style={styles.secondaryButton}
-          onPress={() => router.replace('/cliente')}
+          onPress={() => router.replace('/')}
           activeOpacity={0.9}
         >
           <Text style={styles.secondaryButtonText}>Continua con codice salone</Text>

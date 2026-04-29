@@ -14,17 +14,17 @@ export default function ProprietarioScreen() {
   const showResetDoneMessage = params.reset === 'done';
   const showDesktopEntryHint = params.entry === 'desktop';
 
-  const navigateToOwnerAgenda = React.useCallback(() => {
+  const navigateToOwnerBackoffice = React.useCallback(() => {
     if (
       Platform.OS === 'web' &&
       typeof window !== 'undefined' &&
       typeof window.location?.assign === 'function'
     ) {
-      window.location.assign('/agenda');
+      window.location.assign('/');
       return;
     }
 
-    router.replace('/agenda');
+    router.replace('/(tabs)/index');
   }, [router]);
 
   React.useEffect(() => {
@@ -38,8 +38,8 @@ export default function ProprietarioScreen() {
     }
 
     redirectLockRef.current = true;
-    navigateToOwnerAgenda();
-  }, [forceOwnerAccess, isAuthenticated, navigateToOwnerAgenda, ownerPasswordRecoveryActive]);
+    navigateToOwnerBackoffice();
+  }, [forceOwnerAccess, isAuthenticated, navigateToOwnerBackoffice, ownerPasswordRecoveryActive]);
 
   if (isAuthenticated && !ownerPasswordRecoveryActive && !forceOwnerAccess) {
     return (

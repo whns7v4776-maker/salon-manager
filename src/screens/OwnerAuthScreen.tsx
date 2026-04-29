@@ -48,8 +48,11 @@ export default function OwnerAuthScreen() {
   const registerFirstNameRef = useRef<TextInput | null>(null);
   const registerLastNameRef = useRef<TextInput | null>(null);
   const registerSalonNameRef = useRef<TextInput | null>(null);
-  const registerEmailRef = useRef<TextInput | null>(null);
   const registerBusinessPhoneRef = useRef<TextInput | null>(null);
+  const registerStreetLineRef = useRef<TextInput | null>(null);
+  const registerCityRef = useRef<TextInput | null>(null);
+  const registerPostalCodeRef = useRef<TextInput | null>(null);
+  const registerEmailRef = useRef<TextInput | null>(null);
   const registerActivityCategoryRef = useRef<TextInput | null>(null);
   const registerPasswordRef = useRef<TextInput | null>(null);
   const [login, setLogin] = useState(EMPTY_LOGIN);
@@ -64,7 +67,7 @@ export default function OwnerAuthScreen() {
     registerBusinessPhone?: string;
   }>({});
   const { focusField, scrollToField } = useKeyboardAwareScroll(scrollRef, {
-    topOffset: 32,
+    topOffset: Platform.OS === 'ios' ? 200 : 172,
   });
 
   const handleLogin = async () => {
@@ -89,6 +92,23 @@ export default function OwnerAuthScreen() {
       registerEmail?: string;
       registerBusinessPhone?: string;
     } = {};
+
+    if (
+      !register.firstName.trim() ||
+      !register.lastName.trim() ||
+      !register.salonName.trim() ||
+      !register.businessPhone.trim() ||
+      !register.streetLine.trim() ||
+      !register.city.trim() ||
+      !register.postalCode.trim() ||
+      !register.activityCategory.trim() ||
+      !register.email.trim() ||
+      !register.password.trim()
+    ) {
+      invalidFields.push(
+        'Compila tutti i campi obbligatori: nome, cognome, nome salone, categoria, cellulare, indirizzo, comune, CAP, mail e password.'
+      );
+    }
 
     if (!isValidPhone10(register.businessPhone)) {
       invalidFields.push('Numero di telefono errato (deve avere 10 cifre)');
@@ -313,6 +333,78 @@ export default function OwnerAuthScreen() {
                 blurOnSubmit={false}
               />
               <TextInput
+                ref={registerBusinessPhoneRef}
+                style={[styles.input, formErrors.registerBusinessPhone && styles.inputError]}
+                placeholder="Numero cellulare azienda"
+                placeholderTextColor="#9a9a9a"
+                keyboardType="phone-pad"
+                value={register.businessPhone}
+                onChangeText={(value) =>
+                  {
+                    setRegister((current) => ({
+                      ...current,
+                      businessPhone: limitPhoneToTenDigits(value),
+                    }));
+                    if (formErrors.registerBusinessPhone) {
+                      setFormErrors((current) => ({
+                        ...current,
+                        registerBusinessPhone: undefined,
+                      }));
+                    }
+                  }
+                }
+                onFocus={() => scrollToField(registerBusinessPhoneRef)}
+                returnKeyType="next"
+                onSubmitEditing={() => focusField(registerStreetLineRef)}
+                blurOnSubmit={false}
+              />
+              {formErrors.registerBusinessPhone ? (
+                <Text style={styles.fieldErrorText}>{formErrors.registerBusinessPhone}</Text>
+              ) : null}
+              <TextInput
+                ref={registerStreetLineRef}
+                style={styles.input}
+                placeholder="Via e civico"
+                placeholderTextColor="#9a9a9a"
+                value={register.streetLine}
+                onChangeText={(value) =>
+                  setRegister((current) => ({ ...current, streetLine: value }))
+                }
+                onFocus={() => scrollToField(registerStreetLineRef)}
+                returnKeyType="next"
+                onSubmitEditing={() => focusField(registerCityRef)}
+                blurOnSubmit={false}
+              />
+              <TextInput
+                ref={registerCityRef}
+                style={styles.input}
+                placeholder="Comune"
+                placeholderTextColor="#9a9a9a"
+                value={register.city}
+                onChangeText={(value) =>
+                  setRegister((current) => ({ ...current, city: value }))
+                }
+                onFocus={() => scrollToField(registerCityRef)}
+                returnKeyType="next"
+                onSubmitEditing={() => focusField(registerPostalCodeRef)}
+                blurOnSubmit={false}
+              />
+              <TextInput
+                ref={registerPostalCodeRef}
+                style={styles.input}
+                placeholder="CAP"
+                placeholderTextColor="#9a9a9a"
+                keyboardType="number-pad"
+                value={register.postalCode}
+                onChangeText={(value) =>
+                  setRegister((current) => ({ ...current, postalCode: value.replace(/\D+/g, '') }))
+                }
+                onFocus={() => scrollToField(registerPostalCodeRef)}
+                returnKeyType="next"
+                onSubmitEditing={() => focusField(registerActivityCategoryRef)}
+                blurOnSubmit={false}
+              />
+              <TextInput
                 ref={registerActivityCategoryRef}
                 style={styles.input}
                 placeholder="Categoria attività"
@@ -343,40 +435,11 @@ export default function OwnerAuthScreen() {
                 }}
                 onFocus={() => scrollToField(registerEmailRef)}
                 returnKeyType="next"
-                onSubmitEditing={() => focusField(registerBusinessPhoneRef)}
+                onSubmitEditing={() => focusField(registerPasswordRef)}
                 blurOnSubmit={false}
               />
               {formErrors.registerEmail ? (
                 <Text style={styles.fieldErrorText}>{formErrors.registerEmail}</Text>
-              ) : null}
-              <TextInput
-                ref={registerBusinessPhoneRef}
-                style={[styles.input, formErrors.registerBusinessPhone && styles.inputError]}
-                placeholder="Numero cellulare azienda"
-                placeholderTextColor="#9a9a9a"
-                keyboardType="phone-pad"
-                value={register.businessPhone}
-                onChangeText={(value) =>
-                  {
-                    setRegister((current) => ({
-                      ...current,
-                      businessPhone: limitPhoneToTenDigits(value),
-                    }));
-                    if (formErrors.registerBusinessPhone) {
-                      setFormErrors((current) => ({
-                        ...current,
-                        registerBusinessPhone: undefined,
-                      }));
-                    }
-                  }
-                }
-                onFocus={() => scrollToField(registerBusinessPhoneRef)}
-                returnKeyType="next"
-                onSubmitEditing={() => focusField(registerPasswordRef)}
-                blurOnSubmit={false}
-              />
-              {formErrors.registerBusinessPhone ? (
-                <Text style={styles.fieldErrorText}>{formErrors.registerBusinessPhone}</Text>
               ) : null}
               <TextInput
                 ref={registerPasswordRef}
@@ -403,8 +466,7 @@ export default function OwnerAuthScreen() {
             </>
           ) : (
             <Text style={styles.helperText}>
-              Nome, cognome, nome salone e mail sono obbligatori. Dopo la registrazione entri
-              direttamente nell’app.
+              Campi obbligatori: nome, cognome, nome salone, categoria, cellulare azienda, indirizzo, comune, CAP, mail e password.
             </Text>
           )}
         </View>

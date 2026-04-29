@@ -56,6 +56,11 @@ const buildExpoGoNotificationSignature = (item: {
   stato?: string | null;
   cancellationSource?: string | null;
 }) => `${item.id}:${item.stato ?? 'unknown'}:${item.cancellationSource ?? 'none'}`;
+const buildViewedRequestSignature = (item: {
+  id: string;
+  stato?: string | null;
+  cancellationSource?: string | null;
+}) => `${item.id}:${item.stato ?? 'unknown'}:${item.cancellationSource ?? 'none'}`;
 const expoGoRuntimeTrackedNotificationSignatures = new Set<string>();
 const formatOwnerPushDateLabel = (dateValue?: string | null) => {
   const normalizedDate = dateValue?.trim() ?? '';
@@ -258,7 +263,7 @@ function BottomTabBar({
   const dragPressLockRef = React.useRef(false);
   const dragPressUnlockTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const notifiedRequestSignaturesRef = React.useRef<Set<string>>(new Set());
-  const [hasLoadedExpoGoNotifiedRequestIds, setHasLoadedExpoGoNotifiedRequestIds] = React.useState(false);
+  const loadedExpoGoNotifiedRequestOwnerKeyRef = React.useRef<string | null>(null);
 
   const buildClientViewKey = React.useCallback(
     (item: (typeof clienti)[number]) => {
@@ -468,6 +473,11 @@ function BottomTabBar({
     };
   }, [clienti, salonAccountEmail]);
 
+  const normalizedExpoGoOwnerEmail = React.useMemo(
+    () => salonAccountEmail.trim().toLowerCase(),
+    [salonAccountEmail]
+  );
+
   const richiesteInAttesa = React.useMemo(() => {
     if (!hasLoadedViewedRequestIds) {
       return 0;
@@ -477,7 +487,7 @@ function BottomTabBar({
       (item) =>
         (item.origine ?? 'frontend') === 'frontend' &&
         item.viewedBySalon !== true &&
-        !viewedRequestIds.includes(item.id) &&
+        !viewedRequestIds.includes(buildViewedRequestSignature(item)) &&
         (
           item.stato === 'In attesa' ||
           item.stato === 'Accettata' ||
@@ -519,26 +529,29 @@ function BottomTabBar({
     if (!isExpoGoPushRuntime()) {
       notifiedRequestSignaturesRef.current = new Set();
       expoGoRuntimeTrackedNotificationSignatures.clear();
-      setHasLoadedExpoGoNotifiedRequestIds(true);
+      loadedExpoGoNotifiedRequestOwnerKeyRef.current = '__disabled__';
       return;
     }
 
     let cancelled = false;
-    setHasLoadedExpoGoNotifiedRequestIds(false);
 
     const loadNotifiedRequestIds = async () => {
-      const normalizedEmail = salonAccountEmail.trim().toLowerCase();
-      if (!normalizedEmail) {
+      if (!normalizedExpoGoOwnerEmail) {
         if (!cancelled) {
           notifiedRequestSignaturesRef.current = new Set();
-          setHasLoadedExpoGoNotifiedRequestIds(true);
+          expoGoRuntimeTrackedNotificationSignatures.clear();
+          loadedExpoGoNotifiedRequestOwnerKeyRef.current = '__empty__';
         }
+        return;
+      }
+
+      if (loadedExpoGoNotifiedRequestOwnerKeyRef.current === normalizedExpoGoOwnerEmail) {
         return;
       }
 
       try {
         const raw = await AsyncStorage.getItem(
-          buildExpoGoNotifiedRequestIdsStorageKey(normalizedEmail)
+          buildExpoGoNotifiedRequestIdsStorageKey(normalizedExpoGoOwnerEmail)
         );
         const parsed = raw ? (JSON.parse(raw) as unknown) : [];
         const nextIds = Array.isArray(parsed)
@@ -549,13 +562,13 @@ function BottomTabBar({
           notifiedRequestSignaturesRef.current = new Set(nextIds);
           expoGoRuntimeTrackedNotificationSignatures.clear();
           nextIds.forEach((id) => expoGoRuntimeTrackedNotificationSignatures.add(id));
-          setHasLoadedExpoGoNotifiedRequestIds(true);
+          loadedExpoGoNotifiedRequestOwnerKeyRef.current = normalizedExpoGoOwnerEmail;
         }
       } catch {
         if (!cancelled) {
           notifiedRequestSignaturesRef.current = new Set();
           expoGoRuntimeTrackedNotificationSignatures.clear();
-          setHasLoadedExpoGoNotifiedRequestIds(true);
+          loadedExpoGoNotifiedRequestOwnerKeyRef.current = normalizedExpoGoOwnerEmail;
         }
       }
     };
@@ -565,40 +578,42 @@ function BottomTabBar({
     return () => {
       cancelled = true;
     };
-  }, [salonAccountEmail]);
+  }, [normalizedExpoGoOwnerEmail]);
 
   React.useEffect(() => {
     if (!isExpoGoPushRuntime()) {
       return;
     }
 
-    if (!hasLoadedViewedRequestIds || !hasLoadedExpoGoNotifiedRequestIds) {
+    if (
+      !normalizedExpoGoOwnerEmail ||
+      loadedExpoGoNotifiedRequestOwnerKeyRef.current !== normalizedExpoGoOwnerEmail
+    ) {
       return;
     }
 
-    const uniqueUnreadRequestMap = new Map<string, (typeof richiestePrenotazione)[number]>();
+    const uniqueRelevantRequestMap = new Map<string, (typeof richiestePrenotazione)[number]>();
     richiestePrenotazione.forEach((item) => {
       const isFrontend = (item.origine ?? 'frontend') === 'frontend';
-      const isUnread = item.viewedBySalon !== true && !viewedRequestIds.includes(item.id);
       const isRelevantStatus =
         item.stato === 'In attesa' ||
         (item.stato === 'Annullata' && item.cancellationSource === 'cliente');
 
-      if (!isFrontend || !isUnread || !isRelevantStatus || !item.id) {
+      if (!isFrontend || !isRelevantStatus || !item.id) {
         return;
       }
 
-      if (!uniqueUnreadRequestMap.has(item.id)) {
-        uniqueUnreadRequestMap.set(item.id, item);
+      if (!uniqueRelevantRequestMap.has(item.id)) {
+        uniqueRelevantRequestMap.set(item.id, item);
       }
     });
 
-    const unreadFrontendRequests = Array.from(uniqueUnreadRequestMap.values());
+    const relevantFrontendRequests = Array.from(uniqueRelevantRequestMap.values());
 
     const nextTrackedSignatures = new Set(
-      unreadFrontendRequests.map((item) => buildExpoGoNotificationSignature(item))
+      relevantFrontendRequests.map((item) => buildExpoGoNotificationSignature(item))
     );
-    const newlyAdded = unreadFrontendRequests.filter(
+    const newlyAdded = relevantFrontendRequests.filter(
       (item) =>
         !notifiedRequestSignaturesRef.current.has(buildExpoGoNotificationSignature(item)) &&
         !expoGoRuntimeTrackedNotificationSignatures.has(buildExpoGoNotificationSignature(item))
@@ -607,11 +622,10 @@ function BottomTabBar({
     notifiedRequestSignaturesRef.current = nextTrackedSignatures;
     expoGoRuntimeTrackedNotificationSignatures.clear();
     nextTrackedSignatures.forEach((id) => expoGoRuntimeTrackedNotificationSignatures.add(id));
-    const normalizedEmail = salonAccountEmail.trim().toLowerCase();
 
-    if (normalizedEmail) {
+    if (normalizedExpoGoOwnerEmail) {
       void AsyncStorage.setItem(
-        buildExpoGoNotifiedRequestIdsStorageKey(normalizedEmail),
+        buildExpoGoNotifiedRequestIdsStorageKey(normalizedExpoGoOwnerEmail),
         JSON.stringify(Array.from(nextTrackedSignatures))
       ).catch(() => null);
     }
@@ -661,12 +675,9 @@ function BottomTabBar({
 
     void scheduleExpoGoFallbackNotifications();
   }, [
-    hasLoadedExpoGoNotifiedRequestIds,
-    hasLoadedViewedRequestIds,
+    normalizedExpoGoOwnerEmail,
     richiestePrenotazione,
-    salonAccountEmail,
     servizi,
-    viewedRequestIds,
   ]);
 
   const tabTitles = React.useMemo(
@@ -709,10 +720,14 @@ function BottomTabBar({
   const tabLabelFontSize = isUltraCompact ? 7.2 : 8;
   const tabLabelMinScale = 0.72;
   const tabItemVerticalPadding = 0;
+  const webIndicatorLeftNudge = Platform.OS === 'web' ? 8 : 0;
 
   const indicatorWidth = Math.max(40, Math.min(52, tabItemWidth - 12));
   const indicatorRenderWidth = indicatorWidth;
-  const indicatorInset = (tabItemWidth - indicatorRenderWidth) / 2 + tabRowHorizontalPadding;
+  const indicatorInset =
+    (tabItemWidth - indicatorRenderWidth) / 2 +
+    tabRowHorizontalPadding -
+    webIndicatorLeftNudge;
 
   const indicatorTabOffsets = React.useMemo(
     () => state.routes.map((_, index) => index * (tabItemWidth + tabSpacing) + indicatorInset),
@@ -1039,13 +1054,16 @@ function BottomTabBar({
 
 export default function TabLayout() {
   const [disableParentSwipe, setDisableParentSwipe] = React.useState(false);
+  const { showOnboarding } = useAppContext();
 
   const screenOptions = React.useMemo<MaterialTopTabNavigationOptions>(
     () => ({
-      swipeEnabled: !disableParentSwipe,
+      swipeEnabled: !disableParentSwipe && !showOnboarding,
       animationEnabled: false,
       lazy: false,
       lazyPreloadDistance: 1,
+      overScrollMode: 'never',
+      overdrag: false,
       tabBarScrollEnabled: false,
       tabBarStyle: {
         display: 'none',
@@ -1054,7 +1072,7 @@ export default function TabLayout() {
         backgroundColor: 'transparent',
       },
     }),
-    [disableParentSwipe]
+    [disableParentSwipe, showOnboarding]
   );
 
   return (

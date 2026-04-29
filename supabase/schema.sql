@@ -62,6 +62,7 @@ create table if not exists public.owner_profiles (
   provider_user_id text,
   email_verified boolean not null default false,
   phone_verified boolean not null default false,
+  onboarding_completed_at timestamptz,
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now()),
   unique (auth_provider, provider_user_id)
@@ -279,6 +280,14 @@ create table if not exists public.message_templates (
   updated_at timestamptz not null default timezone('utc', now())
 );
 
+create table if not exists public.owner_app_snapshots (
+  id uuid primary key default gen_random_uuid(),
+  workspace_id uuid not null unique references public.workspaces(id) on delete cascade,
+  payload jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default timezone('utc', now()),
+  updated_at timestamptz not null default timezone('utc', now())
+);
+
 create table if not exists public.backup_runs (
   id uuid primary key default gen_random_uuid(),
   workspace_id uuid references public.workspaces(id) on delete set null,
@@ -413,6 +422,11 @@ create trigger set_updated_at_message_templates
 before update on public.message_templates
 for each row execute procedure public.set_updated_at();
 
+drop trigger if exists set_updated_at_owner_app_snapshots on public.owner_app_snapshots;
+create trigger set_updated_at_owner_app_snapshots
+before update on public.owner_app_snapshots
+for each row execute procedure public.set_updated_at();
+
 alter table public.workspaces enable row level security;
 alter table public.workspace_members enable row level security;
 alter table public.owner_profiles enable row level security;
@@ -428,6 +442,7 @@ alter table public.cash_movements enable row level security;
 alter table public.connected_cards enable row level security;
 alter table public.events enable row level security;
 alter table public.message_templates enable row level security;
+alter table public.owner_app_snapshots enable row level security;
 alter table public.backup_runs enable row level security;
 
 drop policy if exists "workspace members can read own workspace" on public.workspaces;
@@ -610,6 +625,19 @@ using (workspace_id = public.current_workspace_id());
 drop policy if exists "message_templates mutate own workspace" on public.message_templates;
 create policy "message_templates mutate own workspace"
 on public.message_templates
+for all
+using (workspace_id = public.current_workspace_id() and public.workspace_access_allowed())
+with check (workspace_id = public.current_workspace_id() and public.workspace_access_allowed());
+
+drop policy if exists "owner_app_snapshots select own workspace" on public.owner_app_snapshots;
+create policy "owner_app_snapshots select own workspace"
+on public.owner_app_snapshots
+for select
+using (workspace_id = public.current_workspace_id());
+
+drop policy if exists "owner_app_snapshots mutate own workspace" on public.owner_app_snapshots;
+create policy "owner_app_snapshots mutate own workspace"
+on public.owner_app_snapshots
 for all
 using (workspace_id = public.current_workspace_id() and public.workspace_access_allowed())
 with check (workspace_id = public.current_workspace_id() and public.workspace_access_allowed());

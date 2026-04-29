@@ -25,7 +25,12 @@ const buildFrontendBiometricProfileKeyForSalon = (salonCode?: string | null) => 
 
 export default function ClienteImpostazioniScreen() {
   const router = useRouter();
-  const searchParams = useLocalSearchParams<{ salon?: string | string[] }>();
+  const searchParams = useLocalSearchParams<{
+    salon?: string | string[];
+    source?: string | string[];
+    email?: string | string[];
+    phone?: string | string[];
+  }>();
   const responsive = useResponsiveLayout();
   const [frontendLanguage, setFrontendLanguage] = useState<AppLanguage>('it');
   const [frontendBiometricEnabled, setFrontendBiometricEnabled] = useState(false);
@@ -40,6 +45,9 @@ export default function ClienteImpostazioniScreen() {
   } | null>(null);
   const [activeSalonCode, setActiveSalonCode] = useState('');
   const salonParam = Array.isArray(searchParams.salon) ? searchParams.salon[0] : searchParams.salon;
+  const sourceParam = Array.isArray(searchParams.source) ? searchParams.source[0] : searchParams.source;
+  const emailParam = Array.isArray(searchParams.email) ? searchParams.email[0] : searchParams.email;
+  const phoneParam = Array.isArray(searchParams.phone) ? searchParams.phone[0] : searchParams.phone;
   useEffect(() => {
     const loadSettings = async () => {
       try {
@@ -138,14 +146,6 @@ export default function ClienteImpostazioniScreen() {
       return;
     }
 
-    if (!frontendBiometricAvailable) {
-      Alert.alert(
-        'Biometria non disponibile',
-        'Configura Face ID o impronta nelle impostazioni del dispositivo e riprova.'
-      );
-      return;
-    }
-
     setFrontendBiometricBusy(true);
 
     try {
@@ -162,7 +162,7 @@ export default function ClienteImpostazioniScreen() {
       if (!savedProfile || !normalizedSalonCode) {
         Alert.alert(
           'Accesso cliente richiesto',
-          'Accedi prima nell’area cliente con email e cellulare, poi potrai attivare Face ID o biometria.'
+          'Accedi prima nell’area cliente con email e cellulare, poi potrai attivare Face ID o l’accesso con impronta.'
         );
         return;
       }
@@ -171,7 +171,7 @@ export default function ClienteImpostazioniScreen() {
         promptMessage:
           frontendBiometricType === 'faceid'
             ? 'Attiva Face ID cliente'
-            : 'Attiva biometria cliente',
+            : 'Attiva accesso con impronta',
         cancelLabel: 'Annulla',
         disableDeviceFallback: false,
         fallbackLabel: 'Usa codice',
@@ -194,15 +194,33 @@ export default function ClienteImpostazioniScreen() {
   };
 
   const handleBack = () => {
-    if (router.canGoBack()) {
-      router.back();
+    const fallbackEmail = String(emailParam ?? '').trim().toLowerCase();
+    const fallbackPhone = String(phoneParam ?? '').trim();
+    const targetEmail = activeProfile?.email?.trim()?.toLowerCase() || fallbackEmail;
+    const targetPhone = activeProfile?.telefono?.trim() || fallbackPhone;
+    const targetSalon = salonParam || activeSalonCode || undefined;
+
+    if (sourceParam === 'requests') {
+      router.replace({
+        pathname: '/cliente-prenotazioni',
+        params: {
+          salon: targetSalon,
+          autologin: targetEmail && targetPhone ? '1' : undefined,
+          email: targetEmail || undefined,
+          phone: targetPhone || undefined,
+        },
+      });
       return;
     }
 
     router.replace({
       pathname: '/cliente',
       params: {
-        salon: salonParam || undefined,
+        salon: targetSalon,
+        mode: 'booking',
+        autologin: targetEmail && targetPhone ? '1' : undefined,
+        email: targetEmail || undefined,
+        phone: targetPhone || undefined,
       },
     });
   };
@@ -213,7 +231,7 @@ export default function ClienteImpostazioniScreen() {
       return;
     }
 
-    router.replace('/cliente-scanner');
+    router.replace('/');
   };
 
   const performFrontendLogout = async () => {
@@ -265,13 +283,17 @@ export default function ClienteImpostazioniScreen() {
 
   const languageOptions = getAppLanguageOptions(frontendLanguage);
   const biometricTitle =
-    frontendBiometricType === 'faceid' ? 'Face ID cliente' : 'Accesso biometrico cliente';
+    frontendBiometricType === 'faceid' ? 'Face ID cliente' : 'Accesso con impronta';
   const biometricDescription =
     !frontendBiometricAvailable
       ? 'Configura Face ID o impronta nelle impostazioni del dispositivo per attivarlo.'
       : frontendBiometricEnabled
-      ? 'Accesso rapido attivo: puoi entrare nell’area cliente con biometria.'
-      : 'Attiva l’accesso biometrico per entrare nell’area cliente senza reinserire i dati.';
+      ? frontendBiometricType === 'faceid'
+        ? 'Accesso rapido attivo: puoi entrare nell’area cliente con Face ID.'
+        : 'Accesso rapido attivo: puoi entrare nell’area cliente con impronta.'
+      : frontendBiometricType === 'faceid'
+        ? 'Attiva Face ID per entrare nell’area cliente senza reinserire i dati.'
+        : 'Attiva l’accesso con impronta per entrare nell’area cliente senza reinserire i dati.';
 
   return (
     <ScrollView

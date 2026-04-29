@@ -4,13 +4,13 @@ const baseConfig = {
     slug: 'salon-manager',
     version: '1.0.0',
     orientation: 'portrait',
-    icon: './assets/images/app-icons/salonpro-final/light_ios_1024_final.png',
+    icon: './assets/icon.png',
     scheme: 'salonmanager',
     userInterfaceStyle: 'automatic',
     ios: {
       icon: {
-        light: './assets/images/app-icons/salonpro-final/light_ios_1024_final.png',
-        dark: './assets/images/app-icons/salonpro-final/dark_ios_1024_final.png',
+        light: './assets/ios-icon-no-alpha.png',
+        dark: './assets/ios-icon-dark-no-alpha.png',
       },
       supportsTablet: true,
       bundleIdentifier: 'com.marzix91.salonmanager',
@@ -22,11 +22,10 @@ const baseConfig = {
       },
     },
     android: {
-      icon: './assets/images/app-icons/salonpro-final/light_android_512_final.png',
+      icon: './assets/icon.png',
       adaptiveIcon: {
-        backgroundColor: '#ffffff',
-        foregroundImage: './assets/images/app-icons/salonpro-final/light_android_512_final.png',
-        monochromeImage: './assets/images/app-icons/salonpro-final/dark_android_512_final.png',
+        backgroundColor: '#FAF6EE',
+        foregroundImage: './assets/adaptive-icon.png',
       },
       softwareKeyboardLayoutMode: 'resize',
       predictiveBackGestureEnabled: false,
@@ -36,7 +35,7 @@ const baseConfig = {
     },
     web: {
       output: 'static',
-      favicon: './assets/images/app-icons/salonpro-final/light_ios_1024_final.png',
+      favicon: './assets/images/favicon.png',
     },
     plugins: [
       'expo-router',
@@ -50,7 +49,7 @@ const baseConfig = {
       [
         'expo-notifications',
         {
-          icon: './assets/images/app-icons/salonpro-final/notification_android_96_final.png',
+          icon: './assets/images/android-icon-monochrome.png',
           color: '#C89B3C',
         },
       ],
@@ -64,13 +63,13 @@ const baseConfig = {
       [
         'expo-splash-screen',
         {
-          image: './assets/images/app-icons/salonpro-final/light_ios_1024_final.png',
+          image: './assets/icon-light.png',
           imageWidth: 240,
           resizeMode: 'contain',
-          backgroundColor: '#ffffff',
+          backgroundColor: '#FAF6EE',
           dark: {
-            image: './assets/images/app-icons/salonpro-final/dark_ios_1024_final.png',
-            backgroundColor: '#060816',
+            image: './assets/icon-night.png',
+            backgroundColor: '#111111',
           },
         },
       ],

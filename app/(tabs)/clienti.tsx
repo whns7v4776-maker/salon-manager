@@ -37,6 +37,7 @@ import { useAppContext } from '../../src/context/AppContext';
 import { focusNextInput, useKeyboardAwareScroll } from '../../src/lib/form-navigation';
 import { haptic } from '../../src/lib/haptics';
 import { useResponsiveLayout } from '../../src/lib/responsive';
+import { supabase } from '../../src/lib/supabase';
 import { formatCustomerFullNameValue } from '../../src/lib/customer-name';
 import {
     buildInvalidFieldsMessage,
@@ -80,6 +81,9 @@ const buildInstagramUrl = (value?: string | null) => {
   const handle = value?.replace(/^@+/, '').trim();
   return handle ? `https://instagram.com/${handle}` : '';
 };
+const isUuidLike = (value?: string | null) =>
+  !!value &&
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 const IS_ANDROID = Platform.OS === 'android';
 const DEFAULT_PUBLIC_CLIENT_BASE_URL = 'https://salon-manager-puce.vercel.app';
 const CUSTOMER_REMINDER_HOUR_OPTIONS = [0, 1, 2, 3, 6, 12, 24, 48] as const;
@@ -102,21 +106,21 @@ const getPrimaryBookingLimitBadgeLabel = (cliente: {
 }) => {
   if (typeof cliente.maxFutureAppointments === 'number') {
     return cliente.maxFutureAppointmentsMode === 'monthly'
-      ? `Max mese: ${cliente.maxFutureAppointments}`
-      : `Max futuri: ${cliente.maxFutureAppointments}`;
+      ? `Lim.Mese:${cliente.maxFutureAppointments}`
+      : `Lim.Futuri:${cliente.maxFutureAppointments}`;
   }
 
-  return 'Principale: illimitato';
+  return 'Lim.Mese:ill.';
 };
 
 const getDailyBookingLimitBadgeLabel = (cliente: {
   maxDailyAppointments?: number | null;
 }) => {
   if (typeof cliente.maxDailyAppointments === 'number') {
-    return `Max giorno: ${cliente.maxDailyAppointments}`;
+    return `Lim.Giorno:${cliente.maxDailyAppointments}`;
   }
 
-  return 'Giorno: illimitato';
+  return 'Lim.Giorno:ill.';
 };
 
 const parsePublicClientBaseUrl = (value: string) => {
@@ -227,6 +231,7 @@ export default function ClientiScreen() {
     salonAccountEmail,
     clienti: localClienti,
     setClienti: setLocalClienti,
+    createClientePersisted,
     updateClientePersisted,
     deleteClientePersisted,
   } = useAppContext();
@@ -265,14 +270,16 @@ export default function ClientiScreen() {
   const [showNewCustomerExpanded, setShowNewCustomerExpanded] = useState(false);
   const [isUpdatingCustomerReminder, setIsUpdatingCustomerReminder] = useState(false);
   const [customerReminderDraftHours, setCustomerReminderDraftHours] = useState<number | null>(null);
+  const customerReminderPersistTargetRef = useRef<number | null>(null);
   const [formErrors, setFormErrors] = useState<{
     nome?: string;
     telefono?: string;
     email?: string;
   }>({});
   const { focusField, scrollToField } = useKeyboardAwareScroll(listRef, {
-    topOffset: responsive.isDesktop ? 40 : 24,
+    topOffset: responsive.isDesktop ? 72 : 176,
   });
+  const nameFieldScrollTopOffset = responsive.isDesktop ? 52 : 156;
   const handleKeyboardNext = useCallback(() => {
     focusNextInput([nameInputRef, phoneInputRef, emailInputRef, instagramInputRef], focusField);
   }, [focusField]);
@@ -355,6 +362,16 @@ export default function ClientiScreen() {
 
   React.useEffect(() => {
     if (
+      customerReminderPersistTargetRef.current !== null &&
+      persistedCustomerReminderHoursBefore === customerReminderPersistTargetRef.current
+    ) {
+      customerReminderPersistTargetRef.current = null;
+      setCustomerReminderDraftHours(null);
+      return;
+    }
+
+    if (
+      customerReminderPersistTargetRef.current === null &&
       !isUpdatingCustomerReminder &&
       customerReminderDraftHours !== null &&
       persistedCustomerReminderHoursBefore === customerReminderDraftHours
@@ -375,6 +392,7 @@ export default function ClientiScreen() {
       }
 
       setIsUpdatingCustomerReminder(true);
+      customerReminderPersistTargetRef.current = normalizedHours;
       setCustomerReminderDraftHours(normalizedHours);
 
       try {
@@ -383,6 +401,10 @@ export default function ClientiScreen() {
           customerReminderHoursBefore: normalizedHours,
           updatedAt: new Date().toISOString(),
         }));
+      } catch (error) {
+        console.log('Errore aggiornamento promemoria push clienti:', error);
+        customerReminderPersistTargetRef.current = null;
+        setCustomerReminderDraftHours(null);
       } finally {
         setIsUpdatingCustomerReminder(false);
       }
@@ -512,8 +534,29 @@ export default function ClientiScreen() {
         .catch(() => {
           // Non bloccare UX notifiche in caso di errore storage locale.
         });
+
+      const backendClientIds = ids.filter((item) => isUuidLike(item));
+      if (!salonWorkspace.id || backendClientIds.length === 0) {
+        return;
+      }
+
+      void (async () => {
+        try {
+          const { error } = await supabase
+            .from('customers')
+            .update({ viewed_by_salon: true })
+            .eq('workspace_id', salonWorkspace.id)
+            .in('id', backendClientIds);
+
+          if (error) {
+            throw error;
+          }
+        } catch (error) {
+          console.log('Errore sync viewed_by_salon clienti:', error);
+        }
+      })();
     },
-    [buildClientViewKey, localClienti, salonAccountEmail, setLocalClienti]
+    [buildClientViewKey, localClienti, salonAccountEmail, salonWorkspace.id, setLocalClienti]
   );
 
   const clearScheduledVisibilityCheck = useCallback(() => {
@@ -638,9 +681,8 @@ export default function ClientiScreen() {
     preparaModificaCliente(cliente);
     requestAnimationFrame(() => {
       listRef.current?.scrollToOffset({ offset: 0, animated: true });
-      focusField(nameInputRef);
     });
-  }, [focusField]);
+  }, []);
 
   const impostaLimiteAppuntamentiCliente = useCallback((cliente: ClienteItem) => {
     swipeableRefs.current[cliente.id]?.close();
@@ -745,25 +787,22 @@ export default function ClientiScreen() {
         return;
       }
 
-      setLocalClienti((current) => [
-        {
-          id: `cliente-${Date.now()}`,
-          nome: normalizedFullName,
-          telefono: normalizedPhone,
-          email: normalizedEmail || '',
-          instagram: normalizedInstagram || '',
-          birthday: normalizedBirthday || '',
-          nota: '',
-          fonte: 'salone',
-          viewedBySalon: true,
-          annullamentiCount: 0,
-          inibito: false,
-          maxFutureAppointments: 4,
-          maxFutureAppointmentsMode: 'monthly',
-          maxDailyAppointments: 1,
-        },
-        ...current,
-      ]);
+      const result = await createClientePersisted({
+        nome: normalizedFullName,
+        telefono: normalizedPhone,
+        email: normalizedEmail || '',
+        instagram: normalizedInstagram || '',
+        birthday: normalizedBirthday || '',
+        maxFutureAppointments: 4,
+        maxFutureAppointmentsMode: 'monthly',
+        maxDailyAppointments: 1,
+      });
+
+      if (!result.ok) {
+        setSaving(false);
+        Alert.alert('Errore', result.error || 'Non sono riuscito a creare il cliente.');
+        return;
+      }
 
       setSaving(false);
 
@@ -1105,10 +1144,12 @@ export default function ClientiScreen() {
                 <Text style={styles.clienteInitialText}>{buildClientMonogram(item.full_name)}</Text>
               </View>
               <View style={styles.clienteContentColumn}>
-                <View style={styles.clienteNomeWrap}>
-                  <Text style={styles.clienteNome} numberOfLines={1}>
-                    {item.full_name}
-                  </Text>
+                <View style={styles.clienteNameRow}>
+                  <View style={styles.clienteNomeWrap}>
+                    <Text style={styles.clienteNome} numberOfLines={1}>
+                      {item.full_name}
+                    </Text>
+                  </View>
                 </View>
                 <View style={styles.clienteContactStack}>
                   <Text
@@ -1128,67 +1169,70 @@ export default function ClientiScreen() {
                     {item.email || 'Nessuna email'}
                   </Text>
                 </View>
-                <View style={styles.statusBadgesRow}>
-                  {hasCancellationAlert ? (
-                    <Animated.View
-                      style={styles.statusBadgeCancelledFloating}
-                      entering={FadeIn.duration(140).easing(Easing.out(Easing.cubic))}
-                      layout={LinearTransition.duration(160).easing(Easing.out(Easing.cubic))}
-                    >
-                      <Text
-                        style={styles.statusBadgeCancelledText}
-                        numberOfLines={1}
-                        adjustsFontSizeToFit
-                        minimumFontScale={0.74}
-                      >
-                        Annullati: {cancellationCount}
-                      </Text>
-                    </Animated.View>
-                  ) : null}
+                <View style={styles.statusMetaRow}>
                   {isInibito ? (
                     <View style={styles.statusBadgeBlockedCentered}>
                       <Text style={styles.statusBadgeBlockedText}>Inibito</Text>
                     </View>
                   ) : null}
-                  <View
-                    style={[
-                      styles.statusBadgeLimit,
-                      typeof item.maxFutureAppointments !== 'number' && styles.statusBadgeUnlimited,
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.statusBadgeLimitText,
-                        typeof item.maxFutureAppointments !== 'number' &&
-                          styles.statusBadgeUnlimitedText,
-                      ]}
-                      numberOfLines={1}
-                      adjustsFontSizeToFit
-                      minimumFontScale={0.78}
-                    >
-                      {getPrimaryBookingLimitBadgeLabel(item)}
-                    </Text>
-                  </View>
-                  <View
-                    style={[
-                      styles.statusBadgeLimit,
-                      typeof item.maxDailyAppointments !== 'number' && styles.statusBadgeUnlimited,
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.statusBadgeLimitText,
-                        typeof item.maxDailyAppointments !== 'number' &&
-                          styles.statusBadgeUnlimitedText,
-                      ]}
-                      numberOfLines={1}
-                      adjustsFontSizeToFit
-                      minimumFontScale={0.78}
-                    >
-                      {getDailyBookingLimitBadgeLabel(item)}
-                    </Text>
-                  </View>
                 </View>
+              </View>
+            </View>
+            <View style={styles.statusBadgesRow}>
+              {hasCancellationAlert ? (
+                <View style={styles.clientCancellationAlertRow}>
+                  <View style={styles.clientCancellationCountPill}>
+                    <Text style={styles.clientCancellationCountText}>{cancellationCount}</Text>
+                  </View>
+                  <Text
+                    style={styles.clientCancellationAlertText}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.84}
+                  >
+                    {cancellationCount === 1
+                      ? 'Pren. Annullata'
+                      : `Pren. Annullate:${cancellationCount}`}
+                  </Text>
+                </View>
+              ) : null}
+              <View
+                style={[
+                  styles.statusBadgeLimit,
+                  typeof item.maxFutureAppointments !== 'number' && styles.statusBadgeUnlimited,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.statusBadgeLimitText,
+                    typeof item.maxFutureAppointments !== 'number' &&
+                      styles.statusBadgeUnlimitedText,
+                  ]}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.82}
+                >
+                  {getPrimaryBookingLimitBadgeLabel(item)}
+                </Text>
+              </View>
+              <View
+                style={[
+                  styles.statusBadgeLimit,
+                  typeof item.maxDailyAppointments !== 'number' && styles.statusBadgeUnlimited,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.statusBadgeLimitText,
+                    typeof item.maxDailyAppointments !== 'number' &&
+                      styles.statusBadgeUnlimitedText,
+                  ]}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.82}
+                >
+                  {getDailyBookingLimitBadgeLabel(item)}
+                </Text>
               </View>
             </View>
 
@@ -1266,9 +1310,9 @@ export default function ClientiScreen() {
             <View style={styles.cardTrailingMeta}>
               <View style={styles.cardTrailingMetaHintRow}>
                 <View style={styles.cardTrailingMetaHintBar}>
-                  <Ionicons name="arrow-back-outline" size={15} color="#a3554c" />
+                  <Ionicons name="arrow-back" size={18} color="#a3554c" />
                   <Text style={styles.cardTrailingMetaHint}>Scorri per azioni rapide</Text>
-                  <Ionicons name="arrow-forward-outline" size={15} color="#a3554c" />
+                  <Ionicons name="arrow-forward" size={18} color="#a3554c" />
                 </View>
               </View>
             </View>
@@ -1319,12 +1363,20 @@ export default function ClientiScreen() {
 
               <View style={styles.clientOverviewRow}>
                 <View style={[styles.clientOverviewCard, styles.clientOverviewCardSuccess]}>
-                  <Text style={styles.clientOverviewCount}>{clienti.length}</Text>
-                  <Text style={styles.clientOverviewLabel}>Clienti</Text>
+                  <View style={styles.clientOverviewContent}>
+                    <Text style={styles.clientOverviewCount}>{clienti.length}</Text>
+                    <View style={styles.clientOverviewLabelWrap}>
+                      <Text style={styles.clientOverviewLabel}>Clienti</Text>
+                    </View>
+                  </View>
                 </View>
                 <View style={[styles.clientOverviewCard, styles.clientOverviewCardAlert]}>
-                  <Text style={styles.clientOverviewCount}>{cancellationAlertsCount}</Text>
-                  <Text style={styles.clientOverviewLabel}>Annullati</Text>
+                  <View style={styles.clientOverviewContent}>
+                    <Text style={styles.clientOverviewCount}>{cancellationAlertsCount}</Text>
+                    <View style={styles.clientOverviewLabelWrap}>
+                      <Text style={styles.clientOverviewLabel}>Annullamenti cliente</Text>
+                    </View>
+                  </View>
                 </View>
               </View>
 
@@ -1383,7 +1435,9 @@ export default function ClientiScreen() {
                           setFormErrors((current) => ({ ...current, nome: undefined }));
                         }
                       }}
-                      onFocus={() => scrollToField(nameInputRef)}
+                      onFocus={() =>
+                        scrollToField(nameInputRef, { topOffset: nameFieldScrollTopOffset })
+                      }
                       editable={!saving && !loadingInit}
                       style={[styles.input, formErrors.nome && styles.inputError]}
                       returnKeyType="next"
@@ -1485,7 +1539,7 @@ export default function ClientiScreen() {
                           !birthday && styles.dateInputPlaceholder,
                         ]}
                       >
-                        {formatBirthdayLabel(birthday) || 'Compleanno / Data (Opzionale)'}
+                        {formatBirthdayLabel(birthday) || 'Data di nascita (Opzionale)'}
                       </Text>
                     </HapticTouchable>
 
@@ -1728,7 +1782,7 @@ export default function ClientiScreen() {
 
       <NativeDatePickerModal
         visible={showBirthdayPicker}
-        title="Compleanno / Data (Opzionale)"
+        title="Data di nascita (Opzionale)"
         initialValue={birthday || undefined}
         onClose={() => setShowBirthdayPicker(false)}
         onConfirm={(value) => {
@@ -1887,18 +1941,6 @@ export default function ClientiScreen() {
                   style={styles.limitConfigOption}
                   onPress={() => {
                     if (!limitConfigClient) return;
-                    setLimitTargetClient(limitConfigClient);
-                    setLimitTargetMode('daily');
-                    setLimitConfigClient(null);
-                  }}
-                >
-                  <Text style={styles.limitConfigOptionText}>Per giorno</Text>
-                </HapticTouchable>
-
-                <HapticTouchable
-                  style={styles.limitConfigOption}
-                  onPress={() => {
-                    if (!limitConfigClient) return;
                     setLocalClienti((current) =>
                       current.map((item) =>
                         item.id === limitConfigClient.id
@@ -1913,6 +1955,18 @@ export default function ClientiScreen() {
                   }}
                 >
                   <Text style={styles.limitConfigOptionText}>Nessun limite giornaliero</Text>
+                </HapticTouchable>
+
+                <HapticTouchable
+                  style={styles.limitConfigOption}
+                  onPress={() => {
+                    if (!limitConfigClient) return;
+                    setLimitTargetClient(limitConfigClient);
+                    setLimitTargetMode('daily');
+                    setLimitConfigClient(null);
+                  }}
+                >
+                  <Text style={styles.limitConfigOptionText}>Per giorno</Text>
                 </HapticTouchable>
               </View>
 
@@ -1987,6 +2041,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 18,
   },
+  clientOverviewContent: {
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   clientOverviewCardSuccess: {
     backgroundColor: '#E9F9EF',
   },
@@ -2001,12 +2060,17 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   clientOverviewLabel: {
-    marginTop: 12,
     fontSize: 17,
     lineHeight: 22,
     fontWeight: '800',
     color: '#64748B',
     textAlign: 'center',
+  },
+  clientOverviewLabelWrap: {
+    minHeight: 44,
+    marginTop: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   heroClientSubtitle: {
     marginTop: 18,
@@ -2509,6 +2573,7 @@ const styles = StyleSheet.create({
     flexDirection: 'column',
     alignItems: 'stretch',
     gap: 4,
+    overflow: 'hidden',
   },
   clienteCardSelected: {
     borderColor: 'rgba(15, 23, 42, 0.08)',
@@ -2521,7 +2586,8 @@ const styles = StyleSheet.create({
     width: '100%',
     position: 'relative',
     paddingHorizontal: 0,
-    gap: 3,
+    gap: 1,
+    alignSelf: 'stretch',
   },
   clienteTopRow: {
     flexDirection: 'row',
@@ -2562,16 +2628,24 @@ const styles = StyleSheet.create({
   clienteContentColumn: {
     flex: 1,
     minWidth: 0,
-    gap: 5,
-    paddingTop: 2,
+    gap: 1,
+    paddingTop: 0,
   },
   clienteNomeWrap: {
-    flexGrow: 0,
+    flex: 1,
     flexShrink: 1,
     minWidth: 0,
     minHeight: 0,
     justifyContent: 'flex-start',
     paddingTop: 0,
+  },
+  clienteNameRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 6,
+    width: '100%',
+    minWidth: 0,
   },
   clienteNome: {
     fontSize: 15,
@@ -2592,7 +2666,8 @@ const styles = StyleSheet.create({
     gap: 0,
     width: '100%',
     minWidth: 0,
-    marginTop: 0,
+    marginTop: -1,
+    marginBottom: 2,
   },
   clienteTelefono: {
     fontSize: IS_ANDROID ? 10.6 : 11.2,
@@ -2627,11 +2702,72 @@ const styles = StyleSheet.create({
   statusBadgesRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'flex-start',
+    justifyContent: 'center',
     flexWrap: 'nowrap',
-    gap: 4,
+    gap: 6,
     width: '100%',
     minWidth: 0,
+    marginTop: 6,
+    paddingLeft: 0,
+    alignSelf: 'stretch',
+  },
+  statusMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    flexWrap: 'nowrap',
+    gap: 10,
+    width: '100%',
+    minWidth: 0,
+    minHeight: 0,
+    marginTop: 0,
+    marginBottom: 6,
+    paddingLeft: 0,
+    alignSelf: 'stretch',
+  },
+  clientCancellationAlertRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    gap: 5,
+    alignSelf: 'flex-start',
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    minHeight: 42,
+    marginBottom: 0,
+    flexShrink: 1,
+    flexGrow: 1.7,
+    flexBasis: 0,
+    minWidth: 0,
+    alignContent: 'center',
+  },
+  clientCancellationCountPill: {
+    minWidth: 24,
+    height: 28,
+    borderRadius: 999,
+    backgroundColor: '#C81E1E',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 6,
+    flexShrink: 0,
+  },
+  clientCancellationCountText: {
+    fontSize: IS_ANDROID ? 10.2 : 10.8,
+    lineHeight: IS_ANDROID ? 11 : 12,
+    fontWeight: '900',
+    color: '#FFFFFF',
+    textAlign: 'center',
+  },
+  clientCancellationAlertText: {
+    flexShrink: 1,
+    fontSize: IS_ANDROID ? 10.1 : 10.7,
+    lineHeight: IS_ANDROID ? 12 : 13,
+    fontWeight: '800',
+    color: '#B91C1C',
+    textAlign: 'center',
   },
   clienteInstagramCompact: {
     fontSize: IS_ANDROID ? 10 : 11,
@@ -2655,9 +2791,9 @@ const styles = StyleSheet.create({
   quickActionsRow: {
     flexDirection: 'row',
     flexWrap: 'nowrap',
-    justifyContent: 'flex-start',
-    gap: 4,
-    marginTop: 2,
+    justifyContent: 'space-between',
+    gap: 8,
+    marginTop: 6,
     width: '100%',
   },
   quickActionsRowCompact: {
@@ -2666,9 +2802,9 @@ const styles = StyleSheet.create({
   },
   quickActionChip: {
     backgroundColor: '#F8FAFC',
-    borderRadius: 11,
-    paddingHorizontal: 4,
-    paddingVertical: 6,
+    borderRadius: 13,
+    paddingHorizontal: 8,
+    paddingVertical: 8,
     borderWidth: 0,
     minWidth: 0,
     alignItems: 'center',
@@ -2696,7 +2832,7 @@ const styles = StyleSheet.create({
     opacity: 0.44,
   },
   quickActionText: {
-    fontSize: IS_ANDROID ? 7.9 : 8.6,
+    fontSize: IS_ANDROID ? 9.2 : 9.8,
     fontWeight: '800',
     color: '#0F172A',
     textAlign: 'center',
@@ -2720,10 +2856,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 0,
-    paddingTop: 2,
-    width: '100%',
+    paddingTop: 0,
+    width: 'auto',
+    alignSelf: 'stretch',
+    marginTop: 8,
+    marginLeft: IS_ANDROID ? -14 : -16,
+    marginRight: IS_ANDROID ? -16 : -18,
+    marginBottom: -9,
+    backgroundColor: '#FFF5F2',
     borderTopWidth: 1,
-    borderTopColor: 'rgba(15, 23, 42, 0.06)',
+    borderTopColor: 'rgba(163, 85, 76, 0.12)',
+    borderBottomLeftRadius: 24,
+    borderBottomRightRadius: 24,
+    overflow: 'hidden',
   },
   cardTrailingMetaText: {
     fontSize: IS_ANDROID ? 10 : 11,
@@ -2733,13 +2878,13 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   cardTrailingMetaHint: {
-    fontSize: 9.5,
-    fontWeight: '800',
+    fontSize: 10.2,
+    fontWeight: '900',
     color: '#a3554c',
     textAlign: 'center',
     width: 'auto',
     flexShrink: 1,
-    letterSpacing: 0.1,
+    letterSpacing: 0.12,
   },
   cardTrailingMetaHintRow: {
     flexDirection: 'row',
@@ -2751,19 +2896,18 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
+    gap: 12,
     width: '100%',
-    minHeight: 24,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 10,
+    minHeight: 42,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 0,
     backgroundColor: '#FFF5F2',
-    borderWidth: 1,
-    borderColor: 'rgba(163, 85, 76, 0.14)',
-    shadowColor: '#9a6b61',
-    shadowOpacity: 0.025,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 1 },
+    borderWidth: 0,
+    borderColor: 'transparent',
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    shadowOffset: { width: 0, height: 0 },
     elevation: 0,
   },
   swipeActionsRowLeft: {
@@ -2831,20 +2975,21 @@ const styles = StyleSheet.create({
     color: '#b91c1c',
   },
   statusBadgeBlockedCentered: {
-    backgroundColor: '#F8FAFC',
+    backgroundColor: '#FEF2F2',
     borderRadius: 999,
-    borderWidth: 0,
-    paddingHorizontal: IS_ANDROID ? 14 : 9,
-    paddingVertical: 4,
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    paddingHorizontal: IS_ANDROID ? 16 : 12,
+    paddingVertical: 5,
     alignSelf: 'flex-start',
-    marginTop: 6,
-    marginBottom: 4,
-    minWidth: IS_ANDROID ? 78 : undefined,
+    marginTop: 0,
+    marginBottom: 0,
+    minWidth: IS_ANDROID ? 92 : 84,
   },
   statusBadgeBlockedText: {
-    fontSize: IS_ANDROID ? 9.5 : 10,
+    fontSize: IS_ANDROID ? 10.8 : 11.2,
     fontWeight: '900',
-    color: '#64748B',
+    color: '#B91C1C',
     width: '100%',
     textAlign: 'center',
   },
@@ -2858,51 +3003,27 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
     flexShrink: 0,
   },
-  statusBadgeCancelledFloating: {
-    minHeight: 22,
-    borderRadius: 999,
-    backgroundColor: '#FDECEC',
-    borderWidth: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-    flexShrink: 0,
-    minWidth: 0,
-    maxWidth: '39%',
-    shadowColor: '#000',
-    shadowOpacity: 0.03,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 1,
-    alignSelf: 'flex-start',
-    marginTop: 0,
-    marginBottom: 0,
-    marginLeft: 0,
-  },
-  statusBadgeCancelledText: {
-    fontSize: IS_ANDROID ? 7.7 : 8.2,
-    fontWeight: '900',
-    color: '#B91C1C',
-    letterSpacing: 0.2,
-    width: '100%',
-    textAlign: 'center',
-  },
   statusBadgeLimit: {
-    alignSelf: 'flex-start',
+    alignSelf: 'center',
     marginTop: 0,
     marginBottom: 0,
     backgroundColor: '#F3E8FF',
     borderWidth: 1,
     borderColor: 'rgba(109, 40, 217, 0.14)',
     borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
     flexShrink: 1,
+    flexGrow: 1,
+    flexBasis: 0,
     minWidth: 0,
+    maxWidth: '100%',
+    minHeight: 42,
+    justifyContent: 'center',
   },
   statusBadgeLimitText: {
-    fontSize: 9.6,
+    fontSize: IS_ANDROID ? 10 : 10.6,
+    lineHeight: IS_ANDROID ? 12.5 : 13.5,
     fontWeight: '900',
     color: '#6d28d9',
     textAlign: 'center',

@@ -108,6 +108,7 @@ export function HapticTouchable({
         if (Platform.OS === 'web') {
           return;
         }
+        longPressTriggeredRef.current = true;
         if (!disabled && longPressHapticType && longPressHapticType !== 'none') {
           haptic[longPressHapticType]().catch(() => null);
         }
@@ -115,7 +116,7 @@ export function HapticTouchable({
       }}
       onPress={(event) => {
         clearWebLongPressTimer();
-        if (Platform.OS === 'web' && longPressTriggeredRef.current) {
+        if (longPressTriggeredRef.current) {
           longPressTriggeredRef.current = false;
           return;
         }

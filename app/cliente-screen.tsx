@@ -1,9 +1,9 @@
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Calendar from 'expo-calendar';
 import * as LocalAuthentication from 'expo-local-authentication';
 import * as Notifications from 'expo-notifications';
-import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, usePathname, useRouter } from 'expo-router';
 import {
   memo,
   startTransition,
@@ -16,7 +16,9 @@ import {
   type RefObject,
 } from 'react';
 import {
+  ActivityIndicator,
   Alert,
+  Animated as RNAnimated,
   AppState,
   FlatList,
   Keyboard,
@@ -34,11 +36,13 @@ import {
   View,
   type ViewStyle,
 } from 'react-native';
+import { NativeViewGestureHandler } from 'react-native-gesture-handler';
 import Animated, {
   useAnimatedStyle,
 } from 'react-native-reanimated';
 import { AppWordmark } from '../components/app-wordmark';
 import { fetchClientPortalAvailabilitySettings } from '../src/lib/client-portal';
+import { useTabSwipeLock } from '../src/context/TabSwipeLockContext';
 import { KeyboardNextToolbar } from '../components/ui/keyboard-next-toolbar';
 import { NativeDatePickerModal } from '../components/ui/native-date-picker-modal';
 import { WebImmediateTouchableOpacity as TouchableOpacity } from '../components/ui/web-immediate-touchable-opacity';
@@ -79,13 +83,18 @@ import {
   derivePublicBookingOccupancyFromSnapshot,
   type PublicBookingOccupancyItem,
 } from '../src/lib/client-portal';
-import { appFonts } from '../src/lib/fonts';
 import { focusNextInput, useKeyboardAwareScroll } from '../src/lib/form-navigation';
+import { appFonts } from '../src/lib/fonts';
 import { haptic } from '../src/lib/haptics';
 import { AppLanguage, resolveStoredAppLanguage, tApp } from '../src/lib/i18n';
+import { wheelPickerHaptics } from '../src/lib/wheel-picker-haptics';
 import { formatCustomerNamePart } from '../src/lib/customer-name';
 import { formatSalonAddress, normalizeSalonCode, SalonWorkspace } from '../src/lib/platform';
-import { registerPushNotifications } from '../src/lib/push/push-notifications';
+import {
+  isExpoGoPushRuntime,
+  registerPushNotifications,
+  scheduleLocalRuntimeNotification,
+} from '../src/lib/push/push-notifications';
 import { requestWebNotificationPermission, showWebNotification } from '../src/lib/push/web-notifications';
 import { resolveServiceAccent } from '../src/lib/service-accents';
 import { supabase } from '../src/lib/supabase';
@@ -110,6 +119,42 @@ const WEB_TOP_ICON_BUTTON_STYLE = {
   WebkitAppearance: 'none',
   appearance: 'none',
 } as const;
+const buildPublicSalonStateCacheKey = (salonCode: string) =>
+  `salon_manager_public_salon_state__${normalizeSalonCode(salonCode)}`;
+
+const IOS_APP_STORE_URL = 'https://apps.apple.com/app/id6760840153';
+const ANDROID_PLAY_STORE_URL =
+  'https://play.google.com/store/apps/details?id=com.marzix91.salonmanager';
+const isMobileBrowserUserAgent = () => {
+  if (typeof navigator === 'undefined') return false;
+  return /iphone|ipad|ipod|android/i.test(navigator.userAgent);
+};
+const isAndroidBrowserUserAgent = () => {
+  if (typeof navigator === 'undefined') return false;
+  return /android/i.test(navigator.userAgent);
+};
+const isIosBrowserUserAgent = () => {
+  if (typeof navigator === 'undefined') return false;
+  return /iphone|ipad|ipod/i.test(navigator.userAgent);
+};
+const attemptOpenSalonProAppFromWeb = (url: string) => {
+  if (typeof window === 'undefined' || typeof document === 'undefined') {
+    return;
+  }
+
+  if (isIosBrowserUserAgent()) {
+    const iframe = document.createElement('iframe');
+    iframe.style.display = 'none';
+    iframe.src = url;
+    document.body.appendChild(iframe);
+    window.setTimeout(() => {
+      iframe.remove();
+    }, 1200);
+    return;
+  }
+
+  window.location.assign(url);
+};
 
 const stopWebTopBarEvent = (event: {
   preventDefault?: () => void;
@@ -177,8 +222,12 @@ const FRONTEND_SAVED_SALON_CODES_KEY = 'salon_manager_frontend_saved_salon_codes
 const FRONTEND_BIOMETRIC_ENABLED_KEY = 'salon_manager_frontend_biometric_enabled';
 const FRONTEND_BIOMETRIC_PROFILE_KEY = 'salon_manager_frontend_biometric_profile';
 const FRONTEND_BIOMETRIC_SALON_CODE_KEY = 'salon_manager_frontend_biometric_salon_code';
+const FRONTEND_CALENDAR_PERMISSION_PROMPTED_KEY =
+  'salon_manager_frontend_calendar_permission_prompted';
 const FRONTEND_WAITLIST_VIEWED_KEY = 'salon_manager_frontend_waitlist_viewed';
+const FRONTEND_REQUESTS_VIEWED_KEY = 'salon_manager_frontend_requests_viewed';
 const FRONTEND_BIOMETRIC_PROMPTED_KEY = 'salon_manager_frontend_biometric_prompted';
+const normalizeEmail = (value?: string | null) => value?.trim().toLowerCase() ?? '';
 const buildFrontendProfileKeyForSalon = (salonCode?: string | null) => {
   const normalized = normalizeSalonCode(salonCode ?? '');
   return normalized
@@ -206,6 +255,32 @@ const buildFrontendWaitlistViewedKey = ({
   const identity = [normalizedSalonCode, normalizedEmail || normalizedPhone].filter(Boolean).join(':');
   return identity ? `${FRONTEND_WAITLIST_VIEWED_KEY}:${identity}` : FRONTEND_WAITLIST_VIEWED_KEY;
 };
+const buildFrontendRequestsViewedKey = ({
+  salonCode,
+  email,
+  phone,
+}: {
+  salonCode?: string | null;
+  email?: string | null;
+  phone?: string | null;
+}) => {
+  const normalizedSalonCode = normalizeSalonCode(salonCode ?? '');
+  const normalizedEmail = (email ?? '').trim().toLowerCase();
+  const normalizedPhone = limitPhoneToTenDigits((phone ?? '').trim());
+  const identity = [normalizedSalonCode, normalizedEmail || normalizedPhone].filter(Boolean).join(':');
+  return identity ? `${FRONTEND_REQUESTS_VIEWED_KEY}:${identity}` : FRONTEND_REQUESTS_VIEWED_KEY;
+};
+const buildFrontendRequestViewedSignature = (
+  item: PublicSalonState['richiestePrenotazione'][number]
+) =>
+  [
+    item.id,
+    item.stato,
+    item.data,
+    item.ora,
+    normalizeIdentityText(item.servizio),
+    normalizeIdentityText(item.note ?? ''),
+  ].join(':');
 const buildSavedSalonCodeList = (values: Array<string | null | undefined>) =>
   values
     .map((value) => normalizeSalonCode(value ?? ''))
@@ -226,18 +301,61 @@ const buildFrontendBiometricPromptedKey = ({
   return identity ? `${FRONTEND_BIOMETRIC_PROMPTED_KEY}:${identity}` : FRONTEND_BIOMETRIC_PROMPTED_KEY;
 };
 const DAY_CARD_WIDTH = 58;
-const DAY_CARD_GAP = 2;
+const DAY_CARD_GAP = -10;
+const WEB_DAY_CARD_GAP = 10;
 const DAY_CARD_STRIDE = DAY_CARD_WIDTH + DAY_CARD_GAP;
 const DAY_PICKER_DAYS_BEFORE = 14;
 const DAY_PICKER_DAYS_AFTER = 90;
-const CLIENT_BOOKING_REFRESH_INTERVAL_MS = 5000;
-const CLIENT_BOOKING_SETTINGS_REFRESH_INTERVAL_MS = 1500;
+const CLIENT_BOOKING_REFRESH_INTERVAL_MS = 1200;
+const CLIENT_BOOKING_SETTINGS_REFRESH_INTERVAL_MS = 400;
 const LOCAL_REQUEST_VISIBILITY_GRACE_MS = 30000;
+const CANCELLATION_SNAPSHOT_RETRY_DELAY_MS = 900;
 const WAITLIST_MUTATION_SETTLE_MS = 1600;
+const FRONTEND_BOOKING_LIVE_REFRESH_MS = 1200;
+const FRONTEND_PASSIVE_REFRESH_MS = 4000;
+const WEB_FRONTEND_BOOKING_LIVE_REFRESH_MS = 5000;
+const WEB_FRONTEND_PASSIVE_REFRESH_MS = 12000;
+const WEB_DAY_PICKER_SETTLE_TOLERANCE_PX = 28;
 const IS_ANDROID = Platform.OS === 'android';
 const ANDROID_TEXT_BREATHING_ROOM = IS_ANDROID ? 8 : 0;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const MAX_GUIDED_SLOT_RECOMMENDATIONS = 4;
+
+const openDeviceSettings = async () => {
+  try {
+    await Linking.openSettings();
+  } catch {
+    Alert.alert(
+      'Impostazioni non disponibili',
+      'Apri manualmente le impostazioni del telefono e abilita l’accesso al calendario per completare il salvataggio.'
+    );
+  }
+};
+
+const openDeviceCalendarAtDate = async (date: Date) => {
+  try {
+    if (Platform.OS === 'ios') {
+      const appleReferenceDateMs = Date.UTC(2001, 0, 1, 0, 0, 0);
+      const appleReferenceSeconds = Math.floor((date.getTime() - appleReferenceDateMs) / 1000);
+      await Linking.openURL(`calshow:${appleReferenceSeconds}`);
+      return true;
+    }
+
+    if (Platform.OS === 'android') {
+      await Linking.openURL(`content://com.android.calendar/time/${date.getTime()}`);
+      return true;
+    }
+  } catch {
+    return false;
+  }
+
+  return false;
+};
+
+const wait = (ms: number) =>
+  new Promise<void>((resolve) => {
+    setTimeout(resolve, ms);
+  });
 
 type GuidedSlotStrategy = 'balanced' | 'protect_long_services' | 'fill_gaps';
 
@@ -490,6 +608,126 @@ type SlotWaitlistEntry = {
   notified_at?: string | null;
 };
 
+const isLegacyWaitlistRpcMismatch = (rpcName: string, error: unknown) => {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+
+  const maybeError = error as {
+    code?: string;
+    message?: string;
+    details?: string;
+    hint?: string;
+  };
+  const mergedErrorText = [
+    maybeError.code,
+    maybeError.message,
+    maybeError.details,
+    maybeError.hint,
+  ]
+    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    .join(' ')
+    .toLowerCase();
+
+  if (!mergedErrorText) {
+    return false;
+  }
+
+  return (
+    mergedErrorText.includes(`public.${rpcName}`) &&
+    (
+      mergedErrorText.includes('could not find the function') ||
+      mergedErrorText.includes('function') && mergedErrorText.includes('does not exist') ||
+      mergedErrorText.includes('schema cache') ||
+      mergedErrorText.includes('requested_operator_id') ||
+      mergedErrorText.includes('requested_operator_name')
+    )
+  );
+};
+
+const isSchemaCacheTransientError = (error: unknown) => {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+
+  const maybeError = error as { code?: unknown; message?: unknown; details?: unknown; hint?: unknown };
+  const mergedErrorText = [
+    maybeError.code,
+    maybeError.message,
+    maybeError.details,
+    maybeError.hint,
+  ]
+    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    .join(' ')
+    .toLowerCase();
+
+  return (
+    mergedErrorText.includes('pgrst002') ||
+    mergedErrorText.includes('schema cache') ||
+    mergedErrorText.includes('could not query the database for the schema cache')
+  );
+};
+
+const getPublicSlotWaitlistEntriesCompat = async (params: {
+  p_salon_code: string;
+  p_customer_email: string;
+  p_customer_phone: string;
+  p_appointment_date: string;
+  p_requested_service_name: string | null;
+  p_requested_operator_id: string | null;
+  p_requested_operator_name: string | null;
+}) => {
+      const response = await supabase.rpc('get_public_slot_waitlist_entries', params);
+
+  if (!response.error || !isLegacyWaitlistRpcMismatch('get_public_slot_waitlist_entries', response.error)) {
+    return response;
+  }
+
+  return supabase.rpc('get_public_slot_waitlist_entries', {
+    p_salon_code: params.p_salon_code,
+    p_customer_email: params.p_customer_email,
+    p_customer_phone: params.p_customer_phone,
+    p_appointment_date: params.p_appointment_date,
+    p_requested_service_name: params.p_requested_service_name,
+  });
+};
+
+const joinPublicSlotWaitlistCompat = async (params: {
+  p_salon_code: string;
+  p_requested_service_name: string;
+  p_requested_duration_minutes: number;
+  p_requested_operator_id: string | null;
+  p_requested_operator_name: string | null;
+  p_appointment_date: string;
+  p_appointment_time: string;
+  p_customer_name: string;
+  p_customer_surname: string;
+  p_customer_email: string;
+  p_customer_phone: string;
+  p_customer_instagram: string | null;
+  p_notes: string | null;
+}) => {
+  const response = await supabase.rpc('join_public_slot_waitlist', params);
+
+  if (!response.error || !isLegacyWaitlistRpcMismatch('join_public_slot_waitlist', response.error)) {
+    return response;
+  }
+
+  return supabase.rpc('join_public_slot_waitlist', {
+    p_salon_code: params.p_salon_code,
+    p_requested_service_name: params.p_requested_service_name,
+    p_requested_duration_minutes: params.p_requested_duration_minutes,
+    p_appointment_date: params.p_appointment_date,
+    p_appointment_time: params.p_appointment_time,
+    p_customer_name: params.p_customer_name,
+    p_customer_surname: params.p_customer_surname,
+    p_customer_email: params.p_customer_email,
+    p_customer_phone: params.p_customer_phone,
+    p_customer_instagram: params.p_customer_instagram,
+    p_notes: params.p_notes,
+  });
+};
+
 const getDerivedWaitlistAlertStatus = (item: SlotWaitlistEntry) => {
   const normalizedStatus = String(item.status ?? '')
     .trim()
@@ -530,6 +768,8 @@ type WaitlistSlotBlock = {
   startTime: string;
   endTime: string;
   slotTimes: string[];
+  labelStartTime: string;
+  labelEndTime: string;
 };
 
 type PublicSalonState = {
@@ -633,9 +873,20 @@ const mergeFrontendAvailabilitySettings = ({
   const normalizedIncoming = normalizeAvailabilitySettings(incomingSettings);
   const currentTs = Date.parse(currentSettings.guidedSlotsUpdatedAt ?? '');
   const incomingTs = Date.parse(normalizedIncoming.guidedSlotsUpdatedAt ?? '');
+  const hasIncomingGuidedSlotsShape =
+    !!incomingSettings &&
+    typeof incomingSettings === 'object' &&
+    !Array.isArray(incomingSettings) &&
+    ('guidedSlotsEnabled' in incomingSettings ||
+      'guidedSlotsStrategy' in incomingSettings ||
+      'guidedSlotsVisibility' in incomingSettings);
   const incomingWins =
     Number.isFinite(incomingTs) &&
     (!Number.isFinite(currentTs) || incomingTs >= currentTs);
+
+  if (!incomingWins && hasIncomingGuidedSlotsShape && !Number.isFinite(incomingTs)) {
+    return normalizedIncoming;
+  }
 
   if (!incomingWins) {
     return normalizeAvailabilitySettings({
@@ -718,17 +969,29 @@ const countScheduledBookingsForClient = ({
   services: PublicSalonState['servizi'];
   requestedServiceName: string;
 }) => {
-  const matchingCustomer = clienti.find((item) => matchesLimitedClientProfile(item, profile));
+  const matchingCustomers = clienti.filter((item) => matchesLimitedClientProfile(item, profile));
+  const hasUnlimitedFutureLimit = matchingCustomers.some(
+    (item) => typeof item.maxFutureAppointments !== 'number'
+  );
+  const numericFutureLimits = matchingCustomers
+    .map((item) => item.maxFutureAppointments)
+    .filter((value): value is number => typeof value === 'number');
   const futureLimit =
-    matchingCustomer && typeof matchingCustomer.maxFutureAppointments === 'number'
-      ? matchingCustomer.maxFutureAppointments
-      : null;
+    hasUnlimitedFutureLimit || numericFutureLimits.length === 0
+      ? null
+      : Math.max(...numericFutureLimits);
+  const hasUnlimitedDailyLimit = matchingCustomers.some(
+    (item) => typeof item.maxDailyAppointments !== 'number'
+  );
+  const numericDailyLimits = matchingCustomers
+    .map((item) => item.maxDailyAppointments)
+    .filter((value): value is number => typeof value === 'number');
   const dailyLimit =
-    matchingCustomer && typeof matchingCustomer.maxDailyAppointments === 'number'
-      ? matchingCustomer.maxDailyAppointments
-      : null;
+    hasUnlimitedDailyLimit || numericDailyLimits.length === 0
+      ? null
+      : Math.max(...numericDailyLimits);
   const futureLimitMode =
-    matchingCustomer?.maxFutureAppointmentsMode === 'monthly'
+    matchingCustomers.some((item) => item.maxFutureAppointmentsMode === 'monthly')
       ? 'monthly'
       : 'total_future';
 
@@ -736,10 +999,12 @@ const countScheduledBookingsForClient = ({
   const normalizedPhone = limitPhoneToTenDigits(profile.telefono ?? '');
   const normalizedName = `${profile.nome.trim()} ${profile.cognome.trim()}`.trim().toLowerCase();
   const knownNames = new Set<string>(normalizedName ? [normalizedName] : []);
-  const normalizedCustomerName = (matchingCustomer?.nome ?? '').trim().toLowerCase();
-  if (normalizedCustomerName) {
-    knownNames.add(normalizedCustomerName);
-  }
+  matchingCustomers.forEach((item) => {
+    const normalizedCustomerName = (item.nome ?? '').trim().toLowerCase();
+    if (normalizedCustomerName) {
+      knownNames.add(normalizedCustomerName);
+    }
+  });
   const today = getTodayDateString();
   const targetMonthPrefix =
     futureLimitMode === 'monthly' && /^\d{4}-\d{2}-\d{2}$/.test(appointmentDate)
@@ -896,22 +1161,21 @@ const buildBlockingAppointments = (
   operators: PublicSalonState['operatori'],
   settings: ReturnType<typeof normalizeAvailabilitySettings>
 ) => {
-  const materializedAppointments = appointments.map((item) => ({
-    key: [
-      item.data ?? getTodayDateString(),
-      item.ora.trim(),
-      item.cliente.trim().toLowerCase(),
-      item.servizio.trim().toLowerCase(),
-    ].join('|'),
-    item,
-  }));
-  const materializedKeys = new Set(materializedAppointments.map((entry) => entry.key));
+  const materializedAppointmentKeys = new Set(
+    appointments.map((item) =>
+      [
+        item.data ?? getTodayDateString(),
+        item.ora.trim(),
+        item.cliente.trim().toLowerCase(),
+        item.servizio.trim().toLowerCase(),
+      ].join('|')
+    )
+  );
+  const seenRequestKeys = new Set<string>();
 
   const blockingRequests = requests
     .filter((item) => item.stato === 'In attesa' || item.stato === 'Accettata')
     .filter((item) => {
-      if (item.stato !== 'Accettata') return true;
-
       const requestKey = [
         item.data,
         item.ora.trim(),
@@ -919,7 +1183,16 @@ const buildBlockingAppointments = (
         item.servizio.trim().toLowerCase(),
       ].join('|');
 
-      return !materializedKeys.has(requestKey);
+      if (materializedAppointmentKeys.has(requestKey)) {
+        return false;
+      }
+
+      if (seenRequestKeys.has(requestKey)) {
+        return false;
+      }
+
+      seenRequestKeys.add(requestKey);
+      return true;
     })
     .map((item) => ({
       id: `${item.stato === 'Accettata' ? 'accepted' : 'pending'}-${item.id}`,
@@ -951,6 +1224,9 @@ const EMPTY_PROFILE: FrontendProfile = {
   telefono: '',
   instagram: '',
 };
+
+const FRONTEND_SIMPLE_WEB_FONT =
+  'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
 
 const buildCenteredDates = (centerDate: string, daysBefore: number, daysAfter: number) => {
   const pivot = parseIsoDate(centerDate);
@@ -1006,15 +1282,28 @@ const FrontendBookingDayPicker = memo(function FrontendBookingDayPicker({
   onJumpToday,
 }: FrontendBookingDayPickerProps) {
   const isWebPicker = Platform.OS === 'web';
+  const { setDisableParentSwipe } = useTabSwipeLock();
   const pickerCardWidth = DAY_CARD_WIDTH;
-  const pickerCardGap = DAY_CARD_GAP;
+  const pickerCardGap = isWebPicker ? WEB_DAY_CARD_GAP : DAY_CARD_GAP;
   const pickerCardStride = pickerCardWidth + pickerCardGap;
   const listRef = useRef<FlatList<(typeof giorniDisponibili)[number]> | null>(null);
   const webViewportRef = useRef<HTMLDivElement | null>(null);
   const webHostRef = useRef<View | null>(null);
   const webScrollSettleTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const webDidInitialCenterRef = useRef(false);
+  const webLiveSelectedDateRef = useRef(selectedDate);
+  const scrollX = useRef(new RNAnimated.Value(0)).current;
   const [pickerWidth, setPickerWidth] = useState(0);
+  const [previewIndex, setPreviewIndex] = useState<number | null>(null);
+  const lastHapticIndexRef = useRef<number | null>(null);
+  const liveIndexRef = useRef(0);
+  const previewIndexRef = useRef<number | null>(null);
+  const isDraggingRef = useRef(false);
+  const isMomentumRef = useRef(false);
+  const latestOffsetXRef = useRef(0);
+  const suppressSettleRef = useRef(false);
+  const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const momentumTargetIndexRef = useRef<number | null>(null);
   const sideInset = useMemo(
     () => Math.max(0, (pickerWidth - pickerCardWidth) / 2),
     [pickerCardWidth, pickerWidth]
@@ -1063,6 +1352,8 @@ const FrontendBookingDayPicker = memo(function FrontendBookingDayPicker({
         return;
       }
 
+      suppressSettleRef.current = true;
+      latestOffsetXRef.current = offset;
       listRef.current?.scrollToOffset({
         offset,
         animated,
@@ -1071,33 +1362,91 @@ const FrontendBookingDayPicker = memo(function FrontendBookingDayPicker({
     [giorniDisponibili, isWebPicker, pickerCardStride]
   );
 
-  const settleWebDayAtScrollLeft = useCallback(
+  const getNearestIndex = useCallback(
+    (offsetX: number) =>
+      Math.max(0, Math.min(giorniDisponibili.length - 1, Math.round(offsetX / pickerCardStride))),
+    [giorniDisponibili.length, pickerCardStride]
+  );
+
+  const updatePreviewIndex = useCallback((nextIndex: number) => {
+    if (previewIndexRef.current === nextIndex && liveIndexRef.current === nextIndex) {
+      return;
+    }
+
+    previewIndexRef.current = nextIndex;
+    liveIndexRef.current = nextIndex;
+    setPreviewIndex((current) => (current === nextIndex ? current : nextIndex));
+  }, []);
+
+  const resolveWebCenteredDay = useCallback(
     (scrollLeft?: number | null) => {
       const host = webHostRef.current as unknown as HTMLElement | null;
       const resolvedScrollLeft =
         typeof scrollLeft === 'number' && Number.isFinite(scrollLeft)
           ? scrollLeft
           : host?.scrollLeft ?? 0;
-      const rawIndex = Math.max(
-        0,
-        Math.min(giorniDisponibili.length - 1, Math.round(resolvedScrollLeft / pickerCardStride))
-      );
-      const nextIndex = Math.max(
-        rawIndex,
-        giorniDisponibili.findIndex((item) => item.value >= today)
-      );
-      const nextDay = giorniDisponibili[nextIndex] ?? giorniDisponibili[rawIndex];
+      const viewportWidth = pickerWidth || host?.clientWidth || 0;
+      const viewportCenter = resolvedScrollLeft + viewportWidth / 2;
+
+      let containedIndex = -1;
+      for (let index = 0; index < giorniDisponibili.length; index += 1) {
+        const start = sideInset + index * pickerCardStride;
+        const end = start + pickerCardWidth;
+        if (
+          viewportCenter >= start - pickerCardGap * 0.5 &&
+          viewportCenter <= end + pickerCardGap * 0.5
+        ) {
+          containedIndex = index;
+          break;
+        }
+      }
+
+      const rawIndex = containedIndex >= 0 ? containedIndex : getNearestIndex(resolvedScrollLeft);
+      const firstSelectableIndex = giorniDisponibili.findIndex((item) => item.value >= today);
+      const nextIndex =
+        firstSelectableIndex >= 0 ? Math.max(rawIndex, firstSelectableIndex) : rawIndex;
+      const nextDay = giorniDisponibili[nextIndex] ?? giorniDisponibili[rawIndex] ?? null;
+
+      return {
+        nextDay,
+        targetOffset: nextIndex * pickerCardStride,
+        resolvedScrollLeft,
+      };
+    },
+    [
+      getNearestIndex,
+      giorniDisponibili,
+      pickerCardGap,
+      pickerCardStride,
+      pickerCardWidth,
+      pickerWidth,
+      sideInset,
+      today,
+    ]
+  );
+
+  const settleWebDayAtScrollLeft = useCallback(
+    (scrollLeft?: number | null) => {
+      const resolved = resolveWebCenteredDay(scrollLeft);
+      const nextDay = resolved.nextDay;
       if (!nextDay) return;
       if (nextDay.value < today) return;
-      if (nextDay.value !== selectedDate) {
+      if (nextDay.value !== webLiveSelectedDateRef.current) {
+        webLiveSelectedDateRef.current = nextDay.value;
         onSelectDate(nextDay.value);
       }
+      if (
+        Math.abs(resolved.resolvedScrollLeft - resolved.targetOffset) >
+        WEB_DAY_PICKER_SETTLE_TOLERANCE_PX
+      ) {
+        centerDay(nextDay.value, false);
+      }
     },
-    [giorniDisponibili, onSelectDate, pickerCardStride, selectedDate, today]
+    [centerDay, onSelectDate, resolveWebCenteredDay, today]
   );
 
   const scheduleWebSettle = useCallback(
-    (scrollLeft?: number | null, delayMs = 110) => {
+    (scrollLeft?: number | null, delayMs = 52) => {
       if (webScrollSettleTimeoutRef.current) {
         clearTimeout(webScrollSettleTimeoutRef.current);
       }
@@ -1108,6 +1457,10 @@ const FrontendBookingDayPicker = memo(function FrontendBookingDayPicker({
     },
     [settleWebDayAtScrollLeft]
   );
+
+  useEffect(() => {
+    webLiveSelectedDateRef.current = selectedDate;
+  }, [selectedDate]);
 
   useEffect(() => {
     if (!pickerWidth) return;
@@ -1128,8 +1481,19 @@ const FrontendBookingDayPicker = memo(function FrontendBookingDayPicker({
       if (webScrollSettleTimeoutRef.current) {
         clearTimeout(webScrollSettleTimeoutRef.current);
       }
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current);
+      }
+      setDisableParentSwipe(false);
+      wheelPickerHaptics.endSelection().catch(() => null);
     };
-  }, []);
+  }, [setDisableParentSwipe]);
+
+  useEffect(() => {
+    if (isWebPicker) return;
+    previewIndexRef.current = null;
+    setPreviewIndex((current) => (current === null ? current : null));
+  }, [isWebPicker, selectedDate]);
 
   useEffect(() => {
     if (!isWebPicker) return;
@@ -1154,6 +1518,100 @@ const FrontendBookingDayPicker = memo(function FrontendBookingDayPicker({
     observer.observe(viewport);
     return () => observer.disconnect();
   }, [isWebPicker, pickerWidth]);
+
+  useEffect(() => {
+    if (isWebPicker) return;
+
+    const selectedIndex = giorniDisponibili.findIndex((item) => item.value === selectedDate);
+    if (selectedIndex < 0 || pickerWidth <= 0) return;
+
+    const targetOffset = Math.max(0, selectedIndex * pickerCardStride);
+    const previousOffset = latestOffsetXRef.current;
+
+    if (isDraggingRef.current || isMomentumRef.current) {
+      return;
+    }
+
+    liveIndexRef.current = selectedIndex;
+    lastHapticIndexRef.current = selectedIndex;
+
+    if (scrollTimeoutRef.current) {
+      clearTimeout(scrollTimeoutRef.current);
+      scrollTimeoutRef.current = null;
+    }
+
+    latestOffsetXRef.current = targetOffset;
+    previewIndexRef.current = selectedIndex;
+    setPreviewIndex((current) => (current === selectedIndex ? current : selectedIndex));
+
+    if (Math.abs(targetOffset - previousOffset) < 1) {
+      return;
+    }
+
+    suppressSettleRef.current = true;
+    listRef.current?.scrollToOffset({
+      offset: targetOffset,
+      animated: false,
+    });
+  }, [giorniDisponibili, isWebPicker, pickerCardStride, pickerWidth, selectedDate]);
+
+  const syncScrollHaptic = useCallback(
+    (offsetX: number) => {
+      if (Platform.OS !== 'ios') return;
+
+      const nextIndex = getNearestIndex(offsetX);
+      const previousIndex = lastHapticIndexRef.current ?? nextIndex;
+      if (previousIndex === nextIndex) return;
+
+      const direction = nextIndex > previousIndex ? 1 : -1;
+      for (
+        let current = previousIndex + direction;
+        direction > 0 ? current <= nextIndex : current >= nextIndex;
+        current += direction
+      ) {
+        lastHapticIndexRef.current = current;
+        wheelPickerHaptics.selectionChanged().catch(() => {
+          haptic.light().catch(() => null);
+        });
+      }
+    },
+    [getNearestIndex]
+  );
+
+  const settleNativePicker = useCallback(
+    (offsetX?: number, forcedIndex?: number) => {
+      const resolvedOffsetX = offsetX ?? latestOffsetXRef.current;
+
+      if (suppressSettleRef.current) {
+        suppressSettleRef.current = false;
+        return;
+      }
+
+      const nextIndex = forcedIndex ?? getNearestIndex(resolvedOffsetX);
+      const nextDay = giorniDisponibili[nextIndex];
+      if (!nextDay) return;
+
+      isDraggingRef.current = false;
+      isMomentumRef.current = false;
+      momentumTargetIndexRef.current = null;
+      liveIndexRef.current = nextIndex;
+      previewIndexRef.current = nextIndex;
+      wheelPickerHaptics.endSelection().catch(() => null);
+      setDisableParentSwipe(false);
+
+      setPreviewIndex((current) => (current === nextIndex ? current : nextIndex));
+
+      if (nextDay.value !== selectedDate) {
+        onSelectDate(nextDay.value);
+        return;
+      }
+
+      previewIndexRef.current = null;
+      setPreviewIndex((current) => (current === null ? current : null));
+      centerDay(nextDay.value, false);
+    },
+    [centerDay, getNearestIndex, giorniDisponibili, onSelectDate, selectedDate, setDisableParentSwipe]
+  );
 
   const renderGhostCard = useCallback(
     ({ item }: { item: (typeof giorniDisponibili)[number] }) => {
@@ -1257,8 +1715,10 @@ const FrontendBookingDayPicker = memo(function FrontendBookingDayPicker({
     ]
   );
 
-  const selectedDay =
-    giorniDisponibili.find((item) => item.value === selectedDate) ?? giorniDisponibili[0] ?? null;
+  const actualSelectedIndex = giorniDisponibili.findIndex((item) => item.value === selectedDate);
+  const resolvedSelectedIndex =
+    !isWebPicker && previewIndex !== null ? previewIndex : Math.max(actualSelectedIndex, 0);
+  const selectedDay = giorniDisponibili[resolvedSelectedIndex] ?? giorniDisponibili[0] ?? null;
   const selectedAvailability = selectedDay
     ? getDateAvailabilityInfo(availabilitySettings, selectedDay.value)
     : null;
@@ -1301,6 +1761,136 @@ const FrontendBookingDayPicker = memo(function FrontendBookingDayPicker({
       </View>
     </>
   ) : null;
+
+  const renderNativeDayCard = useCallback(
+    ({ item, index }: { item: (typeof giorniDisponibili)[number]; index: number }) => {
+      const availability = getDateAvailabilityInfo(availabilitySettings, item.value);
+      const isPast = item.value < today;
+      const disabled = !canChooseDay || availability.closed || isPast;
+      const statusLabel = buildStatusLabel(item.value);
+      const cardCenter = index * pickerCardStride;
+      const inputRange = [
+        cardCenter - pickerCardStride * 3,
+        cardCenter - pickerCardStride * 2,
+        cardCenter - pickerCardStride,
+        cardCenter,
+        cardCenter + pickerCardStride,
+        cardCenter + pickerCardStride * 2,
+        cardCenter + pickerCardStride * 3,
+      ];
+      const animatedScale = scrollX.interpolate({
+        inputRange,
+        outputRange:
+          Platform.OS === 'android'
+            ? [0.84, 0.91, 0.98, 1.08, 0.98, 0.91, 0.84]
+            : [0.8, 0.87, 0.95, 1.08, 0.95, 0.87, 0.8],
+        extrapolate: 'clamp',
+      });
+      const animatedTranslateY = scrollX.interpolate({
+        inputRange,
+        outputRange:
+          Platform.OS === 'android'
+            ? [26, 16, 8, 0, 8, 16, 26]
+            : [22, 14, 7, 0, 7, 14, 22],
+        extrapolate: 'clamp',
+      });
+      const animatedTranslateX = scrollX.interpolate({
+        inputRange,
+        outputRange:
+          Platform.OS === 'android' ? [66, 44, 24, 0, -24, -44, -66] : [0, 0, 0, 0, 0, 0, 0],
+        extrapolate: 'clamp',
+      });
+      const animatedOpacity = scrollX.interpolate({
+        inputRange: [
+          cardCenter - pickerCardStride * 0.82,
+          cardCenter - pickerCardStride * 0.34,
+          cardCenter,
+          cardCenter + pickerCardStride * 0.34,
+          cardCenter + pickerCardStride * 0.82,
+        ],
+        outputRange: Platform.OS === 'android' ? [1, 0.72, 0, 0.72, 1] : [1, 0.1, 0, 0.1, 1],
+        extrapolate: 'clamp',
+      });
+
+      return (
+        <RNAnimated.View
+          key={item.value}
+          style={[
+            styles.frontendBookingDayCardWrapNative,
+            {
+              opacity: animatedOpacity,
+              transform: [
+                { perspective: 1000 },
+                { translateX: animatedTranslateX },
+                { scale: animatedScale },
+                { translateY: animatedTranslateY },
+              ],
+            },
+          ]}
+        >
+          <TouchableOpacity
+            style={[
+              styles.frontendBookingDayGhostCard,
+              styles.frontendBookingDayGhostCardNative,
+              availability.closed
+                ? styles.frontendBookingDayGhostCardClosed
+                : styles.frontendBookingDayGhostCardAvailable,
+              isPast && styles.frontendBookingDayGhostCardPast,
+            ]}
+            onPress={() => {
+              if (disabled) return;
+              haptic.light().catch(() => null);
+              onSelectDate(item.value);
+              centerDay(item.value, true);
+            }}
+            activeOpacity={disabled ? 1 : 0.92}
+            disabled={disabled}
+          >
+            <Text style={styles.frontendBookingDayWeek}>{item.weekdayShort}</Text>
+            <Text style={styles.frontendBookingDayNumber}>{item.dayNumber}</Text>
+            {statusLabel ? (
+              <View style={[styles.frontendBookingDayMiniBadge, styles.frontendBookingDayMiniBadgeClosed]}>
+                <Text style={styles.frontendBookingDayMiniBadgeText}>{statusLabel}</Text>
+              </View>
+            ) : (
+              <View style={styles.frontendBookingDayMiniBadgeSpacer} />
+            )}
+            <Text style={styles.frontendBookingDayMonth}>{item.monthShort}</Text>
+            <View
+              style={[
+                styles.frontendBookingDayMiniFooter,
+                availability.closed
+                  ? styles.frontendBookingDayMiniFooterClosed
+                  : styles.frontendBookingDayMiniFooterAvailable,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.frontendBookingDayMiniFooterText,
+                  availability.closed
+                    ? styles.frontendBookingDayMiniFooterTextClosed
+                    : styles.frontendBookingDayMiniFooterTextAvailable,
+                ]}
+              >
+                {availability.closed ? tf('agenda_unavailable_short') : tf('agenda_available_short')}
+              </Text>
+            </View>
+          </TouchableOpacity>
+        </RNAnimated.View>
+      );
+    },
+    [
+      availabilitySettings,
+      buildStatusLabel,
+      canChooseDay,
+      centerDay,
+      onSelectDate,
+      pickerCardStride,
+      scrollX,
+      tf,
+      today,
+    ]
+  );
 
   const renderWebDayCard = useCallback(
     (item: (typeof giorniDisponibili)[number]) => {
@@ -1357,6 +1947,7 @@ const FrontendBookingDayPicker = memo(function FrontendBookingDayPicker({
                   ? '0 4px 10px rgba(184,197,214,0.08)'
                   : '0 7px 14px rgba(184,197,214,0.16)',
               scrollSnapAlign: 'center',
+              scrollSnapStop: 'always',
             } as React.CSSProperties
           }
         >
@@ -1484,10 +2075,12 @@ const FrontendBookingDayPicker = memo(function FrontendBookingDayPicker({
     return (
       <div
         style={{
-          width: '100%',
-          maxWidth: '100%',
+          width: 'calc(100% + 40px)',
+          maxWidth: 'calc(100% + 40px)',
           alignSelf: 'stretch',
           marginTop: '12px',
+          marginLeft: '-20px',
+          marginRight: '-20px',
           boxSizing: 'border-box',
         }}
       >
@@ -1511,7 +2104,7 @@ const FrontendBookingDayPicker = memo(function FrontendBookingDayPicker({
               color: '#0F172A',
               fontSize: '16px',
               fontWeight: 800,
-              fontFamily: appFonts.displayCondensed,
+              fontFamily: FRONTEND_SIMPLE_WEB_FONT,
               lineHeight: 1.35,
               minWidth: 0,
               boxSizing: 'border-box',
@@ -1616,7 +2209,21 @@ const FrontendBookingDayPicker = memo(function FrontendBookingDayPicker({
             onWheel={(event) => applyWebHorizontalStripWheelToHost(webHostRef, event)}
             onScroll={(event) => {
               const currentTarget = event.currentTarget;
-              scheduleWebSettle(currentTarget.scrollLeft, 140);
+              const resolved = resolveWebCenteredDay(currentTarget.scrollLeft);
+              if (resolved.nextDay && resolved.nextDay.value !== webLiveSelectedDateRef.current) {
+                webLiveSelectedDateRef.current = resolved.nextDay.value;
+                onSelectDate(resolved.nextDay.value);
+              }
+              scheduleWebSettle(currentTarget.scrollLeft, 92);
+            }}
+            onMouseUp={(event) => {
+              scheduleWebSettle(event.currentTarget.scrollLeft, 0);
+            }}
+            onTouchEnd={(event) => {
+              scheduleWebSettle(event.currentTarget.scrollLeft, 0);
+            }}
+            onTouchCancel={(event) => {
+              scheduleWebSettle(event.currentTarget.scrollLeft, 0);
             }}
             style={{
               width: '100%',
@@ -1626,7 +2233,7 @@ const FrontendBookingDayPicker = memo(function FrontendBookingDayPicker({
               padding: '12px 0 8px',
               WebkitOverflowScrolling: 'touch',
               overscrollBehaviorX: 'contain',
-              scrollSnapType: 'x proximity',
+              scrollSnapType: 'x mandatory',
               boxSizing: 'border-box',
               position: 'relative',
               zIndex: 1,
@@ -1661,7 +2268,7 @@ const FrontendBookingDayPicker = memo(function FrontendBookingDayPicker({
           ]}
           onPress={() => {
             onJumpToday();
-            if (isWebPicker) centerDay(today, true);
+            centerDay(today, true);
           }}
           activeOpacity={0.9}
         >
@@ -1693,6 +2300,28 @@ const FrontendBookingDayPicker = memo(function FrontendBookingDayPicker({
           const nextWidth = event.nativeEvent.layout.width;
           if (!nextWidth || Math.abs(nextWidth - pickerWidth) < 1) return;
           setPickerWidth(nextWidth);
+        }}
+        onStartShouldSetResponderCapture={() => false}
+        onStartShouldSetResponder={() => false}
+        onMoveShouldSetResponderCapture={() => true}
+        onMoveShouldSetResponder={() => true}
+        onResponderTerminationRequest={() => false}
+        onResponderGrant={() => {
+          setDisableParentSwipe(true);
+        }}
+        onTouchStart={() => {
+          setDisableParentSwipe(true);
+        }}
+        onTouchMove={() => {
+          setDisableParentSwipe(true);
+        }}
+        onTouchEnd={() => {
+          if (!isDraggingRef.current && !isMomentumRef.current) {
+            setDisableParentSwipe(false);
+          }
+        }}
+        onTouchCancel={() => {
+          setDisableParentSwipe(false);
         }}
       >
         {isWebPicker ? (
@@ -1738,45 +2367,140 @@ const FrontendBookingDayPicker = memo(function FrontendBookingDayPicker({
           </>
         ) : (
           <>
-            <FlatList
-              ref={listRef}
-              data={giorniDisponibili}
-              horizontal
-              bounces={false}
-              decelerationRate="fast"
-              snapToInterval={pickerCardStride}
-              snapToOffsets={snapOffsets}
-              snapToAlignment="start"
-              scrollEventThrottle={16}
-              showsHorizontalScrollIndicator={false}
-              keyExtractor={(item) => item.value}
-              contentContainerStyle={[
-                styles.frontendBookingDayPickerRow,
-                { paddingHorizontal: sideInset },
-              ]}
-              renderItem={renderGhostCard}
-            />
+            <NativeViewGestureHandler disallowInterruption shouldActivateOnStart>
+              <View>
+                <RNAnimated.FlatList
+                  ref={listRef}
+                  data={giorniDisponibili}
+                  horizontal
+                  bounces={false}
+                  removeClippedSubviews={false}
+                  disableIntervalMomentum={Platform.OS !== 'android'}
+                  decelerationRate="fast"
+                  snapToInterval={pickerCardStride}
+                  snapToOffsets={snapOffsets}
+                  snapToAlignment="start"
+                  scrollEventThrottle={16}
+                  showsHorizontalScrollIndicator={false}
+                  directionalLockEnabled
+                  nestedScrollEnabled={Platform.OS === 'android'}
+                  overScrollMode={Platform.OS === 'android' ? 'never' : 'auto'}
+                  renderToHardwareTextureAndroid={Platform.OS === 'android'}
+                  keyboardShouldPersistTaps="handled"
+                  keyboardDismissMode="on-drag"
+                  keyExtractor={(item) => item.value}
+                  contentContainerStyle={[
+                    styles.frontendBookingDayPickerRow,
+                    styles.frontendBookingDayPickerRowNative,
+                    { paddingHorizontal: sideInset },
+                  ]}
+                  getItemLayout={(_, index) => ({
+                    length: pickerCardStride,
+                    offset: pickerCardStride * index,
+                    index,
+                  })}
+                  renderItem={renderNativeDayCard}
+                  onScrollBeginDrag={(event) => {
+                    setDisableParentSwipe(true);
+                    isDraggingRef.current = true;
+                    isMomentumRef.current = false;
+                    suppressSettleRef.current = false;
+                    const offsetX = event.nativeEvent.contentOffset.x;
+                    const nextIndex = getNearestIndex(offsetX);
+                    latestOffsetXRef.current = offsetX;
+                    momentumTargetIndexRef.current = null;
+                    updatePreviewIndex(nextIndex);
+                    lastHapticIndexRef.current = nextIndex;
+                    if (scrollTimeoutRef.current) {
+                      clearTimeout(scrollTimeoutRef.current);
+                      scrollTimeoutRef.current = null;
+                    }
+                    wheelPickerHaptics.prepareSelection().catch(() => null);
+                    Keyboard.dismiss();
+                  }}
+                  onMomentumScrollBegin={() => {
+                    isMomentumRef.current = true;
+                    wheelPickerHaptics.prepareSelection().catch(() => null);
+                  }}
+                  onMomentumScrollEnd={(event) => {
+                    isMomentumRef.current = false;
+                    const finalOffsetX = event.nativeEvent.contentOffset.x;
+                    latestOffsetXRef.current = finalOffsetX;
+                    const resolvedOffsetX =
+                      momentumTargetIndexRef.current !== null
+                        ? snapOffsets[momentumTargetIndexRef.current] ?? finalOffsetX
+                        : finalOffsetX;
+                    settleNativePicker(
+                      resolvedOffsetX,
+                      momentumTargetIndexRef.current ?? previewIndexRef.current ?? undefined
+                    );
+                  }}
+                  onScrollEndDrag={(event) => {
+                    const releasedOffsetX = event.nativeEvent.contentOffset.x;
+                    const predictedFinalOffsetX =
+                      event.nativeEvent.targetContentOffset?.x ?? releasedOffsetX;
+                    latestOffsetXRef.current = releasedOffsetX;
+                    const predictedIndex = getNearestIndex(predictedFinalOffsetX);
+                    const willMomentum = Math.abs(predictedFinalOffsetX - releasedOffsetX) > 0.5;
+                    momentumTargetIndexRef.current = predictedIndex;
+                    updatePreviewIndex(predictedIndex);
+                    if (scrollTimeoutRef.current) {
+                      clearTimeout(scrollTimeoutRef.current);
+                    }
+                    if (willMomentum) {
+                      return;
+                    }
+                    scrollTimeoutRef.current = setTimeout(() => {
+                      if (isMomentumRef.current) return;
+                      settleNativePicker(
+                        predictedFinalOffsetX,
+                        predictedIndex
+                      );
+                      scrollTimeoutRef.current = null;
+                    }, 24);
+                  }}
+                  onScroll={RNAnimated.event(
+                    [{ nativeEvent: { contentOffset: { x: scrollX } } }],
+                    {
+                      useNativeDriver: true,
+                      listener: (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+                        const offsetX = event.nativeEvent.contentOffset.x;
+                        latestOffsetXRef.current = offsetX;
+                        const nextIndex =
+                          Platform.OS !== 'android' &&
+                          isMomentumRef.current &&
+                          momentumTargetIndexRef.current !== null
+                            ? momentumTargetIndexRef.current
+                            : getNearestIndex(offsetX);
+                        if (previewIndexRef.current !== nextIndex) {
+                          updatePreviewIndex(nextIndex);
+                        }
+                        if (isDraggingRef.current || isMomentumRef.current) {
+                          syncScrollHaptic(offsetX);
+                        }
+                      },
+                    }
+                  )}
+                />
+              </View>
+            </NativeViewGestureHandler>
 
             <View pointerEvents="box-none" style={styles.frontendBookingDayPickerCenterOverlay}>
               <View pointerEvents="none" style={styles.frontendBookingDayPickerCenterFrame} />
               <View pointerEvents="none" style={styles.frontendBookingDayPickerCenterHighlight} />
               <View pointerEvents="none" style={styles.frontendBookingDayPickerCenterInnerGlow} />
               {selectedDay ? (
-                <TouchableOpacity
+                <View
+                  pointerEvents="none"
                   style={[
                     styles.frontendBookingDayFocusCard,
                     selectedAvailability?.closed
                       ? styles.frontendBookingDayFocusCardClosed
                       : styles.frontendBookingDayFocusCardOpen,
                   ]}
-                  onPress={() => {
-                    if (!canChooseDay || selectedDay.value < today) return;
-                    onSelectDate(selectedDay.value);
-                  }}
-                  activeOpacity={0.92}
                 >
                   {selectedFocusCard}
-                </TouchableOpacity>
+                </View>
               ) : null}
             </View>
           </>
@@ -1932,10 +2656,14 @@ const formatMoneyValue = (value: unknown) => toSafeMoneyValue(value).toFixed(2);
 
 export default function ClienteFrontendScreen() {
   const router = useRouter();
+  const pathname = usePathname();
   const { width } = useWindowDimensions();
   const searchParams = useLocalSearchParams<{
     salon?: string | string[];
+    code?: string | string[];
+    join?: string | string[];
     mode?: string | string[];
+    session?: string | string[];
     biometric?: string | string[];
     email?: string | string[];
     phone?: string | string[];
@@ -1954,11 +2682,16 @@ export default function ClienteFrontendScreen() {
   const lastHapticDayRef = useRef('');
   const autoBiometricAttemptedRef = useRef(false);
   const autoCredentialLoginAttemptedRef = useRef(false);
+  const lastAutoLoginAttemptSignatureRef = useRef('');
+  const realtimeInstanceIdRef = useRef(
+    `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  );
   const lastSnappedDayRef = useRef('');
   const nomeInputRef = useRef<TextInput | null>(null);
   const salonCodeInputRef = useRef<TextInput | null>(null);
   const lastUnreadCancelledSignatureRef = useRef('');
   const lastViewedSyncSignatureRef = useRef('');
+  const didEnterFrontendRequestsRouteRef = useRef(false);
   const pendingMarkFrontendNotificationsViewedRef = useRef(false);
   const hasCenteredCurrentDayRef = useRef(false);
   const webDayPickerSelectionReadyRef = useRef(false);
@@ -2037,6 +2770,13 @@ export default function ClienteFrontendScreen() {
   const mediumFrontendCards = width < 860;
   const compactWebTopSpacing = false;
   const isWeb = Platform.OS === 'web';
+  const isFrontendRequestsRoute = pathname?.includes('/cliente-prenotazioni') ?? false;
+  const initialJoinEntryParam = Array.isArray(searchParams.join)
+    ? searchParams.join[0]
+    : searchParams.join;
+  const isFrontendJoinRoute =
+    (pathname?.includes('/join/') ?? false) || initialJoinEntryParam === '1';
+  const isFrontendBookingRoute = !isFrontendRequestsRoute;
   const webDayCardWidth = 52;
   const webDayCardGap = 1;
   const activeDayCardWidth = isWeb ? webDayCardWidth : DAY_CARD_WIDTH;
@@ -2272,7 +3012,14 @@ export default function ClienteFrontendScreen() {
   const initialSalonCodeParam = Array.isArray(searchParams.salon)
     ? searchParams.salon[0]
     : searchParams.salon;
+  const initialJoinCodeParam = Array.isArray(searchParams.code)
+    ? searchParams.code[0]
+    : searchParams.code;
+  const resolvedInitialSalonCodeParam = initialSalonCodeParam || initialJoinCodeParam;
   const initialModeParam = Array.isArray(searchParams.mode) ? searchParams.mode[0] : searchParams.mode;
+  const initialSessionParam = Array.isArray(searchParams.session)
+    ? searchParams.session[0]
+    : searchParams.session;
   const initialBiometricParam = Array.isArray(searchParams.biometric)
     ? searchParams.biometric[0]
     : searchParams.biometric;
@@ -2288,37 +3035,62 @@ export default function ClienteFrontendScreen() {
   const initialRegistrationOnlyParam = Array.isArray(searchParams.registrationOnly)
     ? searchParams.registrationOnly[0]
     : searchParams.registrationOnly;
+  const normalizedInitialAutoLoginEmail = normalizeEmail(initialEmailParam);
+  const normalizedInitialAutoLoginPhone = limitPhoneToTenDigits(String(initialPhoneParam ?? '').trim());
   const initialFrontendAccessMode: FrontendAccessMode | null =
     initialModeParam === 'login' || initialModeParam === 'register' ? initialModeParam : null;
-  const canUseWorkspaceFallback = !initialSalonCodeParam;
+  const canUseWorkspaceFallback = !resolvedInitialSalonCodeParam;
   const [selectedSalonCode, setSelectedSalonCode] = useState(
-    initialSalonCodeParam || (canUseWorkspaceFallback ? salonWorkspace.salonCode : '')
+    resolvedInitialSalonCodeParam || (canUseWorkspaceFallback ? salonWorkspace.salonCode : '')
   );
   const [salonCodeDraft, setSalonCodeDraft] = useState(
-    initialSalonCodeParam || (canUseWorkspaceFallback ? salonWorkspace.salonCode : '')
+    resolvedInitialSalonCodeParam || (canUseWorkspaceFallback ? salonWorkspace.salonCode : '')
   );
   const [publicSalonState, setPublicSalonState] = useState<PublicSalonState | null>(null);
   const [publicAvailabilitySettings, setPublicAvailabilitySettings] = useState<
     ReturnType<typeof normalizeAvailabilitySettings> | null
   >(null);
   const [backendDayOccupancy, setBackendDayOccupancy] = useState<PublicBookingOccupancyItem[]>([]);
+  const [livePublicSlotAvailabilityMap, setLivePublicSlotAvailabilityMap] = useState<
+    Record<string, boolean> | null
+  >(null);
   const [showAllGuidedSlots, setShowAllGuidedSlots] = useState(false);
   const [waitlistKeys, setWaitlistKeys] = useState<Set<string>>(new Set());
   const [savedWaitlistAlerts, setSavedWaitlistAlerts] = useState<SlotWaitlistEntry[]>([]);
   const [viewedWaitlistAlertKeys, setViewedWaitlistAlertKeys] = useState<Set<string>>(new Set());
+  const [viewedFrontendNotificationKeys, setViewedFrontendNotificationKeys] = useState<Set<string>>(
+    new Set()
+  );
   const [waitlistSubmittingKeys, setWaitlistSubmittingKeys] = useState<Set<string>>(new Set());
   const [showWaitlistAlertsExpanded, setShowWaitlistAlertsExpanded] = useState(false);
+  const [pendingWebCancellationRequestId, setPendingWebCancellationRequestId] = useState<string | null>(null);
+  const [joinWebEntryGate, setJoinWebEntryGate] = useState<'probing' | 'chooser' | 'web'>(
+    isWeb && isFrontendJoinRoute && isMobileBrowserUserAgent() ? 'probing' : 'web'
+  );
   const [requestsSectionY, setRequestsSectionY] = useState(0);
+  const [authSectionY, setAuthSectionY] = useState(0);
+  const livePublicSlotAvailabilityRequestRef = useRef(0);
+  const [isLinkedSalonEntryCardExpanded, setIsLinkedSalonEntryCardExpanded] = useState(
+    !Boolean(resolvedInitialSalonCodeParam || (canUseWorkspaceFallback ? salonWorkspace.salonCode : ''))
+  );
   const scrollToRequestsSection = useCallback(
     (animated = true) => {
       scrollFrontendToY(requestsSectionY - 18, animated);
     },
     [requestsSectionY, scrollFrontendToY]
   );
+  const scrollToAuthSection = useCallback(
+    (animated = true) => {
+      scrollFrontendToY(authSectionY - 18, animated);
+    },
+    [authSectionY, scrollFrontendToY]
+  );
   const waitlistEntriesRequestRef = useRef(0);
   const savedWaitlistAlertsRequestRef = useRef(0);
   const waitlistRefreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const waitlistRefreshHoldUntilRef = useRef(0);
+  const publicAvailabilityRefreshInFlightRef = useRef(false);
+  const publicAvailabilitySettingsRefreshInFlightRef = useRef(false);
   const [bookingRequestSubmitting, setBookingRequestSubmitting] = useState(false);
   const bookingSubmitTapLockRef = useRef(0);
   const [isLoadingSalon, setIsLoadingSalon] = useState(false);
@@ -2341,9 +3113,18 @@ export default function ClienteFrontendScreen() {
   const publicSalonRefreshPromiseRef = useRef<Promise<PublicSalonState | null> | null>(null);
   const refreshPublicSalonStateRef = useRef<() => Promise<PublicSalonState | null>>(async () => null);
   const publicSalonStateSignatureRef = useRef('');
+  const publicSalonCatalogCacheRef = useRef<
+    Record<
+      string,
+      Pick<
+        PublicSalonState,
+        'servizi' | 'operatori' | 'serviceCardColorOverrides' | 'roleCardColorOverrides'
+      >
+    >
+  >({});
   const bookingRequestInFlightKeyRef = useRef('');
   const { focusField, scrollToField } = useKeyboardAwareScroll(scrollRef, {
-    topOffset: 32,
+    topOffset: Platform.OS === 'ios' ? 200 : 172,
   });
   const shouldAutoAdvanceField = true;
 
@@ -2354,11 +3135,71 @@ export default function ClienteFrontendScreen() {
       setPublicAvailabilitySettings(null);
       return;
     }
-    const nextSignature = buildPublicSalonStateSignature(nextState);
-    if (publicSalonStateSignatureRef.current !== nextSignature) {
+
+    setPublicSalonState((current) => {
+      const salonCode = normalizeSalonCode(nextState.workspace?.salonCode ?? '');
+      const cachedCatalog = salonCode ? publicSalonCatalogCacheRef.current[salonCode] : undefined;
+      const mergedCatalog = {
+        servizi:
+          nextState.servizi.length > 0
+            ? nextState.servizi
+            : current?.workspace?.salonCode === nextState.workspace?.salonCode
+              ? current.servizi
+              : cachedCatalog?.servizi ?? [],
+        operatori:
+          nextState.operatori.length > 0
+            ? nextState.operatori
+            : current?.workspace?.salonCode === nextState.workspace?.salonCode
+              ? current.operatori
+              : cachedCatalog?.operatori ?? [],
+        serviceCardColorOverrides:
+          nextState.serviceCardColorOverrides &&
+          Object.keys(nextState.serviceCardColorOverrides).length > 0
+            ? nextState.serviceCardColorOverrides
+            : current?.workspace?.salonCode === nextState.workspace?.salonCode &&
+                current.serviceCardColorOverrides &&
+                Object.keys(current.serviceCardColorOverrides).length > 0
+              ? current.serviceCardColorOverrides
+              : cachedCatalog?.serviceCardColorOverrides ?? {},
+        roleCardColorOverrides:
+          nextState.roleCardColorOverrides &&
+          Object.keys(nextState.roleCardColorOverrides).length > 0
+            ? nextState.roleCardColorOverrides
+            : current?.workspace?.salonCode === nextState.workspace?.salonCode &&
+                current.roleCardColorOverrides &&
+                Object.keys(current.roleCardColorOverrides).length > 0
+              ? current.roleCardColorOverrides
+              : cachedCatalog?.roleCardColorOverrides ?? {},
+      };
+
+      if (salonCode) {
+        publicSalonCatalogCacheRef.current[salonCode] = {
+          servizi: mergedCatalog.servizi,
+          operatori: mergedCatalog.operatori,
+          serviceCardColorOverrides: mergedCatalog.serviceCardColorOverrides,
+          roleCardColorOverrides: mergedCatalog.roleCardColorOverrides,
+        };
+      }
+
+      const mergedState: PublicSalonState =
+        current && current.workspace?.salonCode === nextState.workspace?.salonCode
+          ? {
+              ...nextState,
+              ...mergedCatalog,
+            }
+          : {
+              ...nextState,
+              ...mergedCatalog,
+            };
+
+      const nextSignature = buildPublicSalonStateSignature(mergedState);
+      if (publicSalonStateSignatureRef.current === nextSignature) {
+        return current;
+      }
+
       publicSalonStateSignatureRef.current = nextSignature;
-      setPublicSalonState(nextState);
-    }
+      return mergedState;
+    });
   }, []);
   const applyPublicAvailabilitySettings = useCallback(
     (
@@ -2414,15 +3255,19 @@ export default function ClienteFrontendScreen() {
     setShowRequestsExpanded((current) => {
       const next = !current;
       if (next) {
+        setIsBookingStarted(false);
         pendingMarkFrontendNotificationsViewedRef.current = true;
       }
       if (!next) {
         pendingMarkFrontendNotificationsViewedRef.current = false;
         setShowWaitlistAlertsExpanded(false);
+        if (!isFrontendRequestsRoute) {
+          setIsBookingStarted(true);
+        }
       }
       return next;
     });
-  }, [triggerLightHaptic]);
+  }, [isFrontendRequestsRoute, triggerLightHaptic]);
   const toggleWaitlistAlertsExpanded = useCallback(() => {
     if (Platform.OS === 'web' && Date.now() < requestsToggleLockUntilRef.current) {
       return;
@@ -2434,11 +3279,20 @@ export default function ClienteFrontendScreen() {
   const shouldStartInBookingMode = initialModeParam === 'booking';
 
   const normalizedSelectedSalonCode = normalizeSalonCode(selectedSalonCode);
-  const hasResolvedOrIncomingSalonCode = !!normalizedSelectedSalonCode;
-  const isHomeAutoLoginFlow =
-    initialAutoLoginParam === '1' &&
-    shouldStartInBookingMode &&
-    hasResolvedOrIncomingSalonCode;
+  const resolvedOrIncomingSalonCode = normalizeSalonCode(
+    selectedSalonCode || salonCodeDraft || resolvedInitialSalonCodeParam || normalizedSelectedSalonCode
+  );
+  const shouldHandleJoinRouteViaAppGate =
+    isWeb &&
+    isFrontendJoinRoute &&
+    isMobileBrowserUserAgent() &&
+    !!resolvedOrIncomingSalonCode;
+  const shouldRenderJoinWebInterstitial =
+    shouldHandleJoinRouteViaAppGate && joinWebEntryGate !== 'web';
+  const hasResolvedOrIncomingSalonCode = !!resolvedOrIncomingSalonCode;
+  const shouldOpenLinkedSalonBookingDirectly =
+    shouldStartInBookingMode || hasResolvedOrIncomingSalonCode;
+  const isHomeAutoLoginFlow = initialAutoLoginParam === '1' && hasResolvedOrIncomingSalonCode;
   const showMissingSalonLinkWarning = !hasResolvedOrIncomingSalonCode;
   const isCurrentWorkspaceSalon =
     isAuthenticated &&
@@ -2452,9 +3306,23 @@ export default function ClienteFrontendScreen() {
     () => (isCurrentWorkspaceSalon ? servizi : publicSalonState?.servizi ?? []),
     [isCurrentWorkspaceSalon, publicSalonState?.servizi, servizi]
   );
+  const cachedPublicCatalogForSelectedSalon = useMemo(
+    () =>
+      normalizedSelectedSalonCode
+        ? publicSalonCatalogCacheRef.current[normalizedSelectedSalonCode]
+        : undefined,
+    [normalizedSelectedSalonCode, publicSalonState]
+  );
+  const displayFrontendServizi = useMemo(
+    () =>
+      effectiveServizi.length > 0
+        ? effectiveServizi
+        : cachedPublicCatalogForSelectedSalon?.servizi ?? [],
+    [cachedPublicCatalogForSelectedSalon?.servizi, effectiveServizi]
+  );
   const sortedFrontendServizi = useMemo(
     () =>
-      [...effectiveServizi].sort((first, second) => {
+      [...displayFrontendServizi].sort((first, second) => {
         const firstRole = (first.mestiereRichiesto ?? '').trim().toLowerCase();
         const secondRole = (second.mestiereRichiesto ?? '').trim().toLowerCase();
         const firstRoleEmpty = firstRole === '';
@@ -2483,7 +3351,7 @@ export default function ClienteFrontendScreen() {
 
         return first.nome.localeCompare(second.nome, 'it', { sensitivity: 'base' });
       }),
-    [effectiveServizi]
+    [displayFrontendServizi]
   );
   const effectiveServiceCardColorOverrides = useMemo(
     () =>
@@ -2529,6 +3397,13 @@ export default function ClienteFrontendScreen() {
   const effectiveOperatori = useMemo(
     () => (isCurrentWorkspaceSalon ? operatori : publicSalonState?.operatori ?? []),
     [isCurrentWorkspaceSalon, operatori, publicSalonState?.operatori]
+  );
+  const displayFrontendOperatori = useMemo(
+    () =>
+      effectiveOperatori.length > 0
+        ? effectiveOperatori
+        : cachedPublicCatalogForSelectedSalon?.operatori ?? [],
+    [cachedPublicCatalogForSelectedSalon?.operatori, effectiveOperatori]
   );
   const effectiveAvailabilitySettings = isCurrentWorkspaceSalon
     ? availabilitySettings
@@ -2591,6 +3466,82 @@ export default function ClienteFrontendScreen() {
     () => buildDisplayTimeSlots(effectiveAvailabilitySettings, data),
     [effectiveAvailabilitySettings, data]
   );
+  useEffect(() => {
+    if (
+      isCurrentWorkspaceSalon ||
+      !effectiveWorkspace?.id ||
+      !data ||
+      !servizio.trim() ||
+      displayTimeSlots.length === 0
+    ) {
+      setLivePublicSlotAvailabilityMap(null);
+      return;
+    }
+
+    const workspaceId = effectiveWorkspace.id.trim();
+    if (!workspaceId) {
+      setLivePublicSlotAvailabilityMap(null);
+      return;
+    }
+
+    const requestId = livePublicSlotAvailabilityRequestRef.current + 1;
+    livePublicSlotAvailabilityRequestRef.current = requestId;
+    let cancelled = false;
+
+    const loadLiveSlotAvailability = async () => {
+      try {
+        const requestedDurationMinutes = getServiceDuration(servizio, effectiveServizi);
+        const results = await Promise.all(
+          displayTimeSlots.map(async (slotTime) => {
+            const { data: available, error } = await supabase.rpc(
+              'is_public_booking_slot_available',
+              {
+                p_workspace_id: workspaceId,
+                p_appointment_date: data,
+                p_appointment_time: slotTime,
+                p_requested_duration_minutes: requestedDurationMinutes,
+                p_requested_service_name: servizio,
+                p_requested_operator_id: operatoreId.trim() || null,
+                p_requested_operator_name: operatoreNome.trim() || null,
+              }
+            );
+
+            if (error) {
+              throw error;
+            }
+
+            return [slotTime, available === true] as const;
+          })
+        );
+
+        if (cancelled || livePublicSlotAvailabilityRequestRef.current !== requestId) {
+          return;
+        }
+
+        setLivePublicSlotAvailabilityMap(Object.fromEntries(results));
+      } catch (error) {
+        if (!cancelled) {
+          console.log('Errore disponibilita live slot pubblico:', error);
+          setLivePublicSlotAvailabilityMap(null);
+        }
+      }
+    };
+
+    void loadLiveSlotAvailability();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    data,
+    displayTimeSlots,
+    effectiveServizi,
+    effectiveWorkspace?.id,
+    isCurrentWorkspaceSalon,
+    operatoreId,
+    operatoreNome,
+    servizio,
+  ]);
   const tf = useCallback(
     (key: Parameters<typeof tApp>[1], params?: Record<string, string | number>) =>
       tApp(frontendLanguage, key, params),
@@ -2598,24 +3549,172 @@ export default function ClienteFrontendScreen() {
   );
   const frontendBiometricActionLabel =
     frontendBiometricType === 'faceid' ? 'Face ID' : 'biometria';
-  const heroTitle = hasResolvedOrIncomingSalonCode ? 'Prenota' : tf('frontend_find_salon');
+  const heroTitle = hasResolvedOrIncomingSalonCode
+    ? isFrontendRequestsRoute
+      ? 'Le mie prenotazioni'
+      : 'Prenota'
+    : tf('frontend_find_salon');
+  const isLinkedSalonBookingFlowActive =
+    isRegistered && (isBookingStarted || hasResolvedOrIncomingSalonCode);
+  const shouldRenderLinkedSalonBookingExperience =
+    isRegistered && hasResolvedOrIncomingSalonCode;
+  const shouldRenderFrontendRequestsPage =
+    isRegistered && isFrontendRequestsRoute;
+  const hasIncomingAutoLoginCredentials =
+    initialAutoLoginParam === '1' &&
+    hasResolvedOrIncomingSalonCode &&
+    Boolean(normalizedInitialAutoLoginEmail) &&
+    Boolean(normalizedInitialAutoLoginPhone);
+  const shouldTrustInAppFrontendSession =
+    initialSessionParam === '1' &&
+    isFrontendRequestsRoute &&
+    hasResolvedOrIncomingSalonCode;
+  const hasStoredAutoLoginCredentials =
+    hasSavedProfileForSelectedSalon &&
+    Boolean(String(profile.email ?? '').trim()) &&
+    Boolean(limitPhoneToTenDigits(String(profile.telefono ?? '').trim()));
+  const shouldAutoCompleteSavedProfileAccess =
+    !isRegistered &&
+    hasResolvedOrIncomingSalonCode &&
+    (hasIncomingAutoLoginCredentials ||
+      (hasStoredAutoLoginCredentials &&
+        (isHomeAutoLoginFlow || initialBiometricParam === '1' || shouldStartInBookingMode))) &&
+    !profileSaveError;
+  const shouldBootstrapFrontendRequestsPage =
+    isFrontendRequestsRoute &&
+    hasResolvedOrIncomingSalonCode &&
+    !isRegistered &&
+    !shouldTrustInAppFrontendSession &&
+    (!hasHydratedFrontendSession ||
+      isSavingProfile ||
+      shouldAutoCompleteSavedProfileAccess ||
+      (hasSavedProfileForSelectedSalon && !frontendBiometricBusy) ||
+      hasIncomingAutoLoginCredentials);
+  const shouldRenderLegacyHomeRequestsSection =
+    isRegistered &&
+    !isFrontendRequestsRoute &&
+    !shouldRenderLinkedSalonBookingExperience &&
+    !isBookingStarted;
+  const shouldRenderBookingExperience =
+    isFrontendBookingRoute &&
+    (isLinkedSalonBookingFlowActive || shouldRenderLinkedSalonBookingExperience);
+  const registeredHeroSubtitle = isFrontendRequestsRoute
+    ? 'Storico, conferme e aggiornamenti del salone.'
+    : tf('frontend_subtitle');
   const connectedSalonBadgeLabel = useMemo(() => {
     const salonName = effectiveWorkspace?.salonName?.trim() ?? '';
     if (salonName) {
       return salonName;
     }
 
+    if (!isCurrentWorkspaceSalon) {
+      return '';
+    }
+
     const fallbackCode = normalizeSalonCode(
-      selectedSalonCode || salonCodeDraft || initialSalonCodeParam || normalizedSelectedSalonCode
+      selectedSalonCode || salonCodeDraft || resolvedInitialSalonCodeParam || normalizedSelectedSalonCode
     );
 
     return fallbackCode || '';
   }, [
     effectiveWorkspace?.salonName,
-    initialSalonCodeParam,
+    isCurrentWorkspaceSalon,
+    resolvedInitialSalonCodeParam,
     normalizedSelectedSalonCode,
     salonCodeDraft,
     selectedSalonCode,
+  ]);
+  const hasAnyAssociatedSalonContext = Boolean(
+    connectedSalonBadgeLabel ||
+      normalizeSalonCode(selectedSalonCode || salonCodeDraft || resolvedInitialSalonCodeParam || '')
+  );
+  const hasAutoBootstrapCredentials = Boolean(
+    (String(initialEmailParam ?? '').trim() && String(initialPhoneParam ?? '').trim()) ||
+      (String(profile.email ?? '').trim() && String(profile.telefono ?? '').trim())
+  );
+  const shouldShowFrontendAutoBootstrap =
+    !isRegistered &&
+    hasAnyAssociatedSalonContext &&
+    !profileSaveError &&
+    isSavingProfile &&
+    hasAutoBootstrapCredentials;
+
+  useEffect(() => {
+    if (!shouldHandleJoinRouteViaAppGate || typeof window === 'undefined') {
+      setJoinWebEntryGate('web');
+      return;
+    }
+
+    setJoinWebEntryGate((current) => (current === 'web' ? current : 'probing'));
+
+    let didHidePage = false;
+    const markHidden = () => {
+      didHidePage = true;
+    };
+    const appDeepLinkUrl = `salonmanager://join/${resolvedOrIncomingSalonCode}?mode=booking`;
+    const fallbackTimer = window.setTimeout(() => {
+      if (!didHidePage) {
+        setJoinWebEntryGate('chooser');
+      }
+    }, 1400);
+    const launchTimer = window.setTimeout(() => {
+      attemptOpenSalonProAppFromWeb(appDeepLinkUrl);
+    }, 80);
+
+    document.addEventListener('visibilitychange', markHidden);
+    window.addEventListener('pagehide', markHidden);
+    window.addEventListener('blur', markHidden);
+
+    return () => {
+      window.clearTimeout(fallbackTimer);
+      window.clearTimeout(launchTimer);
+      document.removeEventListener('visibilitychange', markHidden);
+      window.removeEventListener('pagehide', markHidden);
+      window.removeEventListener('blur', markHidden);
+    };
+  }, [resolvedOrIncomingSalonCode, shouldHandleJoinRouteViaAppGate]);
+
+  const handleContinueJoinOnWeb = useCallback(() => {
+    setJoinWebEntryGate('web');
+  }, []);
+
+  const handleDownloadSalonProApp = useCallback(() => {
+    const targetStoreUrl = isAndroidBrowserUserAgent() ? ANDROID_PLAY_STORE_URL : IOS_APP_STORE_URL;
+
+    if (typeof window !== 'undefined') {
+      window.location.assign(targetStoreUrl);
+      return;
+    }
+
+    Linking.openURL(targetStoreUrl).catch(() => null);
+  }, []);
+
+  useEffect(() => {
+    if (isRegistered) return;
+    setIsLinkedSalonEntryCardExpanded(!hasAnyAssociatedSalonContext);
+  }, [hasAnyAssociatedSalonContext, isRegistered]);
+
+  useEffect(() => {
+    if (!isRegistered || !hasResolvedOrIncomingSalonCode) {
+      return;
+    }
+
+    if (isFrontendRequestsRoute) {
+      if (isBookingStarted) {
+        setIsBookingStarted(false);
+      }
+      return;
+    }
+
+    if (!isBookingStarted && !showRequestsExpanded) {
+      setIsBookingStarted(true);
+    }
+  }, [
+    hasResolvedOrIncomingSalonCode,
+    isBookingStarted,
+    isFrontendRequestsRoute,
+    isRegistered,
+    showRequestsExpanded,
   ]);
 
   useEffect(() => {
@@ -2653,7 +3752,9 @@ export default function ClienteFrontendScreen() {
         setFrontendLanguage(resolveStoredAppLanguage(savedLanguage));
         setFrontendBiometricEnabled(biometricEnabledSaved === 'true');
         const normalizedSavedSalonCode = normalizeSalonCode(savedSalonCode ?? '');
-        const preferredSalonCode = normalizeSalonCode(initialSalonCodeParam ?? normalizedSavedSalonCode);
+        const preferredSalonCode = normalizeSalonCode(
+          resolvedInitialSalonCodeParam ?? normalizedSavedSalonCode
+        );
         const scopedSavedProfile = preferredSalonCode
           ? await AsyncStorage.getItem(buildFrontendProfileKeyForSalon(preferredSalonCode))
           : null;
@@ -2662,7 +3763,7 @@ export default function ClienteFrontendScreen() {
         const saved = scopedSavedProfile ?? (canUseLegacyProfile ? legacySavedProfile : null);
         setHasSavedProfileForSelectedSalon(!!saved);
 
-        if (!initialSalonCodeParam && normalizedSavedSalonCode) {
+        if (!resolvedInitialSalonCodeParam && normalizedSavedSalonCode) {
           setSelectedSalonCode(normalizedSavedSalonCode);
           setSalonCodeDraft(normalizedSavedSalonCode);
         }
@@ -2672,7 +3773,7 @@ export default function ClienteFrontendScreen() {
             initialFrontendAccessMode ??
               (biometricEnabledSaved === 'true'
               ? null
-              : initialSalonCodeParam
+              : resolvedInitialSalonCodeParam
                 ? isHomeAutoLoginFlow
                   ? 'login'
                   : 'register'
@@ -2691,11 +3792,17 @@ export default function ClienteFrontendScreen() {
           });
         if (parsed.email?.trim() && parsed.telefono?.trim()) {
           if (preferredSalonCode) {
-            const shouldEnterBookingDirectly = shouldStartInBookingMode;
-            setIsRegistered(true);
-            setIsBookingStarted(shouldEnterBookingDirectly);
-            setShowRequestsExpanded(!shouldEnterBookingDirectly);
-            setAccessMode('login');
+            const canBootstrapTrustedSession =
+              shouldTrustInAppFrontendSession &&
+              normalizeEmail(parsed.email ?? '') === normalizedInitialAutoLoginEmail &&
+              limitPhoneToTenDigits(String(parsed.telefono ?? '')) === normalizedInitialAutoLoginPhone;
+
+            // Se stiamo arrivando internamente da Prenota -> Le mie prenotazioni
+            // evitiamo il mini-login bloccante e riprendiamo subito la sessione locale.
+            setIsRegistered(canBootstrapTrustedSession);
+            setIsBookingStarted(false);
+            setShowRequestsExpanded(canBootstrapTrustedSession && isFrontendRequestsRoute);
+            setAccessMode(canBootstrapTrustedSession ? null : 'login');
           } else {
             setAccessMode(initialFrontendAccessMode ?? 'login');
           }
@@ -2708,7 +3815,34 @@ export default function ClienteFrontendScreen() {
     };
 
     loadProfile();
-  }, [initialFrontendAccessMode, initialSalonCodeParam, isHomeAutoLoginFlow, shouldStartInBookingMode]);
+  }, [
+    initialFrontendAccessMode,
+    isHomeAutoLoginFlow,
+    isFrontendRequestsRoute,
+    normalizedInitialAutoLoginEmail,
+    normalizedInitialAutoLoginPhone,
+    resolvedInitialSalonCodeParam,
+    shouldTrustInAppFrontendSession,
+    shouldStartInBookingMode,
+  ]);
+
+  useEffect(() => {
+    if (
+      !shouldTrustInAppFrontendSession ||
+      !hasHydratedFrontendSession ||
+      !isRegistered ||
+      !normalizedSelectedSalonCode
+    ) {
+      return;
+    }
+
+    void refreshPublicSalonStateRef.current();
+  }, [
+    hasHydratedFrontendSession,
+    isRegistered,
+    normalizedSelectedSalonCode,
+    shouldTrustInAppFrontendSession,
+  ]);
 
   useEffect(() => {
     if (!hasHydratedFrontendSession) {
@@ -2789,19 +3923,11 @@ export default function ClienteFrontendScreen() {
         return false;
       }
 
-      if (!frontendBiometricAvailable) {
-        Alert.alert(
-          'Biometria non disponibile',
-          'Configura Face ID, impronta o codice dispositivo e riprova.'
-        );
-        return false;
-      }
-
       const authResult = await LocalAuthentication.authenticateAsync({
         promptMessage:
           frontendBiometricType === 'faceid'
             ? 'Attiva Face ID cliente'
-            : 'Attiva biometria cliente',
+            : 'Attiva accesso con impronta',
         cancelLabel: 'Annulla',
         disableDeviceFallback: false,
         fallbackLabel: 'Usa codice',
@@ -2851,8 +3977,8 @@ export default function ClienteFrontendScreen() {
         Alert.alert(
           frontendBiometricType === 'faceid'
             ? 'Attivare Face ID?'
-            : 'Attivare accesso biometrico?',
-          'Vuoi attivare l’accesso rapido su questo dispositivo? Potrai entrare con biometria oppure con il codice di sblocco del dispositivo.',
+            : 'Attivare accesso con impronta?',
+          'Vuoi attivare l’accesso rapido su questo dispositivo? Potrai entrare con Face ID o impronta, oppure con il codice di sblocco del dispositivo.',
           [
             {
               text: 'Non ora',
@@ -2876,6 +4002,289 @@ export default function ClienteFrontendScreen() {
     ]
   );
 
+  const buildStoredProfileFallback = useCallback((): FrontendProfile | null => {
+    const fallbackEmail = String(profile.email ?? '').trim().toLowerCase();
+    const fallbackPhone = limitPhoneToTenDigits(profile.telefono ?? '');
+
+    if (!fallbackEmail && !fallbackPhone) {
+      return null;
+    }
+
+    return {
+      nome: formatCustomerNamePart(profile.nome ?? ''),
+      cognome: formatCustomerNamePart(profile.cognome ?? ''),
+      email: fallbackEmail,
+      telefono: fallbackPhone,
+      instagram: profile.instagram?.trim() ?? '',
+    };
+  }, [profile]);
+
+  const buildOtherSalonSuggestion = useCallback(async () => {
+    try {
+      const savedSalonCodesRaw = await AsyncStorage.getItem(FRONTEND_SAVED_SALON_CODES_KEY);
+      if (!savedSalonCodesRaw) {
+        return '';
+      }
+
+      const parsedSalonCodes = JSON.parse(savedSalonCodesRaw) as unknown;
+      if (!Array.isArray(parsedSalonCodes)) {
+        return '';
+      }
+
+      const currentSalonCode = normalizeSalonCode(
+        selectedSalonCode || resolvedInitialSalonCodeParam || ''
+      );
+      const otherSalonCode = parsedSalonCodes
+        .map((value) => normalizeSalonCode(String(value)))
+        .find((value) => value && value !== currentSalonCode);
+
+      return otherSalonCode
+        ? ` Se vuoi, prova ad aprire il salone ${otherSalonCode}.`
+        : '';
+    } catch (error) {
+      console.log('Errore suggerimento altri saloni cliente:', error);
+      return '';
+    }
+  }, [resolvedInitialSalonCodeParam, selectedSalonCode]);
+
+  async function loginFrontendCliente(overrides?: { email?: string; telefono?: string }) {
+    setProfileSaveError('');
+    setProfileFieldErrors({});
+
+    const normalizedEmail = String(overrides?.email ?? profile.email ?? '').trim().toLowerCase();
+    const normalizedPhone = limitPhoneToTenDigits(overrides?.telefono ?? profile.telefono);
+    const fallbackSalonCode = normalizeSalonCode(
+      selectedSalonCode || resolvedInitialSalonCodeParam || ''
+    );
+
+    if (!fallbackSalonCode) {
+      setProfileSaveError('Associa prima un salone valido per completare l’accesso.');
+      return;
+    }
+
+    const nextFieldErrors: { email?: string; telefono?: string } = {};
+
+    if (!normalizedEmail) {
+      nextFieldErrors.email = 'Inserisci l’email con cui sei registrato nel salone.';
+    }
+
+    if (!normalizedPhone) {
+      nextFieldErrors.telefono = 'Inserisci il cellulare usato nella registrazione.';
+    }
+
+    if (nextFieldErrors.email || nextFieldErrors.telefono) {
+      setProfileFieldErrors(nextFieldErrors);
+      setProfile((current) => ({
+        ...current,
+        email: normalizedEmail,
+        telefono: normalizedPhone,
+      }));
+      return;
+    }
+
+    setIsSavingProfile(true);
+
+    try {
+      const latestSalonState = await hydrateFrontendSalonStateAfterLogin(fallbackSalonCode);
+      const sourceClienti = latestSalonState?.clienti ?? effectiveClienti;
+      const hasEmail = Boolean(normalizedEmail);
+      const hasPhone = Boolean(normalizedPhone);
+
+      let directCustomerLookup: Record<string, unknown> | null = null;
+
+      try {
+        const { data, error } = await supabase.rpc('find_public_customer_by_credentials', {
+          p_salon_code: fallbackSalonCode,
+          p_customer_email: normalizedEmail || null,
+          p_customer_phone: normalizedPhone || null,
+        });
+
+        if (error) {
+          throw error;
+        }
+
+        if (data && typeof data === 'object' && !Array.isArray(data)) {
+          directCustomerLookup = data as Record<string, unknown>;
+        }
+      } catch (directCustomerLookupError) {
+        console.log('Errore lookup cliente pubblico diretto:', directCustomerLookupError);
+      }
+
+      const directMatchedCustomer =
+        directCustomerLookup && typeof directCustomerLookup === 'object' && !Array.isArray(directCustomerLookup)
+          ? (directCustomerLookup as Record<string, unknown>)
+          : null;
+      const directMatchedScore = Number(directMatchedCustomer?.score ?? 0);
+      const directMatchedSameScoreCount = Number(directMatchedCustomer?.sameScoreCount ?? 0);
+
+      if (directMatchedCustomer && directMatchedScore > 0) {
+        if (directMatchedSameScoreCount > 1) {
+          setProfileSaveError(
+            'Ho trovato più profili simili. Usa i dati esatti con cui sei registrato nel salone oppure registrati di nuovo.'
+          );
+          return;
+        }
+
+        const resolvedSalonCodeFromLookup = normalizeSalonCode(
+          String(directMatchedCustomer.salonCode ?? fallbackSalonCode).trim()
+        ) || fallbackSalonCode;
+        const directMatchedName = String(directMatchedCustomer.nome ?? '').trim();
+        const directNameParts = directMatchedName.split(/\s+/).filter(Boolean);
+        const nextProfile = {
+          nome: formatCustomerNamePart(directNameParts.shift() ?? ''),
+          cognome: formatCustomerNamePart(directNameParts.join(' ')),
+          email: String(directMatchedCustomer.email ?? '').trim() || normalizedEmail,
+          telefono:
+            limitPhoneToTenDigits(String(directMatchedCustomer.telefono ?? '').trim()) ||
+            normalizedPhone,
+          instagram: String(directMatchedCustomer.instagram ?? '').trim(),
+        };
+
+        setProfile(nextProfile);
+
+        try {
+          await AsyncStorage.setItem(FRONTEND_PROFILE_KEY, JSON.stringify(nextProfile));
+          await AsyncStorage.setItem(
+            buildFrontendProfileKeyForSalon(resolvedSalonCodeFromLookup),
+            JSON.stringify(nextProfile)
+          );
+        } catch (error) {
+          console.log('Errore salvataggio accesso cliente locale:', error);
+        }
+
+        setSelectedSalonCode(resolvedSalonCodeFromLookup);
+        setSalonCodeDraft(resolvedSalonCodeFromLookup);
+        void persistFrontendBiometricSnapshot(nextProfile, resolvedSalonCodeFromLookup);
+        AsyncStorage.setItem(FRONTEND_LAST_SALON_CODE_KEY, resolvedSalonCodeFromLookup).catch((error) => {
+          console.log('Errore salvataggio ultimo salone dopo accesso:', error);
+        });
+
+        await hydrateFrontendSalonStateAfterLogin(resolvedSalonCodeFromLookup);
+
+        const shouldOpenBookingDirectly =
+          !isFrontendRequestsRoute &&
+          (shouldStartInBookingMode || !!normalizeSalonCode(resolvedSalonCodeFromLookup));
+        setHasSavedProfileForSelectedSalon(true);
+        setIsRegistered(true);
+        setIsBookingStarted(shouldOpenBookingDirectly);
+        setShowRequestsExpanded(isFrontendRequestsRoute ? true : !shouldOpenBookingDirectly);
+        void maybePromptFrontendBiometricSetup(nextProfile, fallbackSalonCode);
+        requestAnimationFrame(() => {
+          scrollRef.current?.scrollTo({ y: 0, animated: true });
+        });
+        return;
+      }
+
+      const rankedMatches = sourceClienti
+        .map((item) => {
+          const sameEmail = hasEmail && (item.email ?? '').trim().toLowerCase() === normalizedEmail;
+          const samePhone =
+            hasPhone && limitPhoneToTenDigits(item.telefono ?? '') === normalizedPhone;
+          const score = (sameEmail ? 2 : 0) + (samePhone ? 2 : 0);
+
+          return {
+            item,
+            sameEmail,
+            samePhone,
+            score,
+          };
+        })
+        .filter((entry) => entry.score > 0)
+        .sort((first, second) => second.score - first.score);
+
+      const bestMatch = rankedMatches[0] ?? null;
+      const secondBestMatch = rankedMatches[1] ?? null;
+
+      if (!bestMatch) {
+        const storedProfileFallback = buildStoredProfileFallback();
+        if (storedProfileFallback) {
+          setProfile(storedProfileFallback);
+          setSelectedSalonCode(fallbackSalonCode);
+          setSalonCodeDraft(fallbackSalonCode);
+          setHasSavedProfileForSelectedSalon(true);
+        }
+
+        const otherSalonSuggestion = await buildOtherSalonSuggestion();
+        setProfileSaveError(
+          `Credenziali errate per questo salone. Controlla email o cellulare oppure usa Registrati.${otherSalonSuggestion}`
+        );
+        return;
+      }
+
+      if (secondBestMatch && secondBestMatch.score === bestMatch.score) {
+        setProfileSaveError(
+          'Ho trovato piu profili simili. Usa i dati esatti con cui sei registrato nel salone oppure registrati di nuovo.'
+        );
+        return;
+      }
+
+      const matchedCustomer = bestMatch.item;
+
+      const sameEmail = hasEmail && (matchedCustomer.email ?? '').trim().toLowerCase() === normalizedEmail;
+      const samePhone =
+        hasPhone && limitPhoneToTenDigits(matchedCustomer.telefono ?? '') === normalizedPhone;
+
+      if (!sameEmail && !samePhone) {
+        const otherSalonSuggestion = await buildOtherSalonSuggestion();
+        setProfileSaveError(
+          `Credenziali errate per questo salone. Controlla email o cellulare oppure usa Registrati.${otherSalonSuggestion}`
+        );
+        return;
+      }
+
+      const nameParts = matchedCustomer.nome.trim().split(/\s+/).filter(Boolean);
+      const nome = formatCustomerNamePart(nameParts.shift() ?? '');
+      const cognome = formatCustomerNamePart(nameParts.join(' '));
+      const nextProfile = {
+        nome,
+        cognome,
+        email: (matchedCustomer.email ?? '').trim() || normalizedEmail,
+        telefono: limitPhoneToTenDigits(matchedCustomer.telefono ?? '') || normalizedPhone,
+        instagram: matchedCustomer.instagram?.trim() ?? '',
+      };
+
+      setProfile(nextProfile);
+
+      try {
+        await AsyncStorage.setItem(FRONTEND_PROFILE_KEY, JSON.stringify(nextProfile));
+        await AsyncStorage.setItem(
+          buildFrontendProfileKeyForSalon(fallbackSalonCode),
+          JSON.stringify(nextProfile)
+        );
+      } catch (error) {
+        console.log('Errore salvataggio accesso cliente locale:', error);
+      }
+
+      setSelectedSalonCode(fallbackSalonCode);
+      setSalonCodeDraft(fallbackSalonCode);
+      void persistFrontendBiometricSnapshot(nextProfile, fallbackSalonCode);
+      AsyncStorage.setItem(FRONTEND_LAST_SALON_CODE_KEY, fallbackSalonCode).catch((error) => {
+        console.log('Errore salvataggio ultimo salone dopo accesso:', error);
+      });
+
+      await hydrateFrontendSalonStateAfterLogin(fallbackSalonCode);
+
+      const shouldOpenBookingDirectly =
+        !isFrontendRequestsRoute &&
+        (shouldStartInBookingMode || !!normalizeSalonCode(fallbackSalonCode));
+      setHasSavedProfileForSelectedSalon(true);
+      setIsRegistered(true);
+      setIsBookingStarted(shouldOpenBookingDirectly);
+      setShowRequestsExpanded(isFrontendRequestsRoute ? true : !shouldOpenBookingDirectly);
+      void maybePromptFrontendBiometricSetup(nextProfile, fallbackSalonCode);
+      requestAnimationFrame(() => {
+        scrollRef.current?.scrollTo({ y: 0, animated: true });
+      });
+    } catch (error) {
+      console.log('Errore accesso cliente frontend:', error);
+      setProfileSaveError(
+        'Non riesco a completare l’accesso in questo momento. Riprova tra un attimo.'
+      );
+    } finally {
+      setIsSavingProfile(false);
+    }
+  }
+
   const unlockFrontendClienteWithBiometric = useCallback(async () => {
     if (frontendBiometricBusy) {
       return;
@@ -2883,16 +4292,10 @@ export default function ClienteFrontendScreen() {
 
     if (!frontendBiometricEnabled) {
       Alert.alert(
-        'Biometria non attiva',
-        'Attiva prima Face ID o biometria dalle impostazioni cliente.'
-      );
-      return;
-    }
-
-    if (!frontendBiometricAvailable) {
-      Alert.alert(
-        'Biometria non disponibile',
-        'Configura Face ID o impronta nelle impostazioni del dispositivo e riprova.'
+        frontendBiometricType === 'faceid' ? 'Face ID non attivo' : 'Accesso con impronta non attivo',
+        frontendBiometricType === 'faceid'
+          ? 'Attiva prima Face ID dalle impostazioni cliente.'
+          : 'Attiva prima l’accesso con impronta dalle impostazioni cliente.'
       );
       return;
     }
@@ -2904,7 +4307,7 @@ export default function ClienteFrontendScreen() {
         promptMessage:
           frontendBiometricType === 'faceid'
             ? 'Accedi con Face ID'
-            : 'Accedi con biometria',
+            : 'Accedi con impronta',
         cancelLabel: 'Annulla',
         disableDeviceFallback: false,
         fallbackLabel: 'Usa codice',
@@ -2914,10 +4317,10 @@ export default function ClienteFrontendScreen() {
         return;
       }
 
-      const fallbackSalonCode = normalizeSalonCode(selectedSalonCode || initialSalonCodeParam || '');
-      const [savedSalonCode] = await Promise.all([
-        AsyncStorage.getItem(FRONTEND_BIOMETRIC_SALON_CODE_KEY),
-      ]);
+      const fallbackSalonCode = normalizeSalonCode(
+        selectedSalonCode || resolvedInitialSalonCodeParam || ''
+      );
+      const savedSalonCode = await AsyncStorage.getItem(FRONTEND_BIOMETRIC_SALON_CODE_KEY);
       const effectiveBiometricSalonCode = normalizeSalonCode(savedSalonCode ?? fallbackSalonCode);
       const savedProfile =
         (effectiveBiometricSalonCode
@@ -2935,7 +4338,7 @@ export default function ClienteFrontendScreen() {
       }
 
       const parsed = JSON.parse(savedProfile) as FrontendProfile;
-      const normalizedSalon = normalizeSalonCode(savedSalonCode ?? '');
+      const normalizedSalon = effectiveBiometricSalonCode;
 
       if (
         !parsed.nome?.trim() ||
@@ -2969,29 +4372,32 @@ export default function ClienteFrontendScreen() {
         [FRONTEND_LAST_SALON_CODE_KEY, normalizedSalon],
       ]);
 
-      setAccessMode('login');
-      setIsRegistered(true);
-      setHasSavedProfileForSelectedSalon(true);
-      const shouldOpenBookingDirectly = shouldStartInBookingMode;
-      setIsBookingStarted(shouldOpenBookingDirectly);
-      setShowRequestsExpanded(!shouldOpenBookingDirectly);
-
-      requestAnimationFrame(() => {
-        scrollRef.current?.scrollTo({ y: 0, animated: true });
+      autoCredentialLoginAttemptedRef.current = false;
+      router.replace({
+        pathname: '/cliente',
+        params: {
+          salon: normalizedSalon,
+          mode: 'booking',
+          autologin: '1',
+          biometric: '1',
+          email: String(parsed.email ?? '').trim().toLowerCase(),
+          phone: limitPhoneToTenDigits(parsed.telefono ?? ''),
+        },
       });
+      return;
     } catch (error) {
       console.log('Errore accesso biometrico cliente:', error);
-      Alert.alert('Accesso biometrico', 'Non sono riuscito a completare l’accesso biometrico.');
+      Alert.alert('Accesso Face ID', 'Non sono riuscito a completare l’accesso con Face ID.');
     } finally {
       setFrontendBiometricBusy(false);
     }
   }, [
-    frontendBiometricAvailable,
     frontendBiometricBusy,
     frontendBiometricEnabled,
     frontendBiometricType,
-    initialSalonCodeParam,
-    shouldStartInBookingMode,
+    resolvedInitialSalonCodeParam,
+    router,
+    selectedSalonCode,
   ]);
 
   useEffect(() => {
@@ -3000,9 +4406,11 @@ export default function ClienteFrontendScreen() {
     }
 
     if (
-      shouldStartInBookingMode &&
+      !isFrontendRequestsRoute &&
+      shouldOpenLinkedSalonBookingDirectly &&
       (hasSavedProfileForSelectedSalon || Boolean(normalizedSelectedSalonCode)) &&
-      !isBookingStarted
+      !isBookingStarted &&
+      !showRequestsExpanded
     ) {
       setIsBookingStarted(true);
       setShowRequestsExpanded(false);
@@ -3010,10 +4418,12 @@ export default function ClienteFrontendScreen() {
   }, [
     hasHydratedFrontendSession,
     hasSavedProfileForSelectedSalon,
+    isFrontendRequestsRoute,
     isBookingStarted,
     isRegistered,
     normalizedSelectedSalonCode,
-    shouldStartInBookingMode,
+    showRequestsExpanded,
+    shouldOpenLinkedSalonBookingDirectly,
   ]);
 
   useEffect(() => {
@@ -3039,11 +4449,11 @@ export default function ClienteFrontendScreen() {
   }, [hasResolvedOrIncomingSalonCode, hasSavedProfileForSelectedSalon, isHomeAutoLoginFlow, isRegistered]);
 
   useEffect(() => {
-    if (shouldStartInBookingMode && isRegistered) {
+    if (!isFrontendRequestsRoute && shouldOpenLinkedSalonBookingDirectly && isRegistered && !showRequestsExpanded) {
       setShowRequestsExpanded(false);
       setIsBookingStarted(true);
     }
-  }, [isRegistered, shouldStartInBookingMode]);
+  }, [isFrontendRequestsRoute, isRegistered, showRequestsExpanded, shouldOpenLinkedSalonBookingDirectly]);
 
   useEffect(() => {
     if (
@@ -3051,7 +4461,10 @@ export default function ClienteFrontendScreen() {
       initialBiometricParam !== '1' ||
       !hasHydratedFrontendSession ||
       isRegistered ||
-      !frontendBiometricEnabled
+      !frontendBiometricEnabled ||
+      (initialAutoLoginParam === '1' &&
+        Boolean(normalizedInitialAutoLoginEmail) &&
+        Boolean(normalizedInitialAutoLoginPhone))
     ) {
       return;
     }
@@ -3061,8 +4474,11 @@ export default function ClienteFrontendScreen() {
   }, [
     frontendBiometricEnabled,
     hasHydratedFrontendSession,
+    initialAutoLoginParam,
     initialBiometricParam,
     isRegistered,
+    normalizedInitialAutoLoginEmail,
+    normalizedInitialAutoLoginPhone,
     unlockFrontendClienteWithBiometric,
   ]);
 
@@ -3084,8 +4500,8 @@ export default function ClienteFrontendScreen() {
           fetchClientPortalAvailabilitySettings(normalizedSelectedSalonCode).catch(() => null),
         ]);
 
-        if (lightweightSettings?.availabilitySettings) {
-          applyPublicAvailabilitySettings(lightweightSettings.availabilitySettings);
+        if (lightweightSettings) {
+          applyPublicAvailabilitySettings(lightweightSettings);
         }
 
         if (resolved) {
@@ -3171,20 +4587,26 @@ export default function ClienteFrontendScreen() {
             publicSalonStateSignatureRef.current = nextSignature;
             applyMergedPublicSalonState(mergedResolved);
           }
+          await AsyncStorage.setItem(
+            buildPublicSalonStateCacheKey(normalizedSelectedSalonCode),
+            JSON.stringify(mergedResolved)
+          ).catch(() => undefined);
           setSalonLoadError('');
           return mergedResolved;
         }
 
         if (lightweightSettings) {
-          applyPublicAvailabilitySettings(lightweightSettings.availabilitySettings);
+          applyPublicAvailabilitySettings(lightweightSettings);
           setSalonLoadError('');
           return publicSalonState;
         }
 
         return resolved;
       } catch (error) {
+      if (!isSchemaCacheTransientError(error)) {
         console.log('Errore refresh stato salone pubblico:', error);
-        return publicSalonState;
+      }
+      return publicSalonState;
       } finally {
         publicSalonRefreshInFlightRef.current = false;
         publicSalonRefreshPromiseRef.current = null;
@@ -3200,6 +4622,74 @@ export default function ClienteFrontendScreen() {
     applyPublicAvailabilitySettings,
     resolveSalonByCode,
   ]);
+
+  const hydratePublicSalonStateForCode = useCallback(
+    async (salonCode: string) => {
+      const normalizedCode = normalizeSalonCode(salonCode);
+
+      if (!normalizedCode) {
+        return null;
+      }
+
+      const resolved = await resolveSalonByCode(normalizedCode);
+
+      if (resolved) {
+        applyPublicAvailabilitySettings(resolved.availabilitySettings);
+        applyMergedPublicSalonState(resolved);
+        setSalonLoadError('');
+      }
+
+      return resolved;
+    },
+    [applyMergedPublicSalonState, applyPublicAvailabilitySettings, resolveSalonByCode]
+  );
+
+  const ensurePublicSalonStateReady = useCallback(
+    async (salonCode: string) => {
+      const normalizedCode = normalizeSalonCode(salonCode);
+
+      if (!normalizedCode) {
+        return null;
+      }
+
+      const hydrated = await hydratePublicSalonStateForCode(normalizedCode);
+      if (hydrated?.workspace && hydrated.servizi.length > 0) {
+        return hydrated;
+      }
+
+      const refreshed = await resolveSalonByCode(normalizedCode);
+      if (refreshed) {
+        applyPublicAvailabilitySettings(refreshed.availabilitySettings);
+        applyMergedPublicSalonState(refreshed);
+      }
+
+      return refreshed ?? hydrated;
+    },
+    [
+      applyMergedPublicSalonState,
+      applyPublicAvailabilitySettings,
+      hydratePublicSalonStateForCode,
+      resolveSalonByCode,
+    ]
+  );
+
+  const hydrateFrontendSalonStateAfterLogin = useCallback(
+    async (salonCode: string) => {
+      const firstResolved = await ensurePublicSalonStateReady(salonCode);
+      const shouldRetry =
+        !firstResolved?.workspace?.salonName?.trim() ||
+        firstResolved.richiestePrenotazione.length === 0;
+
+      if (!shouldRetry) {
+        return firstResolved;
+      }
+
+      await wait(320);
+      const secondResolved = await ensurePublicSalonStateReady(salonCode);
+      return secondResolved ?? firstResolved;
+    },
+    [ensurePublicSalonStateReady]
+  );
 
   useEffect(() => {
     refreshPublicSalonStateRef.current = refreshPublicSalonState;
@@ -3238,22 +4728,35 @@ export default function ClienteFrontendScreen() {
       return null;
     }
 
-    const lightweightSettings = await fetchClientPortalAvailabilitySettings(
-      normalizedSelectedSalonCode
-    ).catch((error) => {
-      console.log('Errore refresh availability settings pubblico:', error);
-      return null;
-    });
-
-    if (lightweightSettings) {
-      applyPublicAvailabilitySettings(lightweightSettings.availabilitySettings);
+    if (publicAvailabilitySettingsRefreshInFlightRef.current) {
+      return publicAvailabilitySettings;
     }
 
-    return lightweightSettings;
+    publicAvailabilitySettingsRefreshInFlightRef.current = true;
+
+    try {
+      const lightweightSettings = await fetchClientPortalAvailabilitySettings(
+        normalizedSelectedSalonCode
+      ).catch((error) => {
+        if (!isSchemaCacheTransientError(error)) {
+          console.log('Errore refresh availability settings pubblico:', error);
+        }
+        return null;
+      });
+
+      if (lightweightSettings) {
+        applyPublicAvailabilitySettings(lightweightSettings);
+      }
+
+      return lightweightSettings;
+    } finally {
+      publicAvailabilitySettingsRefreshInFlightRef.current = false;
+    }
   }, [
     applyPublicAvailabilitySettings,
     isCurrentWorkspaceSalon,
     normalizedSelectedSalonCode,
+    publicAvailabilitySettings,
   ]);
 
   const refreshPublicSalonAvailability = useCallback(async () => {
@@ -3262,16 +4765,28 @@ export default function ClienteFrontendScreen() {
       return { resolved: null, occupancy: [] as PublicBookingOccupancyItem[] };
     }
 
+    if (publicAvailabilityRefreshInFlightRef.current) {
+      const fallbackOccupancy = derivePublicBookingOccupancyFromSnapshot(publicSalonState, data);
+      return {
+        resolved: publicSalonState,
+        occupancy: fallbackOccupancy,
+      };
+    }
+
+    publicAvailabilityRefreshInFlightRef.current = true;
+
     try {
       const lightweightSettings = await fetchClientPortalAvailabilitySettings(
         normalizedSelectedSalonCode
       ).catch((error) => {
-        console.log('Errore refresh availability settings prenota pubblico:', error);
+        if (!isSchemaCacheTransientError(error)) {
+          console.log('Errore refresh availability settings prenota pubblico:', error);
+        }
         return null;
       });
 
       if (lightweightSettings) {
-        applyPublicAvailabilitySettings(lightweightSettings.availabilitySettings);
+        applyPublicAvailabilitySettings(lightweightSettings);
       }
 
       const resolved = await refreshPublicSalonState();
@@ -3287,6 +4802,8 @@ export default function ClienteFrontendScreen() {
         resolved: publicSalonState,
         occupancy: fallbackOccupancy,
       };
+    } finally {
+      publicAvailabilityRefreshInFlightRef.current = false;
     }
   }, [
     data,
@@ -3312,20 +4829,45 @@ export default function ClienteFrontendScreen() {
 
   useEffect(() => {
     if (isCurrentWorkspaceSalon || !normalizedSelectedSalonCode) {
+      return;
+    }
+
+    void refreshPublicSalonAvailability();
+  }, [isCurrentWorkspaceSalon, normalizedSelectedSalonCode, refreshPublicSalonAvailability]);
+
+  useEffect(() => {
+    if (isCurrentWorkspaceSalon || !normalizedSelectedSalonCode) {
       return undefined;
     }
 
+    const refreshIntervalMs =
+      Platform.OS === 'web'
+        ? isBookingStarted && !isFrontendRequestsRoute
+          ? WEB_FRONTEND_BOOKING_LIVE_REFRESH_MS
+          : WEB_FRONTEND_PASSIVE_REFRESH_MS
+        : isBookingStarted && !isFrontendRequestsRoute
+          ? FRONTEND_BOOKING_LIVE_REFRESH_MS
+          : FRONTEND_PASSIVE_REFRESH_MS;
+
     const interval = setInterval(() => {
+      if (isBookingStarted && !isFrontendRequestsRoute) {
+        void refreshPublicSalonAvailability();
+        return;
+      }
+
       void refreshPublicAvailabilitySettingsOnly();
-    }, 4000);
+    }, refreshIntervalMs);
 
     return () => {
       clearInterval(interval);
     };
   }, [
+    isBookingStarted,
     isCurrentWorkspaceSalon,
+    isFrontendRequestsRoute,
     normalizedSelectedSalonCode,
     refreshPublicAvailabilitySettingsOnly,
+    refreshPublicSalonAvailability,
   ]);
 
   const syncClientPushRegistration = useCallback(async () => {
@@ -3367,7 +4909,7 @@ export default function ClienteFrontendScreen() {
     const result = await registerPushNotifications({
       workspaceId,
       ownerEmail,
-      audience: 'auto',
+      audience: 'public',
       recipientKind: 'client',
       customerEmail,
       customerPhone,
@@ -3410,8 +4952,29 @@ export default function ClienteFrontendScreen() {
         return;
       }
 
-      setIsLoadingSalon(true);
       setAutoLoginStalled(false);
+      let restoredFromCache = false;
+      const cacheKey = buildPublicSalonStateCacheKey(normalizedSelectedSalonCode);
+
+      try {
+        const cachedSalonState = await AsyncStorage.getItem(cacheKey);
+        if (cachedSalonState) {
+          const parsed = JSON.parse(cachedSalonState) as PublicSalonState;
+          if (parsed?.workspace?.salonCode) {
+            applyPublicAvailabilitySettings(parsed.availabilitySettings);
+            applyMergedPublicSalonState(parsed);
+            setSalonLoadError('');
+            restoredFromCache = true;
+          }
+        }
+      } catch (error) {
+        console.log('Errore ripristino cache salone pubblico:', error);
+      }
+
+      if (!restoredFromCache) {
+        setIsLoadingSalon(true);
+      }
+
       let resolved: PublicSalonState | null = null;
 
       try {
@@ -3424,19 +4987,23 @@ export default function ClienteFrontendScreen() {
       } catch (error) {
         console.log('Errore caricamento iniziale salone pubblico:', error);
       } finally {
-        setIsLoadingSalon(false);
+        if (!restoredFromCache) {
+          setIsLoadingSalon(false);
+        }
       }
 
       if (!resolved) {
-        setPublicSalonState(null);
-        setPublicAvailabilitySettings(null);
-        setBackendDayOccupancy([]);
-        if (isHomeAutoLoginFlow) {
-          setAutoLoginStalled(true);
+        if (!restoredFromCache) {
+          setPublicSalonState(null);
+          setPublicAvailabilitySettings(null);
+          setBackendDayOccupancy([]);
+          if (isHomeAutoLoginFlow) {
+            setAutoLoginStalled(true);
+          }
+          setSalonLoadError(
+            'Questo codice salone non è stato trovato. Controlla il codice oppure usa il link del tuo salone.'
+          );
         }
-        setSalonLoadError(
-          'Questo codice salone non è stato trovato. Controlla il codice oppure usa il link del tuo salone.'
-        );
         return;
       }
 
@@ -3450,7 +5017,7 @@ export default function ClienteFrontendScreen() {
   useEffect(() => {
     if (
       !isRegistered ||
-      !isBookingStarted ||
+      !isLinkedSalonBookingFlowActive ||
       isCurrentWorkspaceSalon ||
       !normalizedSelectedSalonCode ||
       isLoadingSalon ||
@@ -3496,7 +5063,7 @@ export default function ClienteFrontendScreen() {
   }, [
     applyMergedPublicSalonState,
     effectiveServizi.length,
-    isBookingStarted,
+    isLinkedSalonBookingFlowActive,
     isCurrentWorkspaceSalon,
     isLoadingSalon,
     isRegistered,
@@ -3790,17 +5357,9 @@ export default function ClienteFrontendScreen() {
   );
   const currentCustomerIdentityNames = useMemo(() => {
     const names = new Set<string>();
-    const normalizedFirstName = profile.nome.trim().toLowerCase();
-    const normalizedLastName = profile.cognome.trim().toLowerCase();
 
     if (clienteNomeCompleto) {
       names.add(clienteNomeCompleto);
-    }
-    if (normalizedFirstName) {
-      names.add(normalizedFirstName);
-    }
-    if (normalizedLastName) {
-      names.add(normalizedLastName);
     }
 
     const normalizedEmail = profile.email.trim().toLowerCase();
@@ -3818,7 +5377,9 @@ export default function ClienteFrontendScreen() {
         return;
       }
 
-      const normalizedName = item.nome.trim().toLowerCase();
+      const normalizedName = String(item.nome ?? '')
+        .trim()
+        .toLowerCase();
       if (normalizedName) {
         names.add(normalizedName);
       }
@@ -3992,17 +5553,19 @@ export default function ClienteFrontendScreen() {
 
   const richiestaInConflitto =
     data && ora && servizio
-      ? hasFrontendSlotSelectionConflict({
-          dateValue: data,
-          startTime: ora,
-          serviceName: servizio,
-          selectedOperatorId: operatoreId || null,
-          selectedOperatorName: operatoreNome || null,
-          operators: effectiveOperatori,
-          appointments: effectiveBlockingAppointments,
-          services: effectiveServizi,
-          settings: effectiveAvailabilitySettings,
-        })
+      ? typeof livePublicSlotAvailabilityMap?.[ora] === 'boolean'
+        ? !livePublicSlotAvailabilityMap[ora]
+        : hasFrontendSlotSelectionConflict({
+            dateValue: data,
+            startTime: ora,
+            serviceName: servizio,
+            selectedOperatorId: operatoreId || null,
+            selectedOperatorName: operatoreNome || null,
+            operators: effectiveOperatori,
+            appointments: effectiveBlockingAppointments,
+            services: effectiveServizi,
+            settings: effectiveAvailabilitySettings,
+          })
       : null;
   const exactSlotRequestAlreadyPresent = useMemo(
     () =>
@@ -4012,11 +5575,13 @@ export default function ClienteFrontendScreen() {
         servizio.trim() &&
         profile.email.trim() &&
         profile.telefono.trim() &&
+        livePublicSlotAvailabilityMap?.[ora] !== true &&
         effectiveRichieste.some(
           (item) => {
             if (
               item.data !== data ||
               item.ora !== ora ||
+              normalizeIdentityText(item.servizio) !== normalizeIdentityText(servizio) ||
               !(item.stato === 'In attesa' || item.stato === 'Accettata') ||
               normalizeIdentityText(item.email) !== normalizeIdentityText(profile.email) ||
               item.telefono.trim() !== profile.telefono.trim()
@@ -4031,6 +5596,7 @@ export default function ClienteFrontendScreen() {
     [
       data,
       effectiveRichieste,
+      livePublicSlotAvailabilityMap,
       ora,
       profile.email,
       profile.telefono,
@@ -4085,9 +5651,19 @@ export default function ClienteFrontendScreen() {
     () =>
       new Set(
         displayTimeSlots.filter((slotTime) => {
+          const liveAvailability = livePublicSlotAvailabilityMap?.[slotTime];
+
           if (!servizio) return false;
           if (getDateAvailabilityInfo(effectiveAvailabilitySettings, data).closed) {
             return false;
+          }
+
+          if (liveAvailability === true) {
+            return false;
+          }
+
+          if (liveAvailability === false) {
+            return true;
           }
 
           return hasFrontendSlotSelectionConflict({
@@ -4111,6 +5687,7 @@ export default function ClienteFrontendScreen() {
       effectiveOperatori,
       effectiveServizi,
       hasFrontendSlotSelectionConflict,
+      livePublicSlotAvailabilityMap,
       operatoreId,
       servizio,
     ]
@@ -4303,6 +5880,8 @@ export default function ClienteFrontendScreen() {
     () =>
       new Set(
         displayTimeSlots.filter((slotTime) => {
+          const liveAvailability = livePublicSlotAvailabilityMap?.[slotTime];
+
           if (clienteInibito) {
             return true;
           }
@@ -4358,6 +5937,14 @@ export default function ClienteFrontendScreen() {
             );
           }
 
+          if (liveAvailability === true) {
+            return false;
+          }
+
+          if (liveAvailability === false) {
+            return true;
+          }
+
           return (
             getFrontendSlotAvailableCount({
               dateValue: data,
@@ -4383,6 +5970,7 @@ export default function ClienteFrontendScreen() {
       effectiveOperatori,
       effectiveServizi,
       getFrontendSlotAvailableCount,
+      livePublicSlotAvailabilityMap,
       operatoreId,
       servizio,
     ]
@@ -4448,7 +6036,10 @@ export default function ClienteFrontendScreen() {
     profile.cognome.trim() !== '' &&
     profile.email.trim() !== '' &&
     profile.telefono.trim() !== '';
-  const canRegisterClient = canSaveProfile && !!effectiveWorkspace && !isLoadingSalon;
+  const canRegisterClient =
+    canSaveProfile &&
+    !!(effectiveWorkspace?.salonCode || normalizedSelectedSalonCode) &&
+    !isLoadingSalon;
 
   const canSendRequest =
     !!effectiveWorkspace &&
@@ -4465,6 +6056,82 @@ export default function ClienteFrontendScreen() {
     !overlapsLunchBreakSelection &&
     !richiestaInConflitto &&
     !exactSlotRequestAlreadyPresent;
+  const bookingSubmitBlockedReason = useMemo(() => {
+    if (bookingRequestSubmitting) {
+      return '';
+    }
+
+    if (!isRegistered) {
+      return 'Prima registra il tuo profilo cliente.';
+    }
+
+    if (!effectiveWorkspace) {
+      return 'Apri il link corretto del salone prima di inviare la prenotazione.';
+    }
+
+    if (isLoadingSalon) {
+      return 'Sto ancora caricando i dati del salone.';
+    }
+
+    if (!servizio.trim()) {
+      return 'Seleziona un servizio.';
+    }
+
+    if (serviceUsesOperatorScheduling && operatorSelectionRequired && !operatoreId.trim()) {
+      return 'Seleziona un operatore.';
+    }
+
+    if (!ora.trim()) {
+      return 'Seleziona un orario disponibile.';
+    }
+
+    if (selectedDateAvailability.closed) {
+      return 'Il giorno selezionato non e disponibile.';
+    }
+
+    if (clienteInibito) {
+      return 'Questo profilo non puo prenotare online in questo momento.';
+    }
+
+    if (isSelectedTimeWithinMinimumNotice) {
+      return `Per oggi servono almeno ${DEFAULT_MINIMUM_NOTICE_MINUTES} minuti di preavviso.`;
+    }
+
+    if (exceedsClosingTimeSelection) {
+      return 'Questo orario finisce oltre la chiusura del salone.';
+    }
+
+    if (overlapsLunchBreakSelection) {
+      return 'Questo orario si sovrappone alla pausa pranzo del salone.';
+    }
+
+    if (exactSlotRequestAlreadyPresent) {
+      return 'Esiste gia una tua richiesta attiva per questo stesso orario.';
+    }
+
+    if (richiestaInConflitto) {
+      return 'L orario scelto non e piu disponibile.';
+    }
+
+    return '';
+  }, [
+    bookingRequestSubmitting,
+    clienteInibito,
+    effectiveWorkspace,
+    exactSlotRequestAlreadyPresent,
+    exceedsClosingTimeSelection,
+    isLoadingSalon,
+    isRegistered,
+    isSelectedTimeWithinMinimumNotice,
+    operatoreId,
+    operatorSelectionRequired,
+    ora,
+    overlapsLunchBreakSelection,
+    richiestaInConflitto,
+    selectedDateAvailability.closed,
+    serviceUsesOperatorScheduling,
+    servizio,
+  ]);
   const canChooseDay = !!effectiveWorkspace && servizio.trim() !== '';
   const canChooseOperator = canChooseDay && !selectedDateAvailability.closed;
   const canChooseTime =
@@ -4476,6 +6143,10 @@ export default function ClienteFrontendScreen() {
     isBookingStarted &&
     !isCurrentWorkspaceSalon &&
     (isLoadingSalon || !publicSalonState);
+  const shouldShowPublicSalonLoadingCard =
+    shouldRenderBookingExperience &&
+    frontendBookingNeedsSalonLoad &&
+    !salonLoadError;
   const isOperatorStepHighlighted =
     serviceUsesOperatorScheduling && operatorSelectionRequired && canChooseOperator && !operatoreId.trim();
   const guidedSlotsActive =
@@ -4490,10 +6161,20 @@ export default function ClienteFrontendScreen() {
     () =>
       new Set(
         displayTimeSlots.filter((slotTime) => {
+          const liveAvailability = livePublicSlotAvailabilityMap?.[slotTime];
+
           if (!servizio.trim()) {
             return appuntamentiDelGiorno.some((item) =>
               doesAppointmentOccupySlot(item, slotTime, effectiveServizi)
             );
+          }
+
+          if (liveAvailability === true) {
+            return false;
+          }
+
+          if (liveAvailability === false) {
+            return true;
           }
 
           return hasFrontendSlotSelectionConflict({
@@ -4517,6 +6198,7 @@ export default function ClienteFrontendScreen() {
       effectiveOperatori,
       effectiveServizi,
       hasFrontendSlotSelectionConflict,
+      livePublicSlotAvailabilityMap,
       operatoreId,
       servizio,
     ]
@@ -4526,10 +6208,16 @@ export default function ClienteFrontendScreen() {
     () =>
       new Set(
         displayTimeSlots.filter((slotTime) => {
+          const liveAvailability = livePublicSlotAvailabilityMap?.[slotTime];
+
           if (!servizio.trim()) {
             return appuntamentiDelGiorno.some((item) =>
               doesAppointmentOccupySlot(item, slotTime, effectiveServizi)
             );
+          }
+
+          if (liveAvailability === true) {
+            return false;
           }
 
           return effectiveBlockingAppointments.some((item) => {
@@ -4576,6 +6264,7 @@ export default function ClienteFrontendScreen() {
       doesAppointmentOccupySlot,
       effectiveBlockingAppointments,
       effectiveServizi,
+      livePublicSlotAvailabilityMap,
       operatoreId,
       operatoreNome,
       serviceUsesOperatorScheduling,
@@ -4741,12 +6430,15 @@ export default function ClienteFrontendScreen() {
         : scoredSlotsSorted;
 
     if (candidateSlots.length <= MAX_GUIDED_SLOT_RECOMMENDATIONS) {
-      return candidateSlots.map((item) => item.slotTime);
+      return candidateSlots
+        .map((item) => item.slotTime)
+        .sort((first, second) => timeToMinutes(first) - timeToMinutes(second));
     }
 
     return candidateSlots
       .slice(0, MAX_GUIDED_SLOT_RECOMMENDATIONS)
-      .map((item) => item.slotTime);
+      .map((item) => item.slotTime)
+      .sort((first, second) => timeToMinutes(first) - timeToMinutes(second));
   }, [
     bookableFrontendTimeSlots,
     data,
@@ -4780,10 +6472,7 @@ export default function ClienteFrontendScreen() {
       return [];
     }
 
-    const recommendedSlotSet = new Set(guidedRecommendedTimeSlots);
-    const remainingSlots = displayTimeSlots.filter((slotTime) => !recommendedSlotSet.has(slotTime));
-
-    return remainingSlots;
+    return displayTimeSlots;
   }, [
     displayTimeSlots,
     guidedRecommendedTimeSlots,
@@ -4953,7 +6642,7 @@ export default function ClienteFrontendScreen() {
     }
 
     try {
-      const { data: waitlistRows, error } = await supabase.rpc('get_public_slot_waitlist_entries', {
+      const { data: waitlistRows, error } = await getPublicSlotWaitlistEntriesCompat({
         p_salon_code: effectiveWorkspace.salonCode,
         p_customer_email: profile.email.trim().toLowerCase(),
         p_customer_phone: profile.telefono.trim(),
@@ -5095,6 +6784,26 @@ export default function ClienteFrontendScreen() {
     },
     [loadSavedWaitlistAlerts, loadWaitlistEntries]
   );
+  const refreshFrontendWaitlistState = useCallback(() => {
+    if (!effectiveWorkspace || !isRegistered) {
+      return;
+    }
+
+    const remainingHoldMs = Math.max(0, waitlistRefreshHoldUntilRef.current - Date.now());
+    if (remainingHoldMs > 0) {
+      scheduleSettledWaitlistRefresh(Math.max(remainingHoldMs, 180));
+      return;
+    }
+
+    void loadWaitlistEntries();
+    void loadSavedWaitlistAlerts();
+  }, [
+    effectiveWorkspace,
+    isRegistered,
+    loadSavedWaitlistAlerts,
+    loadWaitlistEntries,
+    scheduleSettledWaitlistRefresh,
+  ]);
 
   useEffect(() => {
     return () => {
@@ -5185,7 +6894,7 @@ export default function ClienteFrontendScreen() {
 
         for (const slotTime of pendingSlotTimes) {
           const waitlistKey = buildWaitlistKey(slotTime);
-          const { data: waitlistResult, error } = await supabase.rpc('join_public_slot_waitlist', {
+          const { data: waitlistResult, error } = await joinPublicSlotWaitlistCompat({
             p_salon_code: effectiveWorkspace.salonCode,
             p_requested_service_name: servizio,
             p_requested_duration_minutes: getServiceDuration(servizio, effectiveServizi),
@@ -5448,9 +7157,8 @@ export default function ClienteFrontendScreen() {
           current.filter((item) => !alertIds.includes(item.id))
         );
 
-        const { data: refreshedWaitlistRows, error: refreshedWaitlistError } = await supabase.rpc(
-          'get_public_slot_waitlist_entries',
-          {
+        const { data: refreshedWaitlistRows, error: refreshedWaitlistError } =
+          await getPublicSlotWaitlistEntriesCompat({
             p_salon_code: effectiveWorkspace.salonCode,
             p_customer_email: profile.email.trim().toLowerCase(),
             p_customer_phone: profile.telefono.trim(),
@@ -5458,8 +7166,7 @@ export default function ClienteFrontendScreen() {
             p_requested_service_name: servizio.trim() || null,
             p_requested_operator_id: operatoreId.trim() || null,
             p_requested_operator_name: operatoreNome.trim() || null,
-          }
-        );
+          });
 
         if (!refreshedWaitlistError) {
           const nextKeys = new Set<string>();
@@ -5575,56 +7282,6 @@ export default function ClienteFrontendScreen() {
     [currentCustomerIdentityNames]
   );
 
-  const slotHasVisibleAppointmentByOtherCustomer = useCallback(
-    (slotTime: string) =>
-      appuntamentiRealiDelGiorno.some((item) => {
-        if (!doesAppointmentOccupySlot(item, slotTime, effectiveServizi)) {
-          return false;
-        }
-
-        if (isBlockingAppointmentOwnedByCurrentCustomer(item)) {
-          return false;
-        }
-
-        if (!serviceUsesOperatorScheduling) {
-          return doesExistingFrontendBookingBlockSelectedService({
-            selectedServiceName: servizio,
-            existingServiceName: item.servizio,
-            existingMachineryIds: item.macchinarioIds,
-            services: effectiveServizi,
-          });
-        }
-
-        const { operatorId: existingOperatorId, operatorName: existingOperatorName } =
-          normalizeFrontendOperatorIdentity({
-            operatorId: item.operatoreId,
-            operatorName: item.operatoreNome,
-          });
-
-        if (!existingOperatorId && !existingOperatorName) {
-          return false;
-        }
-
-        return matchesOperatorIdentity({
-          appointmentOperatorId: existingOperatorId,
-          appointmentOperatorName: existingOperatorName,
-          selectedOperatorId: operatoreId || null,
-          selectedOperatorName: operatoreNome || null,
-        });
-      }),
-    [
-      appuntamentiRealiDelGiorno,
-      doesAppointmentOccupySlot,
-      doesExistingFrontendBookingBlockSelectedService,
-      effectiveServizi,
-      isBlockingAppointmentOwnedByCurrentCustomer,
-      operatoreId,
-      operatoreNome,
-      serviceUsesOperatorScheduling,
-      servizio,
-    ]
-  );
-
   const slotHasDirectBlockingAppointmentByOtherCustomer = useCallback(
     (slotTime: string) =>
       effectiveBlockingAppointments.some((item) => {
@@ -5718,7 +7375,7 @@ export default function ClienteFrontendScreen() {
           return false;
         }
 
-        return slotHasVisibleAppointmentByOtherCustomer(slotTime);
+        return slotHasDirectBlockingAppointmentByOtherCustomer(slotTime);
       }),
     [
       canChooseTime,
@@ -5728,7 +7385,7 @@ export default function ClienteFrontendScreen() {
       isRegistered,
       mieRichieste,
       orariOccupatiDiretti,
-      slotHasVisibleAppointmentByOtherCustomer,
+      slotHasDirectBlockingAppointmentByOtherCustomer,
       servizio,
       displayTimeSlots,
     ]
@@ -5847,6 +7504,63 @@ export default function ClienteFrontendScreen() {
     const waitlistableSlotsSet = new Set(waitlistableOccupiedSlots);
     const blocks: WaitlistSlotBlock[] = [];
     let currentBlock: string[] = [];
+    const buildBlock = (slotTimes: string[]): WaitlistSlotBlock => {
+      const overlappingAppointmentStarts = effectiveBlockingAppointments
+        .filter((item) => {
+          if ((item.data ?? getTodayDateString()) !== data) {
+            return false;
+          }
+
+          if (isBlockingAppointmentOwnedByCurrentCustomer(item)) {
+            return false;
+          }
+
+          if (!slotTimes.some((slotTime) => doesAppointmentOccupySlot(item, slotTime, effectiveServizi))) {
+            return false;
+          }
+
+          if (!serviceUsesOperatorScheduling) {
+            return doesExistingFrontendBookingBlockSelectedService({
+              selectedServiceName: servizio,
+              existingServiceName: item.servizio,
+              existingMachineryIds: item.macchinarioIds,
+              services: effectiveServizi,
+            });
+          }
+
+          const { operatorId: existingOperatorId, operatorName: existingOperatorName } =
+            normalizeFrontendOperatorIdentity({
+              operatorId: item.operatoreId,
+              operatorName: item.operatoreNome,
+            });
+
+          if (!existingOperatorId && !existingOperatorName) {
+            return false;
+          }
+
+          return matchesOperatorIdentity({
+            appointmentOperatorId: existingOperatorId,
+            appointmentOperatorName: existingOperatorName,
+            selectedOperatorId: operatoreId || null,
+            selectedOperatorName: operatoreNome || null,
+          });
+        })
+        .map((item) => String(item.ora ?? '').trim().slice(0, 5))
+        .filter(Boolean)
+        .sort((first, second) => timeToMinutes(first) - timeToMinutes(second));
+
+      const labelStartTime = overlappingAppointmentStarts[0] ?? slotTimes[0];
+      const labelEndTime = slotTimes[slotTimes.length - 1];
+
+      return {
+        id: `${data}:${slotTimes[0]}-${slotTimes[slotTimes.length - 1]}`,
+        startTime: slotTimes[0],
+        endTime: slotTimes[slotTimes.length - 1],
+        slotTimes,
+        labelStartTime,
+        labelEndTime,
+      };
+    };
 
     displayTimeSlots.forEach((slotTime) => {
       if (waitlistableSlotsSet.has(slotTime)) {
@@ -5855,27 +7569,30 @@ export default function ClienteFrontendScreen() {
       }
 
       if (currentBlock.length > 0) {
-        blocks.push({
-          id: `${data}:${currentBlock[0]}-${currentBlock[currentBlock.length - 1]}`,
-          startTime: currentBlock[0],
-          endTime: currentBlock[currentBlock.length - 1],
-          slotTimes: currentBlock,
-        });
+        blocks.push(buildBlock(currentBlock));
         currentBlock = [];
       }
     });
 
     if (currentBlock.length > 0) {
-      blocks.push({
-        id: `${data}:${currentBlock[0]}-${currentBlock[currentBlock.length - 1]}`,
-        startTime: currentBlock[0],
-        endTime: currentBlock[currentBlock.length - 1],
-        slotTimes: currentBlock,
-      });
+      blocks.push(buildBlock(currentBlock));
     }
 
     return blocks;
-  }, [data, displayTimeSlots, waitlistableOccupiedSlots]);
+  }, [
+    data,
+    displayTimeSlots,
+    doesAppointmentOccupySlot,
+    doesExistingFrontendBookingBlockSelectedService,
+    effectiveBlockingAppointments,
+    effectiveServizi,
+    isBlockingAppointmentOwnedByCurrentCustomer,
+    operatoreId,
+    operatoreNome,
+    serviceUsesOperatorScheduling,
+    servizio,
+    waitlistableOccupiedSlots,
+  ]);
 
   const handleJoinWaitlistBlock = useCallback(
     async (block: WaitlistSlotBlock) => {
@@ -5935,13 +7652,31 @@ export default function ClienteFrontendScreen() {
   const frontendAutoAcceptEnabled = !isCurrentWorkspaceSalon
     ? publicSalonState?.workspace.autoAcceptBookingRequests === true
     : false;
+  const requestsViewedStorageKey = useMemo(
+    () =>
+      buildFrontendRequestsViewedKey({
+        salonCode: effectiveWorkspace?.salonCode ?? salonWorkspace.salonCode,
+        email: profile.email,
+        phone: profile.telefono,
+      }),
+    [effectiveWorkspace?.salonCode, profile.email, profile.telefono, salonWorkspace.salonCode]
+  );
+  const unreadFrontendStatusResponses = useMemo(
+    () =>
+      mieRichieste.filter((item) => {
+        const signature = buildFrontendRequestViewedSignature(item);
+        return (
+          item.stato !== 'In attesa' &&
+          item.viewedByCliente === false &&
+          !viewedFrontendNotificationKeys.has(signature)
+        );
+      }),
+    [mieRichieste, viewedFrontendNotificationKeys]
+  );
 
   const notificheRisposteCount = useMemo(
-    () =>
-      mieRichieste.filter(
-        (item) => item.stato !== 'In attesa' && item.viewedByCliente === false
-      ).length,
-    [mieRichieste]
+    () => unreadFrontendStatusResponses.length,
+    [unreadFrontendStatusResponses]
   );
 
   const richiestePendenti = useMemo(
@@ -5952,10 +7687,21 @@ export default function ClienteFrontendScreen() {
     () => mieRichieste.filter((item) => item.stato === 'Accettata'),
     [mieRichieste]
   );
+  const richiesteAnnullateDalSalone = useMemo(
+    () =>
+      mieRichieste.filter(
+        (item) =>
+          item.stato === 'Annullata' &&
+          item.cancellationSource === 'salone'
+      ),
+    [mieRichieste]
+  );
   const richiesteArchiviate = useMemo(
     () =>
       mieRichieste.filter(
-        (item) => item.stato === 'Rifiutata' || item.stato === 'Annullata'
+        (item) =>
+          item.stato === 'Rifiutata' ||
+          (item.stato === 'Annullata' && item.cancellationSource !== 'salone')
       ),
     [mieRichieste]
   );
@@ -5996,8 +7742,8 @@ export default function ClienteFrontendScreen() {
   useEffect(() => {
     setArchivedMonthExpanded((current) => {
       const next: Record<string, boolean> = {};
-      richiesteArchiviatePerMese.forEach((group, index) => {
-        next[group.key] = current[group.key] ?? index === 0;
+      richiesteArchiviatePerMese.forEach((group) => {
+        next[group.key] = current[group.key] ?? false;
       });
       return next;
     });
@@ -6106,19 +7852,16 @@ export default function ClienteFrontendScreen() {
   const unreadCancelledRequests = useMemo(
     () =>
       mieRichieste.filter(
-        (item) => item.stato === 'Annullata' && item.viewedByCliente === false
+        (item) =>
+          item.stato === 'Annullata' &&
+          item.viewedByCliente === false &&
+          !viewedFrontendNotificationKeys.has(buildFrontendRequestViewedSignature(item))
       ),
-    [mieRichieste]
+    [mieRichieste, viewedFrontendNotificationKeys]
   );
   const unreadStatusResponses = useMemo(
-    () =>
-      mieRichieste.filter(
-        (item) =>
-          item.stato !== 'In attesa' &&
-          item.stato !== 'Annullata' &&
-          item.viewedByCliente === false
-      ),
-    [mieRichieste]
+    () => unreadFrontendStatusResponses.filter((item) => item.stato !== 'Annullata'),
+    [unreadFrontendStatusResponses]
   );
   const waitlistViewedStorageKey = useMemo(
     () =>
@@ -6138,6 +7881,8 @@ export default function ClienteFrontendScreen() {
     [viewedWaitlistAlertKeys, waitlistAlertsForDisplay]
   );
   const lastUnreadStatusSignatureRef = useRef('');
+  const hasPrimedUnreadCancelledNotificationsRef = useRef(false);
+  const hasPrimedUnreadStatusNotificationsRef = useRef(false);
   const waitlistUnreadCount = useMemo(
     () => unreadWaitlistSignatures.length,
     [unreadWaitlistSignatures]
@@ -6150,17 +7895,35 @@ export default function ClienteFrontendScreen() {
   const totalFrontendNotificationsCount = notificheRisposteCount + waitlistUnreadCount;
 
   useEffect(() => {
-    if (!isRegistered || unreadCancelledRequests.length === 0) {
+    if (!isRegistered) {
+      hasPrimedUnreadCancelledNotificationsRef.current = false;
       lastUnreadCancelledSignatureRef.current = '';
       return;
     }
 
     const signature = unreadCancelledRequests.map((item) => item.id).sort().join('|');
+    if (!hasPrimedUnreadCancelledNotificationsRef.current) {
+      hasPrimedUnreadCancelledNotificationsRef.current = true;
+      lastUnreadCancelledSignatureRef.current = signature;
+      return;
+    }
+
     if (signature === lastUnreadCancelledSignatureRef.current) return;
 
+    const previousIds = new Set(
+      lastUnreadCancelledSignatureRef.current.split('|').map((item) => item.trim()).filter(Boolean)
+    );
+    const newlyAddedCancelledRequests = unreadCancelledRequests.filter(
+      (item) => !previousIds.has(item.id)
+    );
+
     lastUnreadCancelledSignatureRef.current = signature;
+    if (newlyAddedCancelledRequests.length === 0) {
+      return;
+    }
+
     if (Platform.OS === 'web') {
-      const latest = unreadCancelledRequests[0];
+      const latest = newlyAddedCancelledRequests[0];
       const serviceName = String(latest?.servizio ?? 'Appuntamento').trim();
       const dateLabel = String(latest?.data ?? '').trim();
       const timeLabel = String(latest?.ora ?? '').trim();
@@ -6179,7 +7942,8 @@ export default function ClienteFrontendScreen() {
   }, [isRegistered, unreadCancelledRequests]);
 
   useEffect(() => {
-    if (!isRegistered || unreadStatusResponses.length === 0) {
+    if (!isRegistered) {
+      hasPrimedUnreadStatusNotificationsRef.current = false;
       lastUnreadStatusSignatureRef.current = '';
       return;
     }
@@ -6189,11 +7953,59 @@ export default function ClienteFrontendScreen() {
       .sort()
       .join('|');
 
+    if (!hasPrimedUnreadStatusNotificationsRef.current) {
+      hasPrimedUnreadStatusNotificationsRef.current = true;
+      lastUnreadStatusSignatureRef.current = signature;
+      return;
+    }
+
     if (signature === lastUnreadStatusSignatureRef.current) return;
 
+    const previousResponseSignatures = new Set(
+      lastUnreadStatusSignatureRef.current
+        .split('|')
+        .map((item) => item.trim())
+        .filter(Boolean)
+    );
+    const newlyAddedStatusResponses = unreadStatusResponses.filter((item) => {
+      const itemSignature = `${item.id}:${item.stato}:${item.data}:${item.ora}:${item.note ?? ''}`;
+      return !previousResponseSignatures.has(itemSignature);
+    });
+
     lastUnreadStatusSignatureRef.current = signature;
+    if (newlyAddedStatusResponses.length === 0) {
+      return;
+    }
+
+    if (Platform.OS !== 'web' && isExpoGoPushRuntime()) {
+      void Promise.all(
+        newlyAddedStatusResponses.map((item) => {
+          const statusLabel =
+            item.stato === 'Accettata'
+              ? 'Prenotazione confermata'
+              : item.stato === 'Rifiutata'
+                ? 'Prenotazione rifiutata'
+                : item.stato === 'Annullata'
+                  ? 'Prenotazione annullata'
+                  : 'Aggiornamento prenotazione';
+
+          return scheduleLocalRuntimeNotification({
+            title: statusLabel,
+            body: [item.servizio, item.data, item.ora].filter(Boolean).join(' · '),
+            dedupeKey: `expo-go-client:${item.id}:${item.stato}:${item.data}:${item.ora}`,
+            data: {
+              source: 'expo_go_client_fallback',
+              requestId: item.id,
+              requestStatus: item.stato,
+            },
+          });
+        })
+      ).catch(() => undefined);
+      return;
+    }
+
     if (Platform.OS === 'web') {
-      const latest = unreadStatusResponses[0];
+      const latest = newlyAddedStatusResponses[0];
       const statusLabel =
         latest?.stato === 'Accettata'
           ? 'Prenotazione confermata'
@@ -6247,6 +8059,34 @@ export default function ClienteFrontendScreen() {
     };
   }, [isRegistered, waitlistViewedStorageKey]);
 
+  useEffect(() => {
+    if (!isRegistered) {
+      setViewedFrontendNotificationKeys(new Set());
+      return;
+    }
+
+    let cancelled = false;
+
+    AsyncStorage.getItem(requestsViewedStorageKey)
+      .then((storedValue) => {
+        if (cancelled) return;
+        const parsed = storedValue ? (JSON.parse(storedValue) as unknown) : [];
+        const nextKeys = Array.isArray(parsed)
+          ? parsed.map((item) => String(item ?? '').trim()).filter(Boolean)
+          : [];
+        setViewedFrontendNotificationKeys(new Set(nextKeys));
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setViewedFrontendNotificationKeys(new Set());
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isRegistered, requestsViewedStorageKey]);
+
   const markWaitlistAlertsAsViewed = useCallback(() => {
     if (!isRegistered) {
       return;
@@ -6296,6 +8136,21 @@ export default function ClienteFrontendScreen() {
     }
 
     lastViewedSyncSignatureRef.current = syncSignature;
+    const nextViewedSignatures = unreadViewSyncCandidates
+      .map((item) => buildFrontendRequestViewedSignature(item))
+      .filter(Boolean);
+
+    if (nextViewedSignatures.length > 0) {
+      setViewedFrontendNotificationKeys((current) => {
+        const merged = new Set(current);
+        nextViewedSignatures.forEach((signature) => merged.add(signature));
+        void AsyncStorage.setItem(
+          requestsViewedStorageKey,
+          JSON.stringify(Array.from(merged))
+        ).catch(() => undefined);
+        return merged;
+      });
+    }
 
     markClientRequestsViewedForSalon(
       effectiveWorkspace?.salonCode ?? salonWorkspace.salonCode,
@@ -6338,6 +8193,7 @@ export default function ClienteFrontendScreen() {
     markClientRequestsViewedForSalon,
     profile.email,
     profile.telefono,
+    requestsViewedStorageKey,
     salonWorkspace.salonCode,
     setRichiestePrenotazione,
   ]);
@@ -6352,6 +8208,14 @@ export default function ClienteFrontendScreen() {
   }, [isRegistered, markFrontendNotificationsAsViewed, showRequestsExpanded]);
 
   useEffect(() => {
+    if (!isRegistered || !showRequestsExpanded) {
+      return;
+    }
+
+    markFrontendNotificationsAsViewed();
+  }, [isRegistered, markFrontendNotificationsAsViewed, showRequestsExpanded]);
+
+  useEffect(() => {
     if (!isRegistered || !effectiveWorkspace?.salonCode) {
       return;
     }
@@ -6362,6 +8226,7 @@ export default function ClienteFrontendScreen() {
       }
 
       await refreshPublicSalonAvailability();
+      refreshFrontendWaitlistState();
     };
 
     const receivedSubscription = Notifications.addNotificationReceivedListener(() => {
@@ -6388,6 +8253,7 @@ export default function ClienteFrontendScreen() {
     effectiveWorkspace?.salonCode,
     isCurrentWorkspaceSalon,
     isRegistered,
+    refreshFrontendWaitlistState,
     refreshPublicSalonAvailability,
     syncClientPushRegistration,
   ]);
@@ -6397,12 +8263,37 @@ export default function ClienteFrontendScreen() {
   }, [syncClientPushRegistration]);
 
   useEffect(() => {
+    if (
+      Platform.OS === 'web' ||
+      !isRegistered ||
+      !effectiveWorkspace?.salonCode
+    ) {
+      return;
+    }
+
+    const intervalId = setInterval(() => {
+      void syncClientPushRegistration();
+    }, 30000);
+
+    return () => {
+      clearInterval(intervalId);
+    };
+  }, [effectiveWorkspace?.salonCode, isRegistered, syncClientPushRegistration]);
+
+  useEffect(() => {
     if (isCurrentWorkspaceSalon || !normalizedSelectedSalonCode) {
       return;
     }
 
+    const channelName = [
+      'client-portal-live',
+      normalizedSelectedSalonCode,
+      isFrontendRequestsRoute ? 'requests' : 'booking',
+      realtimeInstanceIdRef.current,
+    ].join(':');
+
     const channel = supabase
-      .channel(`client-portal-live:${normalizedSelectedSalonCode}`)
+      .channel(channelName)
       .on(
         'postgres_changes',
         {
@@ -6412,7 +8303,8 @@ export default function ClienteFrontendScreen() {
           filter: `salon_code=eq.${normalizedSelectedSalonCode}`,
         },
         () => {
-          void refreshPublicAvailabilitySettingsOnly();
+          void refreshPublicSalonAvailability();
+          refreshFrontendWaitlistState();
         }
       )
       .subscribe();
@@ -6420,7 +8312,13 @@ export default function ClienteFrontendScreen() {
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [isCurrentWorkspaceSalon, normalizedSelectedSalonCode, refreshPublicAvailabilitySettingsOnly]);
+  }, [
+    isCurrentWorkspaceSalon,
+    isFrontendRequestsRoute,
+    normalizedSelectedSalonCode,
+    refreshFrontendWaitlistState,
+    refreshPublicSalonAvailability,
+  ]);
 
   useEffect(() => {
     const workspaceId = effectiveWorkspace?.id?.trim() ?? '';
@@ -6428,8 +8326,15 @@ export default function ClienteFrontendScreen() {
       return;
     }
 
+    const channelName = [
+      'client-bookings-live',
+      workspaceId,
+      isFrontendRequestsRoute ? 'requests' : 'booking',
+      realtimeInstanceIdRef.current,
+    ].join(':');
+
     const channel = supabase
-      .channel(`client-bookings-live:${workspaceId}`)
+      .channel(channelName)
       .on(
         'postgres_changes',
         {
@@ -6440,6 +8345,7 @@ export default function ClienteFrontendScreen() {
         },
         () => {
           void refreshPublicSalonAvailability();
+          refreshFrontendWaitlistState();
         }
       )
       .on(
@@ -6452,6 +8358,7 @@ export default function ClienteFrontendScreen() {
         },
         () => {
           void refreshPublicSalonAvailability();
+          refreshFrontendWaitlistState();
         }
       )
       .subscribe();
@@ -6459,10 +8366,37 @@ export default function ClienteFrontendScreen() {
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [effectiveWorkspace?.id, isCurrentWorkspaceSalon, refreshPublicSalonAvailability]);
+  }, [
+    effectiveWorkspace?.id,
+    isCurrentWorkspaceSalon,
+    isFrontendRequestsRoute,
+    refreshFrontendWaitlistState,
+    refreshPublicSalonAvailability,
+  ]);
+
+  useEffect(() => {
+    if (isCurrentWorkspaceSalon || !effectiveWorkspace || !isRegistered) {
+      return;
+    }
+
+    const intervalId = setInterval(() => {
+      refreshFrontendWaitlistState();
+    }, FRONTEND_PASSIVE_REFRESH_MS);
+
+    return () => clearInterval(intervalId);
+  }, [
+    effectiveWorkspace,
+    isCurrentWorkspaceSalon,
+    isRegistered,
+    refreshFrontendWaitlistState,
+  ]);
 
   useEffect(() => {
     if (isCurrentWorkspaceSalon || !normalizedSelectedSalonCode) {
+      return;
+    }
+
+    if (Platform.OS === 'web') {
       return;
     }
 
@@ -6547,7 +8481,9 @@ export default function ClienteFrontendScreen() {
 
     setProfileFieldErrors({});
 
-    if (!effectiveWorkspace) {
+    const targetSalonCode = effectiveWorkspace?.salonCode || normalizedSelectedSalonCode;
+
+    if (!targetSalonCode) {
         setProfileSaveError(
           salonLoadError ||
           'Nessun salone collegato. Vai su Inserisci codice salone, scrivi il codice e poi tocca Seleziona salone prima di registrarti.'
@@ -6570,28 +8506,8 @@ export default function ClienteFrontendScreen() {
         instagram: profile.instagram.trim(),
       };
 
-      const existingCustomer = effectiveClienti.find((item) => {
-        const sameEmail = (item.email ?? '').trim().toLowerCase() === normalizedProfile.email;
-        const samePhone =
-          limitPhoneToTenDigits(item.telefono ?? '') === normalizedProfile.telefono;
-        return sameEmail || samePhone;
-      });
-
-      if (existingCustomer) {
-        setAccessMode('login');
-        setProfileSaveError(
-          buildDuplicateFrontendCustomerMessage({
-            emailTaken:
-              (existingCustomer.email ?? '').trim().toLowerCase() === normalizedProfile.email,
-            phoneTaken:
-              limitPhoneToTenDigits(existingCustomer.telefono ?? '') === normalizedProfile.telefono,
-          })
-        );
-        return;
-      }
-
       const saved = await upsertFrontendCustomerForSalon({
-        salonCode: effectiveWorkspace.salonCode,
+        salonCode: targetSalonCode,
         profile: normalizedProfile,
       });
 
@@ -6610,7 +8526,9 @@ export default function ClienteFrontendScreen() {
         }
 
         setProfileSaveError(
-          'Registrazione non completata: il server non è riuscito a creare il cliente per questo salone. Riprova tra poco.'
+          saved.detail?.includes('salon_not_found')
+            ? 'Il salone collegato non risulta disponibile lato server. Rientra nella pagina corretta e riprova.'
+            : 'Registrazione non completata: il server non è riuscito a creare il cliente per questo salone. Riprova tra poco.'
         );
         return;
       }
@@ -6627,7 +8545,7 @@ export default function ClienteFrontendScreen() {
           })
         );
         await AsyncStorage.setItem(
-          buildFrontendProfileKeyForSalon(effectiveWorkspace.salonCode),
+          buildFrontendProfileKeyForSalon(targetSalonCode),
           JSON.stringify({
             nome: normalizedProfile.nome,
             cognome: normalizedProfile.cognome,
@@ -6640,27 +8558,31 @@ export default function ClienteFrontendScreen() {
         console.log('Errore salvataggio profilo cliente locale:', error);
       }
 
-      setSelectedSalonCode(effectiveWorkspace.salonCode);
-      setSalonCodeDraft(effectiveWorkspace.salonCode);
+      setSelectedSalonCode(targetSalonCode);
+      setSalonCodeDraft(targetSalonCode);
       void persistFrontendBiometricSnapshot(
         normalizedProfile,
-        effectiveWorkspace.salonCode
+        targetSalonCode
       );
       setProfile(normalizedProfile);
-      AsyncStorage.setItem(FRONTEND_LAST_SALON_CODE_KEY, effectiveWorkspace.salonCode).catch((error) => {
+      AsyncStorage.setItem(FRONTEND_LAST_SALON_CODE_KEY, targetSalonCode).catch((error) => {
         console.log('Errore salvataggio ultimo salone dopo registrazione:', error);
       });
 
-      const shouldOpenBookingDirectly = shouldStartInBookingMode;
+        await ensurePublicSalonStateReady(targetSalonCode);
+
+      const shouldOpenBookingDirectly =
+        !isFrontendRequestsRoute &&
+        (shouldStartInBookingMode || !!normalizeSalonCode(targetSalonCode));
       setHasSavedProfileForSelectedSalon(true);
       setIsRegistered(true);
       setIsBookingStarted(shouldOpenBookingDirectly);
-      setShowRequestsExpanded(false);
+      setShowRequestsExpanded(isFrontendRequestsRoute ? true : !shouldOpenBookingDirectly);
       Alert.alert(
         'Registrazione completata',
         'Cliente registrato al salone correttamente.'
       );
-      void maybePromptFrontendBiometricSetup(normalizedProfile, effectiveWorkspace.salonCode);
+      void maybePromptFrontendBiometricSetup(normalizedProfile, targetSalonCode);
       requestAnimationFrame(() => {
         scrollRef.current?.scrollTo({ y: 0, animated: true });
       });
@@ -6674,262 +8596,81 @@ export default function ClienteFrontendScreen() {
     }
   };
 
-  const loginFrontendCliente = async (overrides?: { email?: string; telefono?: string }) => {
-    const normalizedEmail = String(overrides?.email ?? profile.email).trim().toLowerCase();
-    const normalizedPhone = limitPhoneToTenDigits(String(overrides?.telefono ?? profile.telefono).trim());
-    const hasEmail = normalizedEmail !== '';
-    const hasPhone = normalizedPhone !== '';
-    const emailIsValid = hasEmail && isValidEmail(normalizedEmail);
-    const phoneIsValid = hasPhone && isValidPhone10(normalizedPhone);
-
-    if (!hasEmail || !hasPhone) {
-      setProfileFieldErrors({
-        email: !hasEmail ? 'Inserisci email' : undefined,
-        telefono: !hasPhone ? 'Inserisci cellulare' : undefined,
-      });
-      setProfileSaveError('Per accedere inserisci sia email sia cellulare usati nella registrazione.');
-      return;
-    }
-
-    if (!emailIsValid || !phoneIsValid) {
-      setProfileFieldErrors({
-        email: !emailIsValid ? 'Email non valida' : undefined,
-        telefono: !phoneIsValid
-          ? 'Numero di telefono errato (deve avere 10 cifre)'
-          : undefined,
-      });
-      setProfileSaveError('Per accedere usa email e cellulare validi già registrati nel salone.');
-      return;
-    }
-
-    setProfileFieldErrors({});
-    setIsSavingProfile(true);
-    setProfileSaveError('');
-
-    try {
-      const latestSalonState =
-        !isCurrentWorkspaceSalon && effectiveWorkspace?.salonCode
-          ? await refreshPublicSalonState()
-          : null;
-      const sourceWorkspace = latestSalonState?.workspace ?? effectiveWorkspace;
-      const sourceClienti = latestSalonState?.clienti ?? effectiveClienti;
-
-      if (latestSalonState) {
-        applyMergedPublicSalonState(latestSalonState);
-        setSalonLoadError('');
-      }
-
-      if (!sourceWorkspace) {
-        setProfileSaveError(
-          salonLoadError ||
-            'Nessun salone collegato. Vai su Inserisci codice salone, scrivi il codice e poi tocca Seleziona salone.'
-        );
-        requestAnimationFrame(() => {
-          scrollToField(salonCodeInputRef);
-        });
-        return;
-      }
-
-      const buildOtherSalonSuggestion = async () => {
-        try {
-          const savedSalonCodesRaw = await AsyncStorage.getItem(FRONTEND_SAVED_SALON_CODES_KEY);
-          const parsed = savedSalonCodesRaw ? (JSON.parse(savedSalonCodesRaw) as unknown) : [];
-          const savedSalonCodes = Array.isArray(parsed)
-            ? buildSavedSalonCodeList(parsed as string[])
-            : [];
-          const otherSalonCodes = savedSalonCodes.filter(
-            (code) => code && code !== sourceWorkspace.salonCode
-          );
-
-          if (!otherSalonCodes.length) {
-            return '';
-          }
-
-          const scopedProfiles = await Promise.all(
-            otherSalonCodes.map(async (code) => ({
-              code,
-              raw: await AsyncStorage.getItem(buildFrontendProfileKeyForSalon(code)),
-            }))
-          );
-
-          const matchingOtherSalon = scopedProfiles.find(({ raw }) => {
-            if (!raw) return false;
-
-            try {
-              const parsedProfile = JSON.parse(raw) as FrontendProfile;
-              const sameEmail =
-                (parsedProfile.email ?? '').trim().toLowerCase() === normalizedEmail;
-              const samePhone =
-                limitPhoneToTenDigits(parsedProfile.telefono ?? '') === normalizedPhone;
-              return sameEmail && samePhone;
-            } catch {
-              return false;
-            }
-          });
-
-          if (!matchingOtherSalon) {
-            return otherSalonCodes.length > 0
-              ? ' Se hai altri saloni salvati su questo dispositivo, seleziona un altro salone e riprova.'
-              : '';
-          }
-
-          return ` Queste credenziali risultano gia salvate per un altro salone. Seleziona un altro salone e riprova.`;
-        } catch {
-          return '';
-        }
-      };
-
-      const rankedMatches = sourceClienti
-        .map((item) => {
-          const sameEmail = hasEmail && (item.email ?? '').trim().toLowerCase() === normalizedEmail;
-          const samePhone =
-            hasPhone && limitPhoneToTenDigits(item.telefono ?? '') === normalizedPhone;
-          const score = (sameEmail ? 2 : 0) + (samePhone ? 2 : 0);
-
-          return {
-            item,
-            sameEmail,
-            samePhone,
-            score,
-          };
-        })
-        .filter((entry) => entry.score > 0)
-        .sort((first, second) => second.score - first.score);
-
-      const bestMatch = rankedMatches[0] ?? null;
-      const secondBestMatch = rankedMatches[1] ?? null;
-
-      if (!bestMatch) {
-        const otherSalonSuggestion = await buildOtherSalonSuggestion();
-        setProfileSaveError(
-          `Credenziali errate per questo salone. Controlla email o cellulare oppure usa Registrati.${otherSalonSuggestion}`
-        );
-        return;
-      }
-
-      if (secondBestMatch && secondBestMatch.score === bestMatch.score) {
-        setProfileSaveError(
-          'Ho trovato piu profili simili. Usa i dati esatti con cui sei registrato nel salone oppure registrati di nuovo.'
-        );
-        return;
-      }
-
-      const matchedCustomer = bestMatch.item;
-
-      const sameEmail = hasEmail && (matchedCustomer.email ?? '').trim().toLowerCase() === normalizedEmail;
-      const samePhone =
-        hasPhone && limitPhoneToTenDigits(matchedCustomer.telefono ?? '') === normalizedPhone;
-
-      if (!sameEmail && !samePhone) {
-        const otherSalonSuggestion = await buildOtherSalonSuggestion();
-        setProfileSaveError(
-          `Credenziali errate per questo salone. Controlla email o cellulare oppure usa Registrati.${otherSalonSuggestion}`
-        );
-        return;
-      }
-
-      const nameParts = matchedCustomer.nome.trim().split(/\s+/).filter(Boolean);
-      const nome = formatCustomerNamePart(nameParts.shift() ?? '');
-      const cognome = formatCustomerNamePart(nameParts.join(' '));
-      const nextProfile = {
-        nome,
-        cognome,
-        email: (matchedCustomer.email ?? '').trim() || normalizedEmail,
-        telefono: limitPhoneToTenDigits(matchedCustomer.telefono ?? '') || normalizedPhone,
-        instagram: matchedCustomer.instagram?.trim() ?? '',
-      };
-
-      setProfile(nextProfile);
-
-      try {
-        await AsyncStorage.setItem(FRONTEND_PROFILE_KEY, JSON.stringify(nextProfile));
-        await AsyncStorage.setItem(
-          buildFrontendProfileKeyForSalon(sourceWorkspace.salonCode),
-          JSON.stringify(nextProfile)
-        );
-      } catch (error) {
-        console.log('Errore salvataggio accesso cliente locale:', error);
-      }
-
-      setSelectedSalonCode(sourceWorkspace.salonCode);
-      setSalonCodeDraft(sourceWorkspace.salonCode);
-      void persistFrontendBiometricSnapshot(nextProfile, sourceWorkspace.salonCode);
-      AsyncStorage.setItem(FRONTEND_LAST_SALON_CODE_KEY, sourceWorkspace.salonCode).catch((error) => {
-        console.log('Errore salvataggio ultimo salone dopo accesso:', error);
-      });
-
-      const shouldOpenBookingDirectly = shouldStartInBookingMode;
-      setHasSavedProfileForSelectedSalon(true);
-      setIsRegistered(true);
-      setIsBookingStarted(shouldOpenBookingDirectly);
-      setShowRequestsExpanded(false);
-      void maybePromptFrontendBiometricSetup(nextProfile, sourceWorkspace.salonCode);
-      requestAnimationFrame(() => {
-        scrollRef.current?.scrollTo({ y: 0, animated: true });
-      });
-    } catch (error) {
-      console.log('Errore accesso cliente frontend:', error);
-      setProfileSaveError(
-        'Non riesco a completare l’accesso in questo momento. Riprova tra un attimo.'
-      );
-    } finally {
-      setIsSavingProfile(false);
-    }
-  };
-
   useEffect(() => {
-    if (
-      autoCredentialLoginAttemptedRef.current ||
-      initialAutoLoginParam !== '1' ||
-      isRegistered ||
-      !effectiveWorkspace ||
-      !publicSalonState ||
-      !hasHydratedFrontendSession
-    ) {
+    const signature =
+      initialAutoLoginParam === '1'
+        ? [
+            normalizeSalonCode(selectedSalonCode || resolvedInitialSalonCodeParam || ''),
+            normalizedInitialAutoLoginEmail,
+            normalizedInitialAutoLoginPhone,
+          ].join('|')
+        : '';
+
+    if (!signature || lastAutoLoginAttemptSignatureRef.current === signature) {
       return;
     }
 
-    const normalizedEmail = String(initialEmailParam ?? '').trim().toLowerCase();
-    const normalizedPhone = limitPhoneToTenDigits(String(initialPhoneParam ?? '').trim());
-
-    if (!normalizedEmail || !normalizedPhone) {
-      return;
-    }
-
-    autoCredentialLoginAttemptedRef.current = true;
-    setAccessMode('login');
-    setProfile((current) => ({
-      ...current,
-      email: normalizedEmail,
-      telefono: normalizedPhone,
-    }));
-
-    requestAnimationFrame(() => {
-      void loginFrontendCliente({
-        email: normalizedEmail,
-        telefono: normalizedPhone,
-      });
-    });
+    lastAutoLoginAttemptSignatureRef.current = signature;
+    autoCredentialLoginAttemptedRef.current = false;
+    setProfileSaveError('');
   }, [
-    effectiveWorkspace,
-    hasHydratedFrontendSession,
     initialAutoLoginParam,
-    initialEmailParam,
-    initialPhoneParam,
-    isRegistered,
-    loginFrontendCliente,
-    publicSalonState,
+    normalizedInitialAutoLoginEmail,
+    normalizedInitialAutoLoginPhone,
+    resolvedInitialSalonCodeParam,
+    selectedSalonCode,
   ]);
 
   useEffect(() => {
     if (
+      shouldTrustInAppFrontendSession ||
+      autoCredentialLoginAttemptedRef.current ||
+      initialAutoLoginParam !== '1' ||
+      isRegistered ||
+      !hasHydratedFrontendSession ||
+      !normalizedSelectedSalonCode
+    ) {
+      return;
+    }
+
+    if (!normalizedInitialAutoLoginEmail || !normalizedInitialAutoLoginPhone) {
+      return;
+    }
+
+    autoCredentialLoginAttemptedRef.current = true;
+    setProfileSaveError('');
+    setProfile((current) => ({
+      ...current,
+      email: normalizedInitialAutoLoginEmail,
+      telefono: normalizedInitialAutoLoginPhone,
+    }));
+
+    requestAnimationFrame(() => {
+      void loginFrontendCliente({
+        email: normalizedInitialAutoLoginEmail,
+        telefono: normalizedInitialAutoLoginPhone,
+      });
+    });
+  }, [
+    hasHydratedFrontendSession,
+    initialAutoLoginParam,
+    isRegistered,
+    loginFrontendCliente,
+    normalizedInitialAutoLoginEmail,
+    normalizedInitialAutoLoginPhone,
+    normalizedSelectedSalonCode,
+    shouldTrustInAppFrontendSession,
+  ]);
+
+  useEffect(() => {
+    if (
+      shouldTrustInAppFrontendSession ||
       autoCredentialLoginAttemptedRef.current ||
       isRegistered ||
       !hasHydratedFrontendSession ||
       !normalizedSelectedSalonCode ||
       !hasSavedProfileForSelectedSalon ||
-      !effectiveWorkspace ||
-      !publicSalonState
+      frontendBiometricBusy
     ) {
       return;
     }
@@ -6942,7 +8683,6 @@ export default function ClienteFrontendScreen() {
     }
 
     autoCredentialLoginAttemptedRef.current = true;
-    setAccessMode('login');
 
     requestAnimationFrame(() => {
       void loginFrontendCliente({
@@ -6951,7 +8691,7 @@ export default function ClienteFrontendScreen() {
       });
     });
   }, [
-    effectiveWorkspace,
+    frontendBiometricBusy,
     hasHydratedFrontendSession,
     hasSavedProfileForSelectedSalon,
     normalizedSelectedSalonCode,
@@ -6959,7 +8699,28 @@ export default function ClienteFrontendScreen() {
     loginFrontendCliente,
     profile.email,
     profile.telefono,
-    publicSalonState,
+    shouldTrustInAppFrontendSession,
+  ]);
+
+  useEffect(() => {
+    if (
+      !isLinkedSalonBookingFlowActive ||
+      isCurrentWorkspaceSalon ||
+      !normalizedSelectedSalonCode ||
+      isLoadingSalon ||
+      sortedFrontendServizi.length > 0
+    ) {
+      return;
+    }
+
+    void ensurePublicSalonStateReady(normalizedSelectedSalonCode);
+  }, [
+    ensurePublicSalonStateReady,
+    isLinkedSalonBookingFlowActive,
+    isCurrentWorkspaceSalon,
+    isLoadingSalon,
+    normalizedSelectedSalonCode,
+    sortedFrontendServizi.length,
   ]);
 
   const resetFrontendCliente = () => {
@@ -7011,6 +8772,39 @@ export default function ClienteFrontendScreen() {
     profileSaveError,
     router,
     showBookingFlowAlert,
+  ]);
+
+  useEffect(() => {
+    if (
+      isRegistered ||
+      !hasHydratedFrontendSession ||
+      !hasResolvedOrIncomingSalonCode ||
+      isFrontendRequestsRoute ||
+      initialAutoLoginParam === '1' ||
+      initialBiometricParam === '1' ||
+      initialRegistrationOnlyParam === '1' ||
+      Boolean(String(initialEmailParam ?? '').trim()) ||
+      Boolean(String(initialPhoneParam ?? '').trim())
+    ) {
+      return;
+    }
+
+    router.replace({
+      pathname: '/',
+      params: { salon: resolvedOrIncomingSalonCode },
+    });
+  }, [
+    hasHydratedFrontendSession,
+    hasResolvedOrIncomingSalonCode,
+    isFrontendRequestsRoute,
+    initialAutoLoginParam,
+    initialBiometricParam,
+    initialEmailParam,
+    initialPhoneParam,
+    initialRegistrationOnlyParam,
+    isRegistered,
+    resolvedOrIncomingSalonCode,
+    router,
   ]);
 
   const inviaRichiesta = async () => {
@@ -7386,7 +9180,34 @@ export default function ClienteFrontendScreen() {
           }),
         ]);
 
-        if (!saved.ok) {
+        const isSubmitTimeout =
+          !saved.ok &&
+          (saved.error === 'request_timeout' ||
+            (saved.detail ?? '').toLowerCase().includes('submit_timeout') ||
+            (saved.detail ?? '').toLowerCase().includes('statement timeout') ||
+            (saved.detail ?? '').toLowerCase().includes('cancelling statement due to statement timeout'));
+        let recoveredAfterTimeout = false;
+
+        if (isSubmitTimeout) {
+          const refreshedAfterTimeout = await resolveSalonByCode(effectiveWorkspace.salonCode).catch(
+            () => null
+          );
+
+          const remoteRequestFound = !!refreshedAfterTimeout?.richiestePrenotazione.some(
+            (item) => buildPublicRequestCompositeKey(item) === nextRequestCompositeKey
+          );
+
+          if (refreshedAfterTimeout) {
+            applyMergedPublicSalonState(refreshedAfterTimeout);
+            await refreshBackendDayOccupancy();
+          }
+
+          if (remoteRequestFound) {
+            recoveredAfterTimeout = true;
+          }
+        }
+
+        if (!saved.ok && !recoveredAfterTimeout) {
           if (!isCurrentWorkspaceSalon) {
             const restored = await refreshPublicSalonState();
             if (restored) {
@@ -7440,7 +9261,7 @@ export default function ClienteFrontendScreen() {
               'Numero di prenotazioni max superato',
               'Hai gia raggiunto il limite prenotazioni impostato dal salone.'
             );
-          } else if (saved.error === 'request_timeout' || (saved.detail ?? '').toLowerCase().includes('submit_timeout')) {
+          } else if (isSubmitTimeout) {
             showBookingFlowAlert(
               'Richiesta non inviata',
               'Il salone non ha risposto in tempo. Riprova tra un attimo.'
@@ -7542,6 +9363,57 @@ export default function ClienteFrontendScreen() {
     void inviaRichiesta();
   }, [inviaRichiesta]);
 
+  const promptFrontendCalendarPermission = useCallback(async () => {
+    try {
+      const alreadyPrompted = await AsyncStorage.getItem(FRONTEND_CALENDAR_PERMISSION_PROMPTED_KEY);
+      if (alreadyPrompted === 'true') {
+        return true;
+      }
+
+      await AsyncStorage.setItem(FRONTEND_CALENDAR_PERMISSION_PROMPTED_KEY, 'true');
+    } catch (error) {
+      console.log('Errore controllo prompt calendario frontend:', error);
+    }
+
+    return await new Promise<boolean>((resolve) => {
+      Alert.alert(
+        'Aggiungi al calendario',
+        'Per salvare l’appuntamento ti chiederemo l’accesso al calendario del telefono. Lo useremo solo per creare questo evento.',
+        [
+          {
+            text: 'Non ora',
+            style: 'cancel',
+            onPress: () => resolve(false),
+          },
+          {
+            text: 'Continua',
+            onPress: () => resolve(true),
+          },
+        ],
+        { cancelable: false }
+      );
+    });
+  }, []);
+
+  const promptFrontendCalendarSettings = useCallback(() => {
+    Alert.alert(
+      'Permesso necessario',
+      'Per aggiungere l’appuntamento al calendario devi abilitare l’accesso nelle impostazioni del telefono.',
+      [
+        {
+          text: 'Non ora',
+          style: 'cancel',
+        },
+        {
+          text: 'Apri impostazioni',
+          onPress: () => {
+            void openDeviceSettings();
+          },
+        },
+      ]
+    );
+  }, []);
+
   const aggiungiRichiestaAccettataAlCalendario = async (richiestaId: string) => {
     const richiesta = mieRichieste.find((item) => item.id === richiestaId);
     if (!richiesta || richiesta.stato !== 'Accettata') return;
@@ -7592,13 +9464,27 @@ export default function ClienteFrontendScreen() {
     }
 
     try {
-      const permission = await Calendar.requestCalendarPermissionsAsync();
+      const currentPermission = await Calendar.getCalendarPermissionsAsync();
+
+      if (currentPermission.status !== 'granted') {
+        if (!currentPermission.canAskAgain) {
+          promptFrontendCalendarSettings();
+          return;
+        }
+
+        const shouldContinue = await promptFrontendCalendarPermission();
+        if (!shouldContinue) {
+          return;
+        }
+      }
+
+      const permission =
+        currentPermission.status === 'granted'
+          ? currentPermission
+          : await Calendar.requestCalendarPermissionsAsync();
 
       if (permission.status !== 'granted') {
-        Alert.alert(
-          'Permesso necessario',
-          'Per salvare l’appuntamento nel calendario devi autorizzare l’accesso al calendario del telefono.'
-        );
+        promptFrontendCalendarSettings();
         return;
       }
 
@@ -7609,6 +9495,14 @@ export default function ClienteFrontendScreen() {
         location: eventLocation,
         notes: eventNotes,
       });
+
+      const openedCalendarApp = await openDeviceCalendarAtDate(startDate);
+      if (!openedCalendarApp) {
+        Alert.alert(
+          'Appuntamento salvato',
+          'L’appuntamento e stato aggiunto al calendario del telefono.'
+        );
+      }
     } catch {
       Alert.alert(
         'Calendario non disponibile',
@@ -7617,7 +9511,7 @@ export default function ClienteFrontendScreen() {
     }
   };
 
-  const annullaPrenotazioneCliente = (requestId: string) => {
+  const annullaPrenotazioneCliente = (requestId: string, bypassWebConfirm = false) => {
     if (cancellingRequestId === requestId) {
       return;
     }
@@ -7663,6 +9557,71 @@ export default function ClienteFrontendScreen() {
       });
 
       try {
+        const requestCompositeKey = buildPublicRequestCompositeKey(richiesta);
+        const requestResolutionKey = buildPublicRequestResolutionKey(richiesta);
+        const applyOptimisticCancelledState = (refreshedState?: PublicSalonState | null) => {
+          recentLocalBookingRequestsRef.current = recentLocalBookingRequestsRef.current.filter(
+            (entry) =>
+              buildPublicRequestCompositeKey(entry.request) !== requestCompositeKey &&
+              buildPublicRequestResolutionKey(entry.request) !== requestResolutionKey
+          );
+
+          if (!isCurrentWorkspaceSalon) {
+            setPublicSalonState((current) => {
+              if (!current) {
+                return current;
+              }
+
+              return {
+                ...current,
+                richiestePrenotazione: current.richiestePrenotazione.map((entry) =>
+                  entry.id === requestId ||
+                  buildPublicRequestCompositeKey(entry) === requestCompositeKey ||
+                  buildPublicRequestResolutionKey(entry) === requestResolutionKey
+                    ? {
+                        ...entry,
+                        stato: 'Annullata',
+                        viewedByCliente: true,
+                        viewedBySalon: false,
+                        cancellationSource: 'cliente',
+                      }
+                    : entry
+                ),
+                appuntamenti:
+                  richiesta.stato === 'Accettata'
+                    ? current.appuntamenti.filter((entry) => {
+                        const entryDate = entry.data ?? '';
+                        return !(
+                          entryDate === richiesta.data &&
+                          entry.ora === richiesta.ora &&
+                          String(entry.servizio ?? '').trim().toLowerCase() ===
+                            String(richiesta.servizio ?? '').trim().toLowerCase() &&
+                          String(entry.cliente ?? '').trim().toLowerCase() ===
+                            `${richiesta.nome} ${richiesta.cognome}`.trim().toLowerCase()
+                        );
+                      })
+                    : current.appuntamenti,
+              };
+            });
+          }
+
+          if (refreshedState) {
+            applyMergedPublicSalonState(refreshedState);
+          }
+        };
+
+        const showCancellationSuccess = () => {
+          const successTitle = isPending ? 'Richiesta annullata' : 'Prenotazione annullata';
+          const successMessage = isPending
+            ? 'La richiesta è stata annullata correttamente. Il salone riceverà subito l’aggiornamento.'
+            : 'La prenotazione è stata annullata correttamente. Il salone riceverà subito l’aggiornamento.';
+
+          if (Platform.OS !== 'web') {
+            showBookingFlowAlert(successTitle, successMessage);
+          }
+          console.log('[frontend-cancel] success', { requestId, successMessage });
+        };
+
         const result = await cancelClientAppointmentForSalon({
           salonCode: effectiveWorkspace.salonCode,
           requestId,
@@ -7673,71 +9632,79 @@ export default function ClienteFrontendScreen() {
         console.log('[frontend-cancel] result', { requestId, result });
 
         if (!result.ok) {
-          const message = result.error ?? 'Non sono riuscito ad annullare la prenotazione.';
-          if (isWeb) {
-            globalThis.alert?.(message);
+          const findMatchingRequest = (state: PublicSalonState | null) =>
+            state?.richiestePrenotazione.find(
+              (entry) =>
+                entry.id === requestId ||
+                buildPublicRequestCompositeKey(entry) === requestCompositeKey ||
+                buildPublicRequestResolutionKey(entry) === requestResolutionKey
+            ) ?? null;
+
+          const refreshed = await resolveSalonByCode(effectiveWorkspace.salonCode).catch(
+            () => null
+          );
+          const refreshedMatch = findMatchingRequest(refreshed);
+
+          if (refreshed && refreshedMatch && refreshedMatch.stato !== 'Annullata') {
+            await wait(CANCELLATION_SNAPSHOT_RETRY_DELAY_MS);
           }
-          Alert.alert('Annullamento non riuscito', message);
+
+          const retriedRefreshed =
+            refreshed && refreshedMatch && refreshedMatch.stato !== 'Annullata'
+              ? await resolveSalonByCode(effectiveWorkspace.salonCode).catch(() => refreshed)
+              : refreshed;
+          const retriedMatch = findMatchingRequest(retriedRefreshed);
+          const backendAlreadyCancelled =
+            !!retriedRefreshed && (!retriedMatch || retriedMatch.stato === 'Annullata');
+
+          if (backendAlreadyCancelled) {
+            console.log('[frontend-cancel] backend already cancelled after retry, forcing success locally', {
+              requestId,
+            });
+            applyOptimisticCancelledState(retriedRefreshed);
+            showCancellationSuccess();
+            return;
+          }
+
+          const message =
+            result.error ?? 'Non sono riuscito a completare l’annullamento. Riprova tra un attimo.';
+          const shouldForceOptimisticCancellation =
+            message !== 'Questa prenotazione non appartiene al profilo cliente attivo.' &&
+            message !== 'Salone non disponibile' &&
+            message !== 'Salone non trovato.';
+
+          if (shouldForceOptimisticCancellation) {
+            console.log('[frontend-cancel] generic failure but forcing optimistic success', {
+              requestId,
+              message,
+            });
+            applyOptimisticCancelledState();
+            void resolveSalonByCode(effectiveWorkspace.salonCode)
+              .then((refreshed) => {
+                if (refreshed) {
+                  applyMergedPublicSalonState(refreshed);
+                }
+              })
+              .catch(() => undefined);
+            showCancellationSuccess();
+            return;
+          }
+
+          showBookingFlowAlert('Annullamento non riuscito', message);
           return;
         }
 
-        if (!isCurrentWorkspaceSalon) {
-          setPublicSalonState((current) => {
-            if (!current) {
-              return current;
+        applyOptimisticCancelledState();
+
+        void resolveSalonByCode(effectiveWorkspace.salonCode)
+          .then((refreshed) => {
+            if (refreshed) {
+              applyMergedPublicSalonState(refreshed);
             }
+          })
+          .catch(() => undefined);
 
-            return {
-              ...current,
-              richiestePrenotazione: current.richiestePrenotazione.map((entry) =>
-                entry.id === requestId
-                  ? {
-                      ...entry,
-                      stato: 'Annullata',
-                      viewedByCliente: true,
-                      viewedBySalon: false,
-                      cancellationSource: 'cliente',
-                    }
-                  : entry
-              ),
-              appuntamenti:
-                richiesta.stato === 'Accettata'
-                  ? current.appuntamenti.filter((entry) => {
-                      const entryDate = entry.data ?? '';
-                      return !(
-                        entryDate === richiesta.data &&
-                        entry.ora === richiesta.ora &&
-                        String(entry.servizio ?? '').trim().toLowerCase() ===
-                          String(richiesta.servizio ?? '').trim().toLowerCase() &&
-                        String(entry.cliente ?? '').trim().toLowerCase() ===
-                          `${richiesta.nome} ${richiesta.cognome}`.trim().toLowerCase()
-                      );
-                    })
-                  : current.appuntamenti,
-            };
-          });
-
-          void resolveSalonByCode(effectiveWorkspace.salonCode)
-            .then((refreshed) => {
-              if (refreshed) {
-                applyMergedPublicSalonState(refreshed);
-              }
-            })
-            .catch(() => undefined);
-        }
-
-        const successMessage = isPending
-          ? 'La richiesta è stata annullata e il salone è stato avvisato.'
-          : 'La prenotazione è stata annullata e il salone è stato avvisato.';
-
-        Alert.alert(
-          isPending ? 'Richiesta annullata' : 'Appuntamento annullato',
-          successMessage
-        );
-        if (isWeb) {
-          globalThis.alert?.(successMessage);
-        }
-        console.log('[frontend-cancel] success', { requestId, successMessage });
+        showCancellationSuccess();
       } catch (error) {
         console.log('[frontend-cancel] thrown-error', {
           requestId,
@@ -7746,11 +9713,8 @@ export default function ClienteFrontendScreen() {
         const message =
           error instanceof Error && error.message.trim()
             ? error.message
-            : 'Non sono riuscito ad annullare la prenotazione.';
-        if (isWeb) {
-          globalThis.alert?.(message);
-        }
-        Alert.alert('Annullamento non riuscito', message);
+            : 'Non sono riuscito a completare l’annullamento. Riprova tra un attimo.';
+        showBookingFlowAlert('Annullamento non riuscito', message);
       } finally {
         console.log('[frontend-cancel] finally', { requestId });
         setCancellingRequestId((current) => (current === requestId ? null : current));
@@ -7760,11 +9724,15 @@ export default function ClienteFrontendScreen() {
     const confirmationTitle = isPending ? 'Annulla richiesta' : 'Annulla appuntamento';
     const confirmationBody = `Vuoi davvero annullare ${richiesta.servizio} del ${formatDateLong(richiesta.data)} alle ${richiesta.ora}? Il salone verrà avvisato subito.`;
 
+    if (isWeb && !bypassWebConfirm) {
+      setPendingWebCancellationRequestId(requestId);
+      return;
+    }
+
+    setPendingWebCancellationRequestId((current) => (current === requestId ? null : current));
+
     if (isWeb) {
-      const confirmed = globalThis.confirm?.(`${confirmationTitle}\n\n${confirmationBody}`) ?? false;
-      if (confirmed) {
-        void confirmCancellation();
-      }
+      void confirmCancellation();
       return;
     }
 
@@ -7831,6 +9799,7 @@ export default function ClienteFrontendScreen() {
     const cancellationSource = (item as { cancellationSource?: 'cliente' | 'salone' }).cancellationSource;
     const cancelledBySalon = isCancelled && cancellationSource === 'salone';
     const isCancelling = cancellingRequestId === item.id;
+    const isAwaitingWebCancellationConfirm = isWeb && pendingWebCancellationRequestId === item.id;
     const compactHistory = options?.compactHistory === true;
     const requestRoleLabel =
       item.mestiereRichiesto?.trim() ||
@@ -7992,18 +9961,45 @@ export default function ClienteFrontendScreen() {
         {canCancel || options?.showCalendarButton ? (
           <View style={styles.requestActionsStack}>
             {canCancel ? (
-              <TouchableOpacity
-                style={[styles.cancelBookingButton, isWeb && styles.requestActionButtonWeb]}
-                onPress={handleCancelRequest}
-                activeOpacity={0.9}
-                disabled={isCancelling}
-              >
-                <Text style={styles.cancelBookingButtonText}>
-                  {isCancelling
-                    ? 'Annullamento in corso...'
-                    : options?.cancelLabel ?? tf('frontend_cancel_booking')}
-                </Text>
-              </TouchableOpacity>
+              isAwaitingWebCancellationConfirm ? (
+                <View style={[styles.webInlineCancelConfirmCard, styles.requestActionButtonWeb]}>
+                  <Text style={styles.webInlineCancelConfirmText}>
+                    Confermi l'annullamento di {item.servizio} del {formatDateLong(item.data)} alle {item.ora}?
+                  </Text>
+                  <View style={styles.webInlineCancelConfirmActions}>
+                    <TouchableOpacity
+                      style={styles.webInlineCancelKeepButton}
+                      onPress={() => setPendingWebCancellationRequestId((current) => (current === item.id ? null : current))}
+                      activeOpacity={0.9}
+                    >
+                      <Text style={styles.webInlineCancelKeepButtonText}>Tieni prenotazione</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.webInlineCancelConfirmButton}
+                      onPress={() => annullaPrenotazioneCliente(item.id, true)}
+                      activeOpacity={0.9}
+                      disabled={isCancelling}
+                    >
+                      <Text style={styles.webInlineCancelConfirmButtonText}>
+                        {isCancelling ? 'Annullamento in corso...' : 'Conferma annullamento'}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ) : (
+                <TouchableOpacity
+                  style={[styles.cancelBookingButton, isWeb && styles.requestActionButtonWeb]}
+                  onPress={handleCancelRequest}
+                  activeOpacity={0.9}
+                  disabled={isCancelling}
+                >
+                  <Text style={styles.cancelBookingButtonText}>
+                    {isCancelling
+                      ? 'Annullamento in corso...'
+                      : options?.cancelLabel ?? tf('frontend_cancel_booking')}
+                  </Text>
+                </TouchableOpacity>
+              )
             ) : null}
 
             {options?.showCalendarButton ? (
@@ -8053,15 +10049,21 @@ export default function ClienteFrontendScreen() {
     }
 
     const dialablePhone = buildDialablePhone(salonBusinessPhone);
+    const telUrl = `tel:${dialablePhone}`;
+    const telPromptUrl = `telprompt:${dialablePhone}`;
 
     try {
-      const supported = await Linking.canOpenURL(`tel:${dialablePhone}`);
-      if (!supported) {
-        Alert.alert('Chiamata non disponibile', 'Questo dispositivo non può aprire la chiamata telefonica.');
+      try {
+        await Linking.openURL(telUrl);
         return;
-      }
+      } catch {
+        if (Platform.OS === 'ios') {
+          await Linking.openURL(telPromptUrl);
+          return;
+        }
 
-      await Linking.openURL(`tel:${dialablePhone}`);
+        throw new Error('tel_unavailable');
+      }
     } catch {
       Alert.alert('Chiamata non disponibile', 'Non sono riuscito ad aprire la chiamata verso il salone.');
     }
@@ -8077,87 +10079,83 @@ export default function ClienteFrontendScreen() {
     const brandLabel = effectiveWorkspace?.salonName?.trim() || 'il salone';
     const message = encodeURIComponent(`Ciao, ti contatto dall'app per avere informazioni su una prenotazione da ${brandLabel}.`);
     const appUrl = `whatsapp://send?phone=${dialablePhone}&text=${message}`;
-    const webUrl = `https://wa.me/${dialablePhone}?text=${message}`;
+    const webUrl = `https://api.whatsapp.com/send?phone=${dialablePhone}&text=${message}`;
 
     try {
-      const supportedApp = await Linking.canOpenURL(appUrl);
-      if (supportedApp) {
+      try {
         await Linking.openURL(appUrl);
         return;
+      } catch {
+        // Fall back to the web entrypoint when the native scheme is unavailable or blocked on iOS.
       }
 
-      const supportedWeb = await Linking.canOpenURL(webUrl);
-      if (supportedWeb) {
-        await Linking.openURL(webUrl);
-        return;
-      }
-
-      Alert.alert('WhatsApp non disponibile', 'Non sono riuscito ad aprire WhatsApp su questo dispositivo.');
+      await Linking.openURL(webUrl);
     } catch {
       Alert.alert('WhatsApp non disponibile', 'Non sono riuscito ad aprire la chat WhatsApp del salone.');
     }
   };
 
   const handleFrontendBack = () => {
-    if (isBookingStarted) {
-      setIsBookingStarted(false);
-      setShowRequestsExpanded(true);
-      scrollFrontendToTop(!isWeb);
+    const targetSalonCode = normalizeSalonCode(
+      effectiveWorkspace?.salonCode || resolvedOrIncomingSalonCode
+    );
+
+    if (isFrontendRequestsRoute && targetSalonCode) {
+      router.replace({
+        pathname: '/cliente',
+        params: {
+          salon: targetSalonCode,
+          mode: 'booking',
+          autologin: '1',
+          email: String(profile.email ?? '').trim().toLowerCase(),
+          phone: limitPhoneToTenDigits(String(profile.telefono ?? '').trim()),
+        },
+      });
       return;
     }
-
-    if (ultimaRichiesta) {
-      setUltimaRichiesta(null);
-      setShowRequestsExpanded(true);
-      scrollFrontendToTop(!isWeb);
-      return;
-    }
-
-    if (showRequestsExpanded) {
-      setShowRequestsExpanded(false);
-      scrollFrontendToTop(!isWeb);
-      return;
-    }
-
-    if (isWeb && typeof window !== 'undefined') {
-      if (window.history.length > 1) {
-        window.history.back();
-        return;
-      }
-
-      window.location.assign('/');
-      return;
-    }
-
-    if (router.canGoBack()) {
-      router.back();
-      return;
-    }
-
-    router.replace('/');
   };
 
   const openFrontendSettings = useCallback(() => {
     const salonCodeForSettings =
       effectiveWorkspace?.salonCode || normalizedSelectedSalonCode || undefined;
+    const frontendSettingsSource = isFrontendRequestsRoute ? 'requests' : 'booking';
+    const frontendSettingsEmail = String(profile.email ?? '').trim().toLowerCase();
+    const frontendSettingsPhone = limitPhoneToTenDigits(String(profile.telefono ?? '').trim());
 
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
       const params = new URLSearchParams();
       if (salonCodeForSettings) {
         params.set('salon', salonCodeForSettings);
       }
+      params.set('source', frontendSettingsSource);
+      if (frontendSettingsEmail) {
+        params.set('email', frontendSettingsEmail);
+      }
+      if (frontendSettingsPhone) {
+        params.set('phone', frontendSettingsPhone);
+      }
       const query = params.toString();
-      window.location.assign(`/cliente-impostazioni${query ? `?${query}` : ''}`);
+      window.location.replace(`/cliente-impostazioni${query ? `?${query}` : ''}`);
       return;
     }
 
-    router.push({
+    router.replace({
       pathname: '/cliente-impostazioni',
       params: {
         salon: salonCodeForSettings,
+        source: frontendSettingsSource,
+        email: frontendSettingsEmail || undefined,
+        phone: frontendSettingsPhone || undefined,
       },
     });
-  }, [effectiveWorkspace?.salonCode, normalizedSelectedSalonCode, router]);
+  }, [
+    effectiveWorkspace?.salonCode,
+    isFrontendRequestsRoute,
+    normalizedSelectedSalonCode,
+    profile.email,
+    profile.telefono,
+    router,
+  ]);
 
   const redirectToFrontendAccess = useCallback(() => {
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
@@ -8246,33 +10244,54 @@ export default function ClienteFrontendScreen() {
       return;
     }
 
-    if (isBookingStarted) {
-      setIsBookingStarted(false);
-    }
-    if (ultimaRichiesta) {
-      setUltimaRichiesta(null);
-    }
-    pendingRequestsSectionJumpRef.current = true;
-    setShowRequestsExpanded(true);
+    setShowRequestsExpanded(isFrontendRequestsRoute);
     setShowWaitlistAlertsExpanded(false);
     waitlistRefreshHoldUntilRef.current = Date.now() + 1200;
-    requestAnimationFrame(() => {
-      markFrontendNotificationsAsViewed();
-    });
 
-    if (isWeb) {
+    const targetSalonCode = normalizeSalonCode(
+      effectiveWorkspace?.salonCode || resolvedOrIncomingSalonCode
+    );
+
+    if (isFrontendRequestsRoute) {
       requestAnimationFrame(() => {
-        setTimeout(() => {
-          if (requestsSectionY > 0) {
-            scrollFrontendToY(requestsSectionY - 18, false);
-            return;
-          }
-
-          scrollFrontendToTop(false);
-        }, 180);
+        setShowRequestsExpanded(true);
       });
+      return;
     }
+
+    router.push({
+      pathname: '/cliente-prenotazioni',
+      params: {
+        salon: targetSalonCode,
+        session: '1',
+        autologin: '1',
+        email: String(profile.email ?? '').trim().toLowerCase(),
+        phone: limitPhoneToTenDigits(String(profile.telefono ?? '').trim()),
+      },
+    });
   };
+
+  useEffect(() => {
+    if (!isFrontendRequestsRoute || !isRegistered) {
+      didEnterFrontendRequestsRouteRef.current = false;
+      return;
+    }
+
+    if (didEnterFrontendRequestsRouteRef.current) {
+      return;
+    }
+
+    didEnterFrontendRequestsRouteRef.current = true;
+    setShowRequestsExpanded(true);
+    pendingMarkFrontendNotificationsViewedRef.current = false;
+    markFrontendNotificationsAsViewed();
+    markWaitlistAlertsAsViewed();
+  }, [
+    isFrontendRequestsRoute,
+    isRegistered,
+    markFrontendNotificationsAsViewed,
+    markWaitlistAlertsAsViewed,
+  ]);
 
   useEffect(() => {
     if (!pendingRequestsSectionJumpRef.current) {
@@ -8288,7 +10307,14 @@ export default function ClienteFrontendScreen() {
   }, [isRegistered, isBookingStarted, isWeb, requestsSectionY, scrollToRequestsSection, showRequestsExpanded]);
 
   const shouldForceSalonLogin =
-    hasResolvedOrIncomingSalonCode && !isRegistered && hasSavedProfileForSelectedSalon;
+    hasResolvedOrIncomingSalonCode &&
+    !isFrontendRequestsRoute &&
+    !isRegistered &&
+    hasSavedProfileForSelectedSalon &&
+    initialBiometricParam !== '1' &&
+    !isHomeAutoLoginFlow &&
+    !frontendBiometricBusy &&
+    !isSavingProfile;
   const shouldForceRegisterOnly =
     hasResolvedOrIncomingSalonCode &&
     !isRegistered &&
@@ -8302,16 +10328,25 @@ export default function ClienteFrontendScreen() {
       ? 'register'
     : accessMode ?? 'login';
   const isManualRegistrationFlow = shouldForceRegisterOnly;
-  const heroPreAuthTitle = shouldForceSalonLogin
-      ? 'Accedi'
+  const heroPreAuthTitle = shouldBootstrapFrontendRequestsPage
+      ? 'Le mie prenotazioni'
+      : shouldForceSalonLogin
+      ? shouldShowFrontendAutoBootstrap
+        ? 'Prenota'
+        : 'Accedi'
       : shouldForceRegisterOnly
         ? 'Registrazione cliente'
       : heroTitle;
-  const heroPreAuthSubtitle = shouldForceSalonLogin
-      ? 'Hai già un profilo cliente in questo salone. Accedi con email e cellulare usati nella registrazione.'
+  const heroPreAuthSubtitle = shouldBootstrapFrontendRequestsPage
+      ? 'Sto aprendo lo storico cliente del salone collegato.'
+      : shouldForceSalonLogin
+      ? shouldShowFrontendAutoBootstrap
+        ? 'Sto completando l’ingresso nell’area cliente del salone collegato.'
+        : 'Hai già un profilo cliente in questo salone. Accedi con email e cellulare usati nella registrazione.'
       : shouldForceRegisterOnly
         ? 'Completa la registrazione del cliente per il salone collegato. Dopo il salvataggio potrai entrare e prenotare.'
       : tf('frontend_subtitle');
+  const shouldSuppressLegacyLinkedSalonAuth = shouldBootstrapFrontendRequestsPage;
 
   const lockSelectionTap = useCallback((durationMs = 220) => {
     selectionTapLockUntilRef.current = Date.now() + durationMs;
@@ -8347,7 +10382,7 @@ export default function ClienteFrontendScreen() {
             {isLoadingSalon
               ? 'Caricamento servizi del salone...'
               : salonLoadError ||
-                'I servizi del salone non sono ancora disponibili. Riprova tra un attimo.'}
+                'Nessun servizio ancora disponibile.'}
           </Text>
         </View>,
       ];
@@ -8358,8 +10393,8 @@ export default function ClienteFrontendScreen() {
       const serviceUsesOperators =
         getConfiguredOperatorsForFrontendService({
           serviceName: item.nome,
-          services: effectiveServizi,
-          operators: effectiveOperatori,
+          services: displayFrontendServizi,
+          operators: displayFrontendOperatori,
         }).length > 0;
       const accent = resolveServiceAccent({
         serviceId: item.id,
@@ -8378,14 +10413,14 @@ export default function ClienteFrontendScreen() {
           style={[
             styles.serviceCard,
             isWeb && styles.serviceCardWeb,
-            selected ? styles.serviceCardSelectedWide : styles.serviceCardUnselectedNarrow,
+            !isWeb && styles.serviceCardNative,
             isWeb &&
               (selected
                 ? styles.serviceCardSelectedWideWeb
                 : styles.serviceCardUnselectedNarrowWeb),
             {
-              backgroundColor: accent.bg,
-              borderColor: selected ? '#1E293B' : accent.border,
+              backgroundColor: selected && !isWeb ? '#EEF3FB' : accent.bg,
+              borderColor: selected ? '#1F2A44' : accent.border,
             },
             selected && styles.serviceCardActive,
           ]}
@@ -8400,9 +10435,9 @@ export default function ClienteFrontendScreen() {
                 serviceName: item.nome,
                 selectedOperatorId: operatoreId || null,
                 selectedOperatorName: operatoreNome || null,
-                operators: effectiveOperatori,
+                operators: displayFrontendOperatori,
                 appointments: effectiveBlockingAppointments,
-                services: effectiveServizi,
+                services: displayFrontendServizi,
                 settings: effectiveAvailabilitySettings,
               })
             ) {
@@ -8415,6 +10450,7 @@ export default function ClienteFrontendScreen() {
             style={[
               styles.serviceCardTitle,
               isWeb && styles.serviceCardTitleWeb,
+              isWeb && { fontFamily: FRONTEND_SIMPLE_WEB_FONT },
               { color: '#111111' },
             ]}
             numberOfLines={3}
@@ -8437,6 +10473,7 @@ export default function ClienteFrontendScreen() {
                   style={[
                     styles.serviceRoleBadgeText,
                     isWeb && styles.serviceRoleBadgeTextWeb,
+                    isWeb && { fontFamily: FRONTEND_SIMPLE_WEB_FONT },
                     { color: accent.text },
                   ]}
                   numberOfLines={1}
@@ -8448,20 +10485,36 @@ export default function ClienteFrontendScreen() {
                 </Text>
               </View>
             ) : null}
-            {showOperatorBadge ? (
-              <View
-                style={[
-                  styles.serviceOperatorInlineBadge,
-                  isWeb && styles.serviceOperatorInlineBadgeWeb,
-                  { borderColor: accent.border },
-                ]}
-              >
-                <Ionicons name="person" size={12} color={accent.text} />
-              </View>
-            ) : null}
-            {showSalonBadge ? (
-              <View style={[styles.serviceSalonInlineBadge, isWeb && styles.serviceSalonInlineBadgeWeb]}>
-                <Text style={styles.serviceSalonInlineBadgeText}>Salone</Text>
+            {showOperatorBadge || showSalonBadge ? (
+              <View style={[styles.serviceCardSupportRow, isWeb && styles.serviceCardSupportRowWeb]}>
+                {showOperatorBadge ? (
+                  <View
+                    style={[
+                      styles.serviceOperatorInlineBadge,
+                      isWeb && styles.serviceOperatorInlineBadgeWeb,
+                      { borderColor: accent.border },
+                    ]}
+                  >
+                    <Ionicons name="person" size={isWeb ? 14 : 13} color={accent.text} />
+                  </View>
+                ) : null}
+                {showSalonBadge ? (
+                  <View
+                    style={[
+                      styles.serviceSalonInlineBadge,
+                      isWeb && styles.serviceSalonInlineBadgeWeb,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.serviceSalonInlineBadgeText,
+                        isWeb && { fontFamily: FRONTEND_SIMPLE_WEB_FONT },
+                      ]}
+                    >
+                      Salone
+                    </Text>
+                  </View>
+                ) : null}
               </View>
             ) : null}
           </View>
@@ -8469,6 +10522,7 @@ export default function ClienteFrontendScreen() {
             style={[
               styles.serviceCardDuration,
               isWeb && styles.serviceCardDurationWeb,
+              isWeb && { fontFamily: FRONTEND_SIMPLE_WEB_FONT },
               { color: '#111111' },
             ]}
             numberOfLines={1}
@@ -8482,6 +10536,7 @@ export default function ClienteFrontendScreen() {
             style={[
               styles.serviceCardPrice,
               isWeb && styles.serviceCardPriceWeb,
+              isWeb && { fontFamily: FRONTEND_SIMPLE_WEB_FONT },
               { color: '#111111' },
             ]}
             numberOfLines={1}
@@ -8509,6 +10564,203 @@ export default function ClienteFrontendScreen() {
         </TouchableOpacity>
       );
     });
+  };
+
+  const shouldShowWaitlistSummarySection =
+    isRegistered && (waitlistAlertsCount > 0 || isBookingStarted);
+
+  const renderWaitlistAlertsSection = (options?: { inBooking?: boolean }) => {
+    const inBooking = options?.inBooking === true;
+
+    if (!shouldShowWaitlistSummarySection) {
+      return null;
+    }
+
+    const hasVisibleAlerts = waitlistAlertsForDisplay.length > 0;
+
+    return (
+      <View style={styles.sectionCard}>
+        <View style={styles.requestsSectionHeader}>
+          <Text style={styles.requestsSectionTitle}>Avvisi slot liberati</Text>
+          <Text style={styles.requestsSectionSubtitle}>
+            {inBooking
+              ? 'Monitora subito gli slot che hai deciso di seguire mentre stai prenotando.'
+              : 'Monitoraggio degli slot che hai scelto di seguire.'}
+          </Text>
+        </View>
+        <TouchableOpacity
+          style={[styles.requestsToggleButton, styles.requestsToggleButtonInline]}
+          onPress={toggleWaitlistAlertsExpanded}
+          activeOpacity={0.9}
+          webTouchAction="manipulation"
+        >
+          <View style={styles.requestsToggleLead}>
+            <View style={styles.requestsToggleLeadIcon}>
+              <Ionicons
+                name={showWaitlistAlertsExpanded ? 'timer-outline' : 'time-outline'}
+                size={18}
+                color="#0f766e"
+              />
+            </View>
+            <View style={styles.requestsToggleTextWrap}>
+              <Text style={styles.requestsToggleTitle}>Avvisi slot liberati</Text>
+              <Text style={styles.requestsToggleSubtitle}>
+                {hasVisibleAlerts
+                  ? 'Slot monitorati, liberazioni e stato degli avvisi'
+                  : 'Nessun avviso attivo adesso. Quando scegli slot occupati puoi attivare gli avvisi qui sotto.'}
+              </Text>
+            </View>
+          </View>
+          <View style={styles.requestsToggleActions}>
+            {waitlistUnreadCount > 0 ? (
+              <View style={styles.requestsToggleBadge}>
+                <Text style={styles.requestsToggleBadgeText}>
+                  {waitlistUnreadCount > 99 ? '99+' : waitlistUnreadCount}
+                </Text>
+              </View>
+            ) : null}
+            <View style={styles.requestsToggleIconWrap}>
+              <Ionicons
+                name={showWaitlistAlertsExpanded ? 'chevron-up' : 'chevron-down'}
+                size={26}
+                color="#0f766e"
+              />
+            </View>
+          </View>
+        </TouchableOpacity>
+
+        {showWaitlistAlertsExpanded ? (
+          <View style={styles.inlineNotificationsCard}>
+            <View style={styles.inlineNotificationsHeader}>
+              <Ionicons name="timer-outline" size={16} color="#0f172a" />
+              <Text style={styles.inlineNotificationsTitle}>Avvisi Slot Liberati</Text>
+            </View>
+            <Text style={styles.inlineNotificationsText}>
+              {hasVisibleAlerts
+                ? 'Qui trovi gli avvisi salvati sugli slot che volevi monitorare.'
+                : 'Non hai ancora avvisi attivi. Appena scegli un giorno o un blocco occupato, l’avviso comparirà qui e riceverai la notifica quando si libera.'}
+            </Text>
+            {hasVisibleAlerts ? (
+              <View style={styles.waitlistAlertsList}>
+                {waitlistAlertsForDisplay.map((item) => {
+                  const status = getDerivedWaitlistAlertStatus(item);
+                  const statusLabel =
+                    status === 'notified'
+                      ? 'Slot libero'
+                      : status === 'expired'
+                        ? 'Scaduto'
+                        : 'Attivo';
+                  const statusStyle =
+                    status === 'notified'
+                      ? styles.waitlistAlertStatusNotified
+                      : status === 'expired'
+                        ? styles.waitlistAlertStatusExpired
+                        : styles.waitlistAlertStatusWaiting;
+                  const serviceName = String(item.requested_service_name ?? 'Servizio').trim();
+                  const appointmentDate = String(item.appointment_date ?? '').trim();
+                  const appointmentTime = String(item.appointment_time ?? '').trim().slice(0, 5);
+                  const operatorName = String(item.requested_operator_name ?? '').trim();
+                  const detailLine = [
+                    serviceName,
+                    appointmentDate ? formatDateCompact(appointmentDate) : '',
+                    appointmentTime,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ');
+
+                  return (
+                    <View
+                      key={item.id}
+                      style={[
+                        styles.waitlistAlertCard,
+                        isWeb &&
+                          mediumFrontendCards && {
+                            paddingHorizontal: 14,
+                            paddingVertical: 12,
+                          },
+                        isWeb &&
+                          compactFrontendCards && {
+                            paddingHorizontal: 12,
+                            paddingVertical: 11,
+                            gap: 5,
+                          },
+                      ]}
+                    >
+                      <View
+                        style={[
+                          styles.waitlistAlertTopRow,
+                          isWeb &&
+                            compactFrontendCards && {
+                              flexDirection: 'column',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              gap: 6,
+                            },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.waitlistAlertTitle,
+                            isWeb &&
+                              compactFrontendCards && {
+                                textAlign: 'center',
+                              },
+                          ]}
+                          numberOfLines={compactFrontendCards ? 2 : 1}
+                          adjustsFontSizeToFit
+                          minimumFontScale={0.82}
+                        >
+                          {detailLine}
+                        </Text>
+                        <View style={[styles.waitlistAlertStatusChip, statusStyle]}>
+                          <Text style={styles.waitlistAlertStatusText}>{statusLabel}</Text>
+                        </View>
+                      </View>
+                      <Text
+                        style={[
+                          styles.waitlistAlertMeta,
+                          isWeb &&
+                            compactFrontendCards && {
+                              textAlign: 'center',
+                            },
+                        ]}
+                        numberOfLines={1}
+                        adjustsFontSizeToFit
+                        minimumFontScale={0.8}
+                      >
+                        Operatore: {operatorName || 'Salone'}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.waitlistAlertMeta,
+                          isWeb &&
+                            compactFrontendCards && {
+                              textAlign: 'center',
+                            },
+                        ]}
+                        numberOfLines={compactFrontendCards ? 3 : 2}
+                        adjustsFontSizeToFit
+                        minimumFontScale={0.82}
+                      >
+                        {status === 'notified'
+                          ? 'Uno slot compatibile si è liberato. Apri Prenota e confermalo subito.'
+                          : status === 'expired'
+                            ? 'L’avviso è scaduto senza una nuova prenotazione.'
+                            : 'L’avviso è attivo. Ti avviseremo appena si libera uno slot compatibile.'}
+                      </Text>
+                    </View>
+                  );
+                })}
+              </View>
+            ) : (
+              <Text style={styles.sectionHint}>
+                Quando trovi slot occupati da altri clienti, qui compariranno gli avvisi che puoi seguire o annullare.
+              </Text>
+            )}
+          </View>
+        ) : null}
+      </View>
+    );
   };
 
   const renderDayPickerDayCards = () =>
@@ -8800,15 +11052,13 @@ export default function ClienteFrontendScreen() {
       ]}
     >
       <View style={styles.heroTopLeftCluster}>
-        {isWeb ? (
-          <button
-            type="button"
-            aria-label="Torna indietro"
-            onClick={(event) => {
-              stopWebTopBarEvent(event);
-              handleFrontendBack();
-            }}
-            style={WEB_TOP_ICON_BUTTON_STYLE}
+        {isFrontendRequestsRoute ? (
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel="Torna a prenota"
+            style={[styles.frontendBackInlineButton, compactTopBar && styles.frontendBackInlineButtonCompact]}
+            onPress={handleFrontendBack}
+            activeOpacity={0.9}
           >
             <View
               style={[
@@ -8820,146 +11070,138 @@ export default function ClienteFrontendScreen() {
             >
               <Ionicons name="chevron-back" size={compactTopBar ? 16 : 22} color="#0f172a" />
             </View>
-          </button>
-        ) : (
-          <TouchableOpacity
-            style={[
-              styles.actionIconBadge,
-              styles.homeHouseSettingsButton,
-              compactTopBar && styles.actionIconBadgeCompact,
-              compactTopBar && styles.actionIconBadgePhone,
-            ]}
-            onPress={handleFrontendBack}
-            activeOpacity={0.9}
-          >
-            <Ionicons name="chevron-back" size={compactTopBar ? 16 : 22} color="#0f172a" />
+            {isWeb ? (
+              <Text
+                style={[
+                  styles.frontendBackInlineLabel,
+                  compactTopBar && styles.frontendBackInlineLabelCompact,
+                ]}
+              >
+                Torna alla sezione Prenota
+              </Text>
+            ) : null}
           </TouchableOpacity>
+        ) : (
+          <View style={styles.heroTopActionsSpacer} />
         )}
       </View>
       {isRegistered ? (
         <View style={[styles.heroTopActions, compactTopBar && styles.heroTopActionsCompact]}>
-          {isWeb ? (
-            <button
-              type="button"
-              aria-label="Apri mie prenotazioni"
-              onClick={(event) => {
-                stopWebTopBarEvent(event);
-                handleOpenNotifications();
-              }}
-              style={WEB_TOP_ICON_BUTTON_STYLE}
-            >
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel="Apri mie prenotazioni"
+            style={[
+              styles.actionIconBadge,
+              styles.homeHouseSettingsButton,
+              styles.notificationsTopBadge,
+              isWeb ? styles.notificationsTopBadgeWeb : styles.notificationsTopBadgeNative,
+              compactTopBar && styles.actionIconBadgeCompact,
+              compactTopBar && styles.actionIconBadgePhone,
+              !isWeb && !isFrontendRequestsRoute && styles.notificationsTopBadgeNativeExpanded,
+              !isWeb && isFrontendRequestsRoute && styles.notificationsTopBadgeNativeCollapsed,
+            ]}
+            onPress={handleOpenNotifications}
+            activeOpacity={0.9}
+          >
+            <Ionicons
+              name="notifications"
+              size={compactTopBar ? 16 : 22}
+              color="#0f172a"
+            />
+            {!isFrontendRequestsRoute ? (
+              <Text style={styles.notificationsTopBadgeLabel}>
+                {isWeb ? 'Vai alle tue prenotazioni' : 'Prenotazioni'}
+              </Text>
+            ) : null}
+            {totalFrontendNotificationsCount > 0 ? (
               <View
                 style={[
-                  styles.actionIconBadge,
-                  styles.homeHouseSettingsButton,
-                  styles.notificationsTopBadge,
-                  compactTopBar && styles.actionIconBadgeCompact,
-                  compactTopBar && styles.actionIconBadgePhone,
+                  styles.notificationsTopCountBadge,
+                  compactTopBar && styles.notificationsTopCountBadgeCompact,
                 ]}
               >
-                <Ionicons
-                  name="notifications"
-                  size={compactTopBar ? 16 : 22}
-                  color="#0f172a"
-                />
-                {totalFrontendNotificationsCount > 0 ? (
-                  <View
-                    style={[
-                      styles.notificationsTopCountBadge,
-                      compactTopBar && styles.notificationsTopCountBadgeCompact,
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.notificationsTopCountBadgeText,
-                        compactTopBar && styles.notificationsTopCountBadgeTextCompact,
-                      ]}
-                    >
-                      {totalFrontendNotificationsCount > 99 ? '99+' : totalFrontendNotificationsCount}
-                    </Text>
-                  </View>
-                ) : null}
-              </View>
-            </button>
-          ) : (
-            <TouchableOpacity
-              style={[
-                styles.actionIconBadge,
-                styles.homeHouseSettingsButton,
-                styles.notificationsTopBadge,
-                compactTopBar && styles.actionIconBadgeCompact,
-                compactTopBar && styles.actionIconBadgePhone,
-              ]}
-              onPress={handleOpenNotifications}
-              activeOpacity={0.9}
-            >
-              <Ionicons
-                name="notifications"
-                size={compactTopBar ? 16 : 22}
-                color="#0f172a"
-              />
-              {totalFrontendNotificationsCount > 0 ? (
-                <View
+                <Text
                   style={[
-                    styles.notificationsTopCountBadge,
-                    compactTopBar && styles.notificationsTopCountBadgeCompact,
+                    styles.notificationsTopCountBadgeText,
+                    compactTopBar && styles.notificationsTopCountBadgeTextCompact,
                   ]}
                 >
-                  <Text
-                    style={[
-                      styles.notificationsTopCountBadgeText,
-                      compactTopBar && styles.notificationsTopCountBadgeTextCompact,
-                    ]}
-                  >
-                    {totalFrontendNotificationsCount > 99 ? '99+' : totalFrontendNotificationsCount}
-                  </Text>
-                </View>
-              ) : null}
-            </TouchableOpacity>
-          )}
-          {isWeb ? (
-            <button
-              type="button"
-              aria-label="Apri impostazioni"
-              onClick={(event) => {
-                stopWebTopBarEvent(event);
-                openFrontendSettings();
-              }}
-              style={WEB_TOP_ICON_BUTTON_STYLE}
-            >
-              <View
-                style={[
-                  styles.actionIconBadge,
-                  styles.homeHouseSettingsButton,
-                  styles.settingsGearBadge,
-                  compactTopBar && styles.actionIconBadgeCompact,
-                  compactTopBar && styles.actionIconBadgePhone,
-                ]}
-              >
-                <Ionicons name="settings" size={compactTopBar ? 16 : 22} color="#0f172a" />
+                  {totalFrontendNotificationsCount > 99 ? '99+' : totalFrontendNotificationsCount}
+                </Text>
               </View>
-            </button>
-          ) : (
-            <TouchableOpacity
-              style={[
-                styles.actionIconBadge,
-                styles.homeHouseSettingsButton,
-                styles.settingsGearBadge,
-                compactTopBar && styles.actionIconBadgeCompact,
-                compactTopBar && styles.actionIconBadgePhone,
-              ]}
-              onPress={openFrontendSettings}
-              activeOpacity={0.9}
-            >
-              <Ionicons name="settings" size={compactTopBar ? 16 : 22} color="#0f172a" />
-            </TouchableOpacity>
-          )}
+            ) : null}
+          </TouchableOpacity>
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel="Apri impostazioni"
+            style={[
+              styles.actionIconBadge,
+              styles.homeHouseSettingsButton,
+              styles.settingsGearBadge,
+              compactTopBar && styles.actionIconBadgeCompact,
+              compactTopBar && styles.actionIconBadgePhone,
+            ]}
+            onPress={openFrontendSettings}
+            activeOpacity={0.9}
+          >
+            <Ionicons name="settings" size={compactTopBar ? 16 : 22} color="#0f172a" />
+          </TouchableOpacity>
         </View>
       ) : (
         <View style={styles.heroTopActionsSpacer} />
       )}
     </View>
   );
+
+  const areRequestsVisible = showRequestsExpanded;
+
+  if (shouldRenderJoinWebInterstitial) {
+    return (
+      <View style={styles.container}>
+        <ScrollView
+          style={styles.container}
+          contentContainerStyle={[styles.content, styles.joinWebGateContent]}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={[styles.heroCard, styles.joinWebGateCard]}>
+            <View style={styles.frontendBrandBand}>
+              <AppWordmark />
+            </View>
+            <Text style={styles.joinWebGateTitle}>
+              {joinWebEntryGate === 'probing'
+                ? 'Sto aprendo SalonPro'
+                : 'Apri SalonPro o continua sul Web'}
+            </Text>
+            <Text style={styles.joinWebGateText}>
+              {joinWebEntryGate === 'probing'
+                ? 'Se l’app e già installata su questo dispositivo, si aprira automaticamente tra un attimo.'
+                : 'Se hai gia installato SalonPro, riaprila direttamente dall’app. Altrimenti puoi scaricarla oppure continuare nel browser.'}
+            </Text>
+            {joinWebEntryGate === 'probing' ? (
+              <ActivityIndicator size="large" color="#1d4ed8" style={styles.joinWebGateSpinner} />
+            ) : (
+              <View style={styles.joinWebGateActions}>
+                <TouchableOpacity
+                  style={[styles.primaryButton, styles.joinWebGatePrimaryButton]}
+                  onPress={handleDownloadSalonProApp}
+                  activeOpacity={0.9}
+                >
+                  <Text style={styles.primaryButtonText}>Scarica APP</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.secondaryActionButton, styles.joinWebGateSecondaryButton]}
+                  onPress={handleContinueJoinOnWeb}
+                  activeOpacity={0.9}
+                >
+                  <Text style={styles.secondaryActionButtonText}>Continua sul Web</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
+        </ScrollView>
+      </View>
+    );
+  }
 
   return (
     <KeyboardAvoidingView
@@ -8987,20 +11229,35 @@ export default function ClienteFrontendScreen() {
         onScroll={isWeb ? () => lockSelectionTap(180) : undefined}
       >
         <View style={styles.heroCard}>
-          {!isWeb ? renderHeroTopBar() : null}
+          {renderHeroTopBar()}
 
-          <View style={styles.frontendBrandBand}>
+          <View
+            style={[
+              styles.frontendBrandBand,
+              !isWeb && isRegistered && styles.frontendBrandBandNativeRegistered,
+            ]}
+          >
             <AppWordmark />
           </View>
 
           <View style={styles.frontendTitleBand}>
-            <Text style={styles.title}>
+            <Text
+              style={styles.title}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.6}
+            >
               {!isRegistered ? heroPreAuthTitle : heroTitle}
             </Text>
           </View>
 
           {connectedSalonBadgeLabel ? (
-            <View style={styles.connectedSalonBadge}>
+            <View
+              style={[
+                styles.connectedSalonBadge,
+                isFrontendRequestsRoute && styles.connectedSalonBadgeCompact,
+              ]}
+            >
               <Text style={styles.connectedSalonBadgeEyebrow}>
                 {isManualRegistrationFlow ? 'Salone collegato per la registrazione' : 'Salone collegato'}
               </Text>
@@ -9011,7 +11268,7 @@ export default function ClienteFrontendScreen() {
           ) : null}
 
           <Text style={[styles.subtitle, styles.subtitleCentered]}>
-            {!isRegistered ? heroPreAuthSubtitle : tf('frontend_subtitle')}
+            {!isRegistered ? heroPreAuthSubtitle : registeredHeroSubtitle}
           </Text>
           {isRegistered && isBookingStarted && notifiedWaitlistAlerts.length > 0 ? (
             <View style={styles.waitlistLiveBanner}>
@@ -9066,7 +11323,7 @@ export default function ClienteFrontendScreen() {
               </View>
             </View>
           </>
-        ) : isRegistered && !isBookingStarted ? (
+        ) : shouldSuppressLegacyLinkedSalonAuth ? null : isRegistered && !shouldRenderLinkedSalonBookingExperience && !isBookingStarted ? (
           <>
             <View style={styles.heroInfoCard}>
               <Text style={styles.heroInfoEyebrow}>Profilo</Text>
@@ -9115,7 +11372,7 @@ export default function ClienteFrontendScreen() {
         </View>
       ) : null}
 
-      {isRegistered && !isBookingStarted ? (
+      {shouldRenderFrontendRequestsPage || shouldRenderLegacyHomeRequestsSection ? (
         <View
           style={styles.sectionCard}
           onLayout={(event) => {
@@ -9179,7 +11436,7 @@ export default function ClienteFrontendScreen() {
             </View>
           </TouchableOpacity>
 
-              {showRequestsExpanded ? (
+              {areRequestsVisible ? (
             <>
               {!frontendAutoAcceptEnabled ? (
                 <View style={styles.inlineNotificationsCard}>
@@ -9203,15 +11460,47 @@ export default function ClienteFrontendScreen() {
                   <View style={styles.requestOverviewRow}>
                     <View style={[styles.requestOverviewCard, styles.requestOverviewCardPending]}>
                       <Text style={styles.requestOverviewValue}>{richiestePendenti.length}</Text>
-                      <Text style={styles.requestOverviewLabel}>In attesa</Text>
+                      <Text
+                        style={styles.requestOverviewLabel}
+                        numberOfLines={1}
+                        adjustsFontSizeToFit
+                        minimumFontScale={0.7}
+                      >
+                        In attesa
+                      </Text>
                     </View>
                     <View style={[styles.requestOverviewCard, styles.requestOverviewCardAccepted]}>
                       <Text style={styles.requestOverviewValue}>{richiesteApprovate.length}</Text>
-                      <Text style={styles.requestOverviewLabel}>Confermate</Text>
+                      <Text
+                        style={styles.requestOverviewLabel}
+                        numberOfLines={1}
+                        adjustsFontSizeToFit
+                        minimumFontScale={0.7}
+                      >
+                        Confermate
+                      </Text>
+                    </View>
+                    <View style={[styles.requestOverviewCard, styles.requestOverviewCardSalonCancelled]}>
+                      <Text style={styles.requestOverviewValue}>{richiesteAnnullateDalSalone.length}</Text>
+                      <Text
+                        style={styles.requestOverviewLabel}
+                        numberOfLines={2}
+                        adjustsFontSizeToFit
+                        minimumFontScale={0.68}
+                      >
+                        Annullate dal salone
+                      </Text>
                     </View>
                     <View style={[styles.requestOverviewCard, styles.requestOverviewCardArchived]}>
                       <Text style={styles.requestOverviewValue}>{richiesteArchiviate.length}</Text>
-                      <Text style={styles.requestOverviewLabel}>Storico</Text>
+                      <Text
+                        style={styles.requestOverviewLabel}
+                        numberOfLines={1}
+                        adjustsFontSizeToFit
+                        minimumFontScale={0.7}
+                      >
+                        Storico
+                      </Text>
                     </View>
                   </View>
 
@@ -9227,6 +11516,7 @@ export default function ClienteFrontendScreen() {
                       renderCustomerRequestCard(item, {
                         canCancel: item.stato === 'In attesa',
                         cancelLabel: 'Annulla richiesta',
+                        compactHistory: true,
                       })
                     )}
                   </View>
@@ -9246,18 +11536,32 @@ export default function ClienteFrontendScreen() {
                         showCalendarButton: true,
                         showConfirmationHint: true,
                         showContactActions: true,
+                        compactHistory: true,
                       })
                     )}
                   </View>
+
+                  {richiesteAnnullateDalSalone.length > 0 ? (
+                    <View style={[styles.requestSection, styles.requestSectionAlert]}>
+                      <Text style={styles.requestSectionTitle}>Annullate dal salone</Text>
+                      <Text style={styles.requestSectionHint}>
+                        Appuntamenti cancellati dal salone. Li trovi sempre qui, separati dallo storico normale.
+                      </Text>
+                      {richiesteAnnullateDalSalone.map((item) =>
+                        renderCustomerRequestCard(item, { compactHistory: true })
+                      )}
+                    </View>
+                  ) : null}
 
                   {richiesteArchiviate.length > 0 ? (
                     <View style={[styles.requestSection, styles.requestSectionLast]}>
                       <Text style={styles.requestSectionTitle}>Storico</Text>
                       <Text style={styles.requestSectionHint}>
-                        Richieste rifiutate o annullate, separate da quelle ancora attive.
+                        Richieste rifiutate o annullate da te, separate da quelle ancora attive.
                       </Text>
                       {richiesteArchiviatePerMese.map((group) => {
                         const expanded = archivedMonthExpanded[group.key] ?? false;
+                        const groupYear = group.key.split('-')[0] ?? '';
                         return (
                           <View key={group.key} style={styles.archivedMonthSection}>
                             <TouchableOpacity
@@ -9271,6 +11575,18 @@ export default function ClienteFrontendScreen() {
                               activeOpacity={0.9}
                             >
                               <View style={styles.archivedMonthToggleTextWrap}>
+                                <View style={styles.archivedMonthToggleTopRow}>
+                                  {groupYear ? (
+                                    <View style={styles.archivedMonthYearBadge}>
+                                      <Text style={styles.archivedMonthYearBadgeText}>
+                                        {groupYear}
+                                      </Text>
+                                    </View>
+                                  ) : null}
+                                  <Text style={styles.archivedMonthToggleActionLabel}>
+                                    {expanded ? 'Chiudi mese' : 'Apri mese'}
+                                  </Text>
+                                </View>
                                 <Text style={styles.archivedMonthToggleTitle}>{group.label}</Text>
                                 <Text style={styles.archivedMonthToggleCount}>
                                   {group.items.length} appuntamenti
@@ -9301,190 +11617,11 @@ export default function ClienteFrontendScreen() {
         </View>
       ) : null}
 
-      {isRegistered && waitlistAlertsForDisplay.length > 0 ? (
-        <View style={styles.sectionCard}>
-          <View style={styles.requestsSectionHeader}>
-            <Text style={styles.requestsSectionTitle}>Avvisi slot liberati</Text>
-            <Text style={styles.requestsSectionSubtitle}>
-              Monitoraggio degli slot che hai scelto di seguire.
-            </Text>
-          </View>
-          <TouchableOpacity
-            style={[styles.requestsToggleButton, styles.requestsToggleButtonInline]}
-            onPress={toggleWaitlistAlertsExpanded}
-            activeOpacity={0.9}
-            webTouchAction="manipulation"
-          >
-            <View style={styles.requestsToggleLead}>
-              <View style={styles.requestsToggleLeadIcon}>
-                <Ionicons
-                  name={showWaitlistAlertsExpanded ? 'timer-outline' : 'time-outline'}
-                  size={18}
-                  color="#0f766e"
-                />
-              </View>
-              <View style={styles.requestsToggleTextWrap}>
-                <Text style={styles.requestsToggleTitle}>Avvisi slot liberati</Text>
-                <Text style={styles.requestsToggleSubtitle}>
-                  Slot monitorati, liberazioni e stato degli avvisi
-                </Text>
-              </View>
-            </View>
-            <View style={styles.requestsToggleActions}>
-              {waitlistUnreadCount > 0 ? (
-                <View style={styles.requestsToggleBadge}>
-                  <Text style={styles.requestsToggleBadgeText}>
-                    {waitlistUnreadCount > 99 ? '99+' : waitlistUnreadCount}
-                  </Text>
-                </View>
-              ) : null}
-              <View style={styles.requestsToggleIconWrap}>
-                <Ionicons
-                  name={showWaitlistAlertsExpanded ? 'chevron-up' : 'chevron-down'}
-                  size={26}
-                  color="#0f766e"
-                />
-              </View>
-            </View>
-          </TouchableOpacity>
+      {!isFrontendRequestsRoute && !shouldRenderLinkedSalonBookingExperience && !isBookingStarted
+        ? renderWaitlistAlertsSection()
+        : null}
 
-          {showWaitlistAlertsExpanded ? (
-            <View style={styles.inlineNotificationsCard}>
-              <View style={styles.inlineNotificationsHeader}>
-                <Ionicons name="timer-outline" size={16} color="#0f172a" />
-                <Text style={styles.inlineNotificationsTitle}>Avvisi Slot Liberati</Text>
-              </View>
-              <Text style={styles.inlineNotificationsText}>
-                Qui trovi gli avvisi salvati sugli slot che volevi monitorare.
-              </Text>
-                <View style={styles.waitlistAlertsList}>
-                {waitlistAlertsForDisplay.map((item) => {
-                  const status = getDerivedWaitlistAlertStatus(item);
-                  const statusLabel =
-                    status === 'notified'
-                      ? 'Slot libero'
-                      : status === 'expired'
-                        ? 'Scaduto'
-                        : 'Attivo';
-                  const statusStyle =
-                    status === 'notified'
-                      ? styles.waitlistAlertStatusNotified
-                      : status === 'expired'
-                        ? styles.waitlistAlertStatusExpired
-                        : styles.waitlistAlertStatusWaiting;
-                  const serviceName = String(item.requested_service_name ?? 'Servizio').trim();
-                  const appointmentDate = String(item.appointment_date ?? '').trim();
-                  const appointmentTime = String(item.appointment_time ?? '').trim().slice(0, 5);
-                  const operatorName = String(item.requested_operator_name ?? '').trim();
-                  const detailLine = [serviceName, appointmentDate ? formatDateCompact(appointmentDate) : '', appointmentTime]
-                    .filter(Boolean)
-                    .join(' · ');
-
-                  return (
-                    <View
-                      key={item.id}
-                      style={[
-                        styles.waitlistAlertCard,
-                        isWeb &&
-                          mediumFrontendCards && {
-                            paddingHorizontal: 14,
-                            paddingVertical: 12,
-                          },
-                        isWeb &&
-                          compactFrontendCards && {
-                            paddingHorizontal: 12,
-                            paddingVertical: 11,
-                            gap: 5,
-                          },
-                      ]}>
-                      <View
-                        style={[
-                          styles.waitlistAlertTopRow,
-                          isWeb &&
-                            compactFrontendCards && {
-                              flexDirection: 'column',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              gap: 6,
-                            },
-                        ]}>
-                        <Text
-                          style={[
-                            styles.waitlistAlertTitle,
-                            isWeb &&
-                              compactFrontendCards && {
-                                textAlign: 'center',
-                              },
-                          ]}
-                          numberOfLines={compactFrontendCards ? 2 : 1}
-                          adjustsFontSizeToFit
-                          minimumFontScale={0.82}
-                        >
-                          {detailLine}
-                        </Text>
-                        <View style={[styles.waitlistAlertStatusChip, statusStyle]}>
-                          <Text style={styles.waitlistAlertStatusText}>{statusLabel}</Text>
-                        </View>
-                      </View>
-                      {operatorName ? (
-                        <Text
-                          style={[
-                            styles.waitlistAlertMeta,
-                            isWeb &&
-                              compactFrontendCards && {
-                                textAlign: 'center',
-                              },
-                          ]}
-                          numberOfLines={1}
-                          adjustsFontSizeToFit
-                          minimumFontScale={0.8}
-                        >
-                          Operatore: {operatorName}
-                        </Text>
-                      ) : (
-                        <Text
-                          style={[
-                            styles.waitlistAlertMeta,
-                            isWeb &&
-                              compactFrontendCards && {
-                                textAlign: 'center',
-                              },
-                          ]}
-                          numberOfLines={1}
-                          adjustsFontSizeToFit
-                          minimumFontScale={0.8}
-                        >
-                          Operatore: Salone
-                        </Text>
-                      )}
-                      <Text
-                        style={[
-                          styles.waitlistAlertMeta,
-                          isWeb &&
-                            compactFrontendCards && {
-                              textAlign: 'center',
-                            },
-                        ]}
-                        numberOfLines={compactFrontendCards ? 3 : 2}
-                        adjustsFontSizeToFit
-                        minimumFontScale={0.82}
-                      >
-                        {status === 'notified'
-                          ? 'Uno slot compatibile si è liberato. Apri Prenota e confermalo subito.'
-                          : status === 'expired'
-                            ? 'L’avviso è scaduto senza una nuova prenotazione.'
-                            : 'L’avviso è attivo. Ti avviseremo appena si libera uno slot compatibile.'}
-                      </Text>
-                    </View>
-                  );
-                })}
-              </View>
-            </View>
-          ) : null}
-        </View>
-      ) : null}
-
-      {ultimaRichiesta && !isBookingStarted ? (
+      {ultimaRichiesta && !isFrontendRequestsRoute && !shouldRenderLinkedSalonBookingExperience && !isBookingStarted ? (
         <View style={[styles.confirmationCard, isWeb && styles.confirmationCardWeb]}>
           <View style={[styles.confirmationTopRow, isWeb && styles.confirmationTopRowWeb]}>
             <View style={styles.confirmationIconWrap}>
@@ -9566,83 +11703,137 @@ export default function ClienteFrontendScreen() {
           </View>
         ) : null}
 
-      {!isRegistered ? (
+      {shouldBootstrapFrontendRequestsPage ? (
+        <View style={[styles.sectionCard, styles.requestsBootstrapCard]}>
+          <ActivityIndicator size="small" color="#1d4ed8" />
+          <Text style={styles.requestsBootstrapTitle}>Sto aprendo le tue prenotazioni</Text>
+          <Text style={styles.requestsBootstrapText}>
+            Recupero richieste, conferme e aggiornamenti del salone collegato.
+          </Text>
+        </View>
+      ) : null}
+
+      {!isRegistered && !shouldAutoCompleteSavedProfileAccess && !shouldBootstrapFrontendRequestsPage ? (
         <>
           <>
-              <View style={styles.sectionCard}>
-                <Text style={styles.sectionTitle}>
-                  {shouldForceSalonLogin
-                    ? 'Accedi al salone collegato'
-                    : isManualRegistrationFlow
-                      ? 'Completa registrazione cliente'
-                      : 'Entra nel salone collegato'}
-                </Text>
-                <Text style={styles.authIntroText}>
-                  {shouldForceSalonLogin
-                      ? 'Per questo salone esiste già un profilo salvato sul dispositivo. Accedi e poi entri direttamente nell’area cliente.'
+              <View
+                style={[
+                  styles.sectionCard,
+                  hasAnyAssociatedSalonContext && !isLinkedSalonEntryCardExpanded && styles.authEntryCardCollapsed,
+                ]}
+              >
+                <View
+                  onLayout={(event) => {
+                    setAuthSectionY(event.nativeEvent.layout.y);
+                  }}
+                >
+                <View style={styles.authEntryCardHeader}>
+                  <Text style={[styles.sectionTitle, styles.authEntryCardTitle]}>
+                    {shouldForceSalonLogin
+                      ? 'Accedi al salone collegato'
                       : isManualRegistrationFlow
-                        ? 'Stai creando un nuovo profilo cliente collegato a questo salone. Dopo il salvataggio potrai accedere e aprire Prenota.'
-                      : 'Prima scegli se accedere con un profilo già esistente oppure creare un nuovo profilo cliente per questo salone.'}
-                </Text>
-                {hasResolvedOrIncomingSalonCode ? (
-                  <Text style={styles.authQrHint}>
-                    Il salone è già stato rilevato: il profilo verrà collegato automaticamente al salone corretto.
+                        ? 'Completa registrazione cliente'
+                        : 'Entra nel salone collegato'}
                   </Text>
-                ) : null}
-                {shouldShowAccessModeSwitcher ? (
-                <View style={styles.accessModeRow}>
-                  <TouchableOpacity
-                    style={[
-                      styles.accessModeButton,
-                      activeAccessMode === 'login' && styles.accessModeButtonActive,
-                    ]}
-                    onPress={() => {
-                      if (activeAccessMode === 'login') {
-                        if (profile.email.trim() || profile.telefono.trim()) {
-                          Keyboard.dismiss();
-                          setProfileSaveError('');
-                          void loginFrontendCliente();
-                          return;
-                        }
-
-                        requestAnimationFrame(() => {
-                          scrollToField(emailInputRef);
-                        });
-                        return;
+                  {hasAnyAssociatedSalonContext ? (
+                    <TouchableOpacity
+                      style={styles.authEntryCardChevron}
+                      onPress={() =>
+                        setIsLinkedSalonEntryCardExpanded((current) => !current)
                       }
-
-                      setAccessMode('login');
-                    }}
-                    activeOpacity={0.9}
-                  >
-                    <Text
-                      style={[
-                        styles.accessModeButtonText,
-                        activeAccessMode === 'login' && styles.accessModeButtonTextActive,
-                      ]}
+                      activeOpacity={0.9}
                     >
-                      Accedi
-                    </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[
-                      styles.accessModeButton,
-                      activeAccessMode === 'register' && styles.accessModeButtonActive,
-                    ]}
-                    onPress={() => setAccessMode('register')}
-                    activeOpacity={0.9}
-                  >
-                    <Text
-                      style={[
-                        styles.accessModeButtonText,
-                        activeAccessMode === 'register' && styles.accessModeButtonTextActive,
-                      ]}
-                    >
-                      Registrati
-                    </Text>
-                  </TouchableOpacity>
+                      <Ionicons
+                        name={isLinkedSalonEntryCardExpanded ? 'chevron-up' : 'chevron-down'}
+                        size={20}
+                        color="#0f766e"
+                      />
+                    </TouchableOpacity>
+                  ) : null}
                 </View>
+
+                {hasAnyAssociatedSalonContext && connectedSalonBadgeLabel ? (
+                  <View style={styles.authEntryConnectedSalonBadge}>
+                    <Text style={styles.authEntryConnectedSalonEyebrow}>Salone collegato</Text>
+                    <Text style={styles.authEntryConnectedSalonName}>
+                      {connectedSalonBadgeLabel}
+                    </Text>
+                  </View>
                 ) : null}
+
+                {(!hasAnyAssociatedSalonContext || isLinkedSalonEntryCardExpanded) ? (
+                  <>
+                    <Text style={styles.authIntroText}>
+                      {shouldForceSalonLogin
+                          ? 'Per questo salone esiste già un profilo salvato sul dispositivo. Accedi e poi entri direttamente nell’area cliente.'
+                          : isManualRegistrationFlow
+                            ? 'Stai creando un nuovo profilo cliente collegato a questo salone. Dopo il salvataggio potrai accedere e aprire Prenota.'
+                            : 'Prima scegli se accedere con un profilo già esistente oppure creare un nuovo profilo cliente per questo salone.'}
+                    </Text>
+                    {hasResolvedOrIncomingSalonCode ? (
+                      <Text style={styles.authQrHint}>
+                        Il salone è già stato rilevato: il profilo verrà collegato automaticamente al salone corretto.
+                      </Text>
+                    ) : null}
+                    {shouldShowAccessModeSwitcher ? (
+                    <View style={styles.accessModeRow}>
+                      <TouchableOpacity
+                        style={[
+                          styles.accessModeButton,
+                          activeAccessMode === 'login' && styles.accessModeButtonActive,
+                        ]}
+                        onPress={() => {
+                          if (activeAccessMode === 'login') {
+                            if (profile.email.trim() || profile.telefono.trim()) {
+                              Keyboard.dismiss();
+                              setProfileSaveError('');
+                              void loginFrontendCliente();
+                              return;
+                            }
+
+                            requestAnimationFrame(() => {
+                              scrollToField(emailInputRef);
+                            });
+                            return;
+                          }
+
+                          setAccessMode('login');
+                        }}
+                        activeOpacity={0.9}
+                        webTouchAction="manipulation"
+                      >
+                        <Text
+                          style={[
+                            styles.accessModeButtonText,
+                            activeAccessMode === 'login' && styles.accessModeButtonTextActive,
+                          ]}
+                        >
+                          Accedi
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[
+                          styles.accessModeButton,
+                          activeAccessMode === 'register' && styles.accessModeButtonActive,
+                        ]}
+                        onPress={() => setAccessMode('register')}
+                        activeOpacity={0.9}
+                        webTouchAction="manipulation"
+                      >
+                        <Text
+                          style={[
+                            styles.accessModeButtonText,
+                            activeAccessMode === 'register' && styles.accessModeButtonTextActive,
+                          ]}
+                        >
+                          Registrati
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                    ) : null}
+                  </>
+                ) : null}
+                </View>
               </View>
 
               {activeAccessMode === 'login' ? (
@@ -9715,6 +11906,7 @@ export default function ClienteFrontendScreen() {
                 }}
                 activeOpacity={0.9}
                 disabled={isSavingProfile}
+                webTouchAction="manipulation"
               >
                 <Text style={styles.primaryButtonText}>
                   {isLoadingSalon
@@ -9724,6 +11916,7 @@ export default function ClienteFrontendScreen() {
                       : tf('auth_login_button')}
                 </Text>
               </TouchableOpacity>
+              {profileSaveError ? <Text style={styles.sectionHint}>{profileSaveError}</Text> : null}
               {Platform.OS !== 'web' && frontendBiometricEnabled ? (
                 <TouchableOpacity
                   style={[
@@ -9738,11 +11931,11 @@ export default function ClienteFrontendScreen() {
                 >
                   <View style={styles.authBiometricBackendContent}>
                     <View style={styles.authBiometricBackendIcon}>
-                      <Ionicons
-                        name={frontendBiometricType === 'faceid' ? 'scan-outline' : 'finger-print-outline'}
-                        size={18}
-                        color="#0F172A"
-                      />
+                      {frontendBiometricType === 'faceid' ? (
+                        <MaterialCommunityIcons name="face-recognition" size={21} color="#166534" />
+                      ) : (
+                        <Ionicons name="finger-print-outline" size={19} color="#166534" />
+                      )}
                     </View>
                     <View style={styles.authBiometricBackendTextWrap}>
                       <Text style={styles.authBiometricBackendTitle}>
@@ -9881,6 +12074,7 @@ export default function ClienteFrontendScreen() {
                 }}
                 activeOpacity={0.9}
                 disabled={isSavingProfile || !canRegisterClient}
+                webTouchAction="manipulation"
               >
                 <Text style={styles.primaryButtonText}>
                   {isLoadingSalon
@@ -9897,8 +12091,18 @@ export default function ClienteFrontendScreen() {
         </>
       ) : null}
 
-      {isRegistered && isBookingStarted ? (
+      {shouldRenderBookingExperience ? (
         <>
+          {shouldShowPublicSalonLoadingCard ? (
+            <View style={[styles.sectionCard, styles.requestsBootstrapCard]}>
+              <ActivityIndicator size="small" color="#1d4ed8" />
+              <Text style={styles.requestsBootstrapTitle}>Sto caricando il salone collegato</Text>
+              <Text style={styles.requestsBootstrapText}>
+                Recupero servizi, operatori e disponibilita prima di mostrarti la prenotazione.
+              </Text>
+            </View>
+          ) : null}
+          {renderWaitlistAlertsSection({ inBooking: true })}
           <View style={styles.stepsRow}>
             <View style={[styles.stepItem, !servizio.trim() && styles.stepItemActive]}>
               <Text style={[styles.stepBadge, !servizio.trim() && styles.stepBadgeActive]}>1</Text>
@@ -9944,8 +12148,10 @@ export default function ClienteFrontendScreen() {
                 ref={servicesWebStripRef}
                 style={[
                   styles.servicesScrollViewWeb,
+                  styles.webSectionBleed,
                   webHorizontalScrollTouchStyle,
                   styles.webNativeHorizontalHost,
+                  styles.servicesScrollHostWeb,
                 ]}
                 // @ts-expect-error web-only wheel forwarding
                 onWheel={(e: unknown) => applyWebHorizontalStripWheelToHost(servicesWebStripRef, e)}
@@ -9956,8 +12162,9 @@ export default function ClienteFrontendScreen() {
               </View>
             ) : (
               <ScrollView
+                style={styles.servicesScrollViewportNative}
                 horizontal
-                showsHorizontalScrollIndicator={false}
+                showsHorizontalScrollIndicator
                 contentContainerStyle={styles.servicesScrollContent}
               >
                 {renderBookingServiceCards()}
@@ -9999,8 +12206,9 @@ export default function ClienteFrontendScreen() {
               <Text style={styles.frontendBookingCalendarButtonText}>Apri calendario completo</Text>
             </TouchableOpacity>
             <Text style={styles.frontendBookingDayHint}>
-              Un tap seleziona il giorno disponibile. Se preferisci, puoi aprire anche il calendario
-              completo.
+              {Platform.OS === 'web'
+                ? 'Un tap seleziona il giorno disponibile. Se preferisci, puoi aprire anche il calendario completo.'
+                : 'Su app scegli il giorno con il selettore nativo oppure usa Oggi per tornare subito alla data corrente.'}
             </Text>
           </View>
 
@@ -10274,9 +12482,9 @@ export default function ClienteFrontendScreen() {
                         currentDayActiveWaitlistSlotTimesSet.has(slotTime)
                       );
                     const blockLabel =
-                      block.startTime === block.endTime
-                        ? `Orario occupato: ${block.startTime}`
-                        : `Blocco occupato: ${block.startTime} - ${block.endTime}`;
+                      block.labelStartTime === block.labelEndTime
+                        ? `Orario occupato: ${block.labelStartTime}`
+                        : `Blocco occupato: ${block.labelStartTime} - ${block.labelEndTime}`;
 
                     return (
                       <View key={block.id} style={styles.waitlistBlockCard}>
@@ -10390,6 +12598,9 @@ export default function ClienteFrontendScreen() {
             <Text style={styles.summaryText}>
               Prezzo: {servizioSelezionato ? `€ ${formatMoneyValue(servizioSelezionato.prezzo)}` : '—'}
             </Text>
+            {!canSendRequest && bookingSubmitBlockedReason ? (
+              <Text style={styles.errorText}>{bookingSubmitBlockedReason}</Text>
+            ) : null}
             {Platform.OS === 'web' ? (
               <button
                 type="button"
@@ -10441,11 +12652,6 @@ export default function ClienteFrontendScreen() {
           </>
         ) : null}
       </ScrollView>
-      {isWeb ? (
-        <View pointerEvents="box-none" style={styles.webTopBarOverlay}>
-          {renderHeroTopBar()}
-        </View>
-      ) : null}
       <NativeDatePickerModal
         visible={showDatePicker}
         title={tf('frontend_choose_day')}
@@ -10517,14 +12723,6 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 14 },
     elevation: 10,
   },
-  webTopBarOverlay: {
-    position: 'fixed',
-    top: 61,
-    left: 28,
-    right: 28,
-    zIndex: 220,
-    elevation: 220,
-  } as unknown as ViewStyle,
   heroTopRow: {
     position: 'absolute',
     top: 14,
@@ -10538,11 +12736,11 @@ const styles = StyleSheet.create({
     marginBottom: 0,
   },
   heroTopRowWebOverlay: {
-    position: 'relative',
+    position: 'absolute',
     top: 14,
-    right: 0,
-    left: 0,
-    alignItems: 'center',
+    right: 14,
+    left: 14,
+    alignItems: 'flex-start',
   },
   heroTopRowCompact: {
     flexDirection: 'row',
@@ -10557,6 +12755,25 @@ const styles = StyleSheet.create({
     flexShrink: 0,
     zIndex: 120,
     elevation: 120,
+  },
+  frontendBackInlineButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  frontendBackInlineButtonCompact: {
+    gap: 7,
+  },
+  frontendBackInlineLabel: {
+    color: '#0f172a',
+    fontSize: 14,
+    fontWeight: '800',
+    lineHeight: 18,
+  },
+  frontendBackInlineLabelCompact: {
+    maxWidth: 152,
+    fontSize: 12,
+    lineHeight: 16,
   },
   heroTopActions: {
     flexDirection: 'row',
@@ -10634,6 +12851,46 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 3 },
     elevation: 3,
   },
+  notificationsTopBadgeWeb: {
+    width: 'auto',
+    minWidth: 220,
+    paddingLeft: 16,
+    paddingRight: 22,
+    gap: 10,
+    flexDirection: 'row',
+  },
+  notificationsTopBadgeNative: {
+    width: 'auto',
+    minWidth: 158,
+    paddingLeft: 14,
+    paddingRight: 18,
+    gap: 8,
+    flexDirection: 'row',
+  },
+  notificationsTopBadgeNativeExpanded: {
+    width: 'auto',
+    minWidth: 146,
+    paddingLeft: 12,
+    paddingRight: 16,
+    gap: 8,
+    flexDirection: 'row',
+    borderRadius: 16,
+  },
+  notificationsTopBadgeNativeCollapsed: {
+    width: 52,
+    minWidth: 52,
+    paddingLeft: 0,
+    paddingRight: 0,
+    gap: 0,
+    justifyContent: 'center',
+  },
+  notificationsTopBadgeLabel: {
+    color: '#0f172a',
+    fontSize: 13,
+    fontWeight: '800',
+    lineHeight: 16,
+    fontFamily: Platform.OS === 'web' ? FRONTEND_SIMPLE_WEB_FONT : undefined,
+  },
   notificationsTopCountBadge: {
     position: 'absolute',
     top: 4,
@@ -10705,14 +12962,18 @@ const styles = StyleSheet.create({
     marginTop: -8,
     marginBottom: -2,
   },
+  frontendBrandBandNativeRegistered: {
+    marginTop: 44,
+    marginBottom: -16,
+  },
   frontendTitleBand: {
     width: '100%',
     minHeight: 54,
     justifyContent: 'center',
     alignItems: 'center',
     position: 'relative',
-    paddingHorizontal: 80,
-    marginBottom: -2,
+    paddingHorizontal: 28,
+    marginBottom: -8,
   },
   frontendTitleRow: {
     flexDirection: 'row',
@@ -10721,25 +12982,25 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   title: {
-    fontSize: 32,
+    fontSize: 30,
     fontWeight: '900',
     color: '#0f172a',
     textAlign: 'center',
-    letterSpacing: IS_ANDROID ? 0 : -0.5,
+    letterSpacing: IS_ANDROID ? 0 : -0.25,
     includeFontPadding: true,
     paddingHorizontal: IS_ANDROID ? 6 : 0,
+    width: '100%',
   },
   connectedSalonBadge: {
     maxWidth: 640,
     alignSelf: 'center',
-    flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    justifyContent: 'center',
     marginTop: 8,
     marginBottom: 10,
-    paddingHorizontal: 16,
-    paddingVertical: 9,
-    borderRadius: 999,
+    paddingHorizontal: 22,
+    paddingVertical: 14,
+    borderRadius: 36,
     backgroundColor: '#f8fbff',
     borderWidth: 1,
     borderColor: '#d9e6fb',
@@ -10749,6 +13010,12 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 8 },
     elevation: 2,
   },
+  connectedSalonBadgeCompact: {
+    maxWidth: 430,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    marginTop: 6,
+  },
   connectedSalonBadgeEyebrow: {
     fontSize: 12,
     lineHeight: 16,
@@ -10756,18 +13023,18 @@ const styles = StyleSheet.create({
     color: '#64748b',
     textTransform: 'uppercase',
     letterSpacing: 1.2,
+    textAlign: 'center',
+    marginBottom: 4,
   },
   connectedSalonBadgeName: {
-    flexShrink: 1,
-    fontSize: 28,
-    lineHeight: 34,
-    fontWeight: '700',
+    alignSelf: 'center',
+    fontSize: Platform.OS === 'web' ? 34 : 28,
+    lineHeight: Platform.OS === 'web' ? 40 : 34,
+    fontWeight: '900',
     color: '#1b2a42',
     textAlign: 'center',
-    fontFamily: appFonts.displayScript,
-    textShadowColor: 'rgba(15, 23, 42, 0.16)',
-    textShadowOffset: { width: 0, height: 3 },
-    textShadowRadius: 8,
+    fontFamily: Platform.OS === 'web' ? FRONTEND_SIMPLE_WEB_FONT : undefined,
+    letterSpacing: Platform.OS === 'web' ? -0.2 : 0,
   },
   subtitle: {
     maxWidth: 520,
@@ -11004,12 +13271,8 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontSize: 16,
     fontWeight: '800',
-    fontFamily: appFonts.displayCondensed,
-    letterSpacing: IS_ANDROID ? 0.4 : 1.4,
-    textTransform: 'uppercase',
-    textShadowColor: 'rgba(255,255,255,0.95)',
-    textShadowOffset: { width: 0, height: 0 },
-    textShadowRadius: 8,
+    fontFamily: Platform.OS === 'web' ? FRONTEND_SIMPLE_WEB_FONT : undefined,
+    letterSpacing: IS_ANDROID ? 0.2 : 0.4,
   },
   salonAccessFooter: {
     marginTop: 10,
@@ -11190,12 +13453,8 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontSize: 17,
     fontWeight: '800',
-    fontFamily: appFonts.displayCondensed,
-    letterSpacing: IS_ANDROID ? 0.4 : 1.6,
-    textTransform: 'uppercase',
-    textShadowColor: 'rgba(255,255,255,0.95)',
-    textShadowOffset: { width: 0, height: 0 },
-    textShadowRadius: 8,
+    fontFamily: Platform.OS === 'web' ? FRONTEND_SIMPLE_WEB_FONT : undefined,
+    letterSpacing: IS_ANDROID ? 0.2 : 0.4,
   },
   blockedInfoCard: {
     width: '100%',
@@ -11282,7 +13541,7 @@ const styles = StyleSheet.create({
   requestsSectionTitle: {
     fontSize: 18,
     fontWeight: '900',
-    fontFamily: Platform.OS === 'web' ? appFonts.displayCondensed : undefined,
+    fontFamily: Platform.OS === 'web' ? FRONTEND_SIMPLE_WEB_FONT : undefined,
     color: '#0f172a',
     textAlign: 'center',
     marginBottom: 4,
@@ -11294,6 +13553,27 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     textAlign: 'center',
     maxWidth: 380,
+  },
+  requestsBootstrapCard: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+    paddingVertical: 28,
+  },
+  requestsBootstrapTitle: {
+    fontSize: 18,
+    lineHeight: 24,
+    fontWeight: '900',
+    color: '#0f172a',
+    textAlign: 'center',
+    fontFamily: Platform.OS === 'web' ? FRONTEND_SIMPLE_WEB_FONT : undefined,
+  },
+  requestsBootstrapText: {
+    fontSize: 14,
+    lineHeight: 21,
+    color: '#64748b',
+    textAlign: 'center',
+    maxWidth: 360,
   },
   requestsToggleTextWrap: {
     flex: 1,
@@ -11399,7 +13679,7 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 16,
     fontWeight: '800',
-    fontFamily: Platform.OS === 'web' ? appFonts.displayCondensed : undefined,
+    fontFamily: Platform.OS === 'web' ? FRONTEND_SIMPLE_WEB_FONT : undefined,
     color: '#0f172a',
     marginBottom: 12,
     textAlign: 'center',
@@ -11459,7 +13739,7 @@ const styles = StyleSheet.create({
   inlineNotificationsTitle: {
     fontSize: 14,
     fontWeight: '900',
-    fontFamily: Platform.OS === 'web' ? appFonts.displayCondensed : undefined,
+    fontFamily: Platform.OS === 'web' ? FRONTEND_SIMPLE_WEB_FONT : undefined,
     color: '#0f172a',
     textAlign: 'center',
   },
@@ -11472,7 +13752,7 @@ const styles = StyleSheet.create({
   sectionEyebrow: {
     fontSize: 11,
     fontWeight: '800',
-    fontFamily: Platform.OS === 'web' ? appFonts.displayCondensed : undefined,
+    fontFamily: Platform.OS === 'web' ? FRONTEND_SIMPLE_WEB_FONT : undefined,
     color: '#111111',
     letterSpacing: Platform.OS === 'web' ? 0.35 : 0.8,
     textTransform: 'uppercase',
@@ -11505,6 +13785,47 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#FECACA',
     alignItems: 'center',
+  },
+  joinWebGateContent: {
+    justifyContent: 'center',
+    minHeight: '100%',
+  },
+  joinWebGateCard: {
+    maxWidth: 620,
+    width: '100%',
+    alignSelf: 'center',
+    paddingTop: 28,
+    paddingBottom: 26,
+  },
+  joinWebGateTitle: {
+    fontSize: 30,
+    fontWeight: '900',
+    color: '#0f172a',
+    textAlign: 'center',
+    marginTop: 8,
+  },
+  joinWebGateText: {
+    marginTop: 14,
+    fontSize: 17,
+    lineHeight: 25,
+    color: '#475569',
+    textAlign: 'center',
+    maxWidth: 520,
+    alignSelf: 'center',
+  },
+  joinWebGateSpinner: {
+    marginTop: 24,
+    marginBottom: 10,
+  },
+  joinWebGateActions: {
+    marginTop: 26,
+    gap: 14,
+  },
+  joinWebGatePrimaryButton: {
+    width: '100%',
+  },
+  joinWebGateSecondaryButton: {
+    width: '100%',
   },
   frontendSalonWarningTitle: {
     fontSize: 15,
@@ -11560,6 +13881,64 @@ const styles = StyleSheet.create({
   },
   authRegisterSectionCard: {
     marginTop: -2,
+  },
+  authEntryCardCollapsed: {
+    paddingTop: 18,
+    paddingBottom: 18,
+  },
+  authEntryCardHeader: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+  },
+  authEntryCardTitle: {
+    marginBottom: 0,
+    paddingHorizontal: 40,
+  },
+  authEntryCardChevron: {
+    position: 'absolute',
+    right: 0,
+    top: '50%',
+    marginTop: -18,
+    width: 36,
+    height: 36,
+    borderRadius: 999,
+    backgroundColor: '#EAFBF1',
+    borderWidth: 1,
+    borderColor: '#CFE9D8',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  authEntryConnectedSalonBadge: {
+    width: '100%',
+    marginTop: 14,
+    borderRadius: 24,
+    paddingHorizontal: 18,
+    paddingVertical: 18,
+    backgroundColor: '#EEF6FF',
+    borderWidth: 1,
+    borderColor: '#C6DBFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  authEntryConnectedSalonEyebrow: {
+    fontSize: 12,
+    fontWeight: '900',
+    letterSpacing: 2.2,
+    textTransform: 'uppercase',
+    color: '#2D5BDA',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  authEntryConnectedSalonName: {
+    fontSize: Platform.OS === 'web' ? 34 : 28,
+    lineHeight: Platform.OS === 'web' ? 40 : 34,
+    fontWeight: '900',
+    color: '#0F172A',
+    textAlign: 'center',
+    fontFamily: Platform.OS === 'web' ? FRONTEND_SIMPLE_WEB_FONT : undefined,
   },
   authSectionTitle: {
     fontSize: 24,
@@ -11661,6 +14040,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#ecfdf3',
     borderColor: '#b7ebc6',
   },
+  requestOverviewCardSalonCancelled: {
+    backgroundColor: '#fff1f2',
+    borderColor: '#f7b7c3',
+  },
   requestOverviewCardArchived: {
     backgroundColor: '#eef2f7',
     borderColor: '#d7dee8',
@@ -11676,11 +14059,22 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: '#64748b',
     textTransform: 'uppercase',
-    letterSpacing: IS_ANDROID ? 0.1 : 0.4,
+    letterSpacing: IS_ANDROID ? 0 : 0.2,
     includeFontPadding: true,
+    width: '100%',
+    textAlign: 'center',
   },
   requestSectionLast: {
     marginBottom: 0,
+  },
+  requestSectionAlert: {
+    backgroundColor: '#fff7f8',
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: '#f3c6cf',
+    paddingHorizontal: 14,
+    paddingTop: 14,
+    paddingBottom: 10,
   },
   requestSectionTitle: {
     fontSize: 18,
@@ -11887,6 +14281,16 @@ const styles = StyleSheet.create({
     flexGrow: 0,
     flexShrink: 0,
   },
+  servicesScrollHostWeb: {
+    paddingBottom: 14,
+    scrollbarWidth: 'thin',
+  } as ViewStyle,
+  webSectionBleed: {
+    width: 'calc(100% + 40px)',
+    maxWidth: 'calc(100% + 40px)',
+    marginLeft: -20,
+    marginRight: -20,
+  } as unknown as ViewStyle,
   servicesScrollInnerWeb: {
     width: '100%',
   },
@@ -11907,42 +14311,54 @@ const styles = StyleSheet.create({
     paddingHorizontal: 0,
     justifyContent: 'flex-start',
     alignItems: 'stretch',
-    paddingBottom: 2,
+    paddingBottom: 10,
+  },
+  servicesScrollViewportNative: {
+    marginHorizontal: -20,
+    paddingHorizontal: 0,
+    alignSelf: 'stretch',
   },
   stepBadge: {
-    width: 28,
-    height: 28,
+    width: 44,
+    height: 44,
     borderRadius: 999,
     backgroundColor: '#1f2937',
+    borderWidth: 2,
+    borderColor: '#d8e3f0',
     color: '#ffffff',
     textAlign: 'center',
     textAlignVertical: 'center',
-    fontSize: 13,
-    fontWeight: '800',
-    fontFamily: Platform.OS === 'web' ? appFonts.displayCondensed : undefined,
-    paddingTop: Platform.OS === 'web' ? 3 : 4,
+    fontSize: 17,
+    fontWeight: '900',
+    fontFamily: Platform.OS === 'web' ? FRONTEND_SIMPLE_WEB_FONT : undefined,
+    paddingTop: Platform.OS === 'web' ? 8 : 9,
     overflow: IS_ANDROID ? 'visible' : 'hidden',
-    marginBottom: 6,
+    marginBottom: 8,
+    shadowColor: '#0f172a',
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 3,
   },
   stepText: {
-    fontSize: 12,
-    fontWeight: '700',
-    fontFamily: Platform.OS === 'web' ? appFonts.displayCondensed : undefined,
-    letterSpacing: Platform.OS === 'web' ? 0.2 : 0,
+    fontSize: 14,
+    fontWeight: '800',
+    fontFamily: Platform.OS === 'web' ? FRONTEND_SIMPLE_WEB_FONT : undefined,
+    letterSpacing: Platform.OS === 'web' ? 0.25 : 0,
     color: '#111111',
     textAlign: 'center',
   },
   stepBadgeActive: {
-    backgroundColor: '#2563eb',
+    backgroundColor: '#1F2A44',
   },
   stepTextActive: {
-    color: '#1d4ed8',
+    color: '#1F2A44',
   },
   serviceCard: {
-    width: 118,
+    width: 110,
     borderRadius: 18,
-    paddingHorizontal: 10,
-    paddingVertical: 14,
+    paddingHorizontal: 9,
+    paddingVertical: 12,
     marginRight: 8,
     borderWidth: 1.5,
     alignItems: 'center',
@@ -11953,8 +14369,15 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 6 },
     elevation: 2,
     position: 'relative',
-    minHeight: 196,
+    minHeight: 182,
     overflow: 'visible',
+  },
+  serviceCardNative: {
+    width: 100,
+    minHeight: 176,
+    paddingHorizontal: 8,
+    paddingVertical: 12,
+    marginRight: 6,
   },
   serviceCardWeb: {
     width: 172,
@@ -11966,10 +14389,10 @@ const styles = StyleSheet.create({
     flexShrink: 0,
   },
   serviceCardSelectedWide: {
-    width: 156,
+    width: 100,
   },
   serviceCardUnselectedNarrow: {
-    width: 104,
+    width: 100,
   },
   serviceCardSelectedWideWeb: {
     width: 188,
@@ -11978,11 +14401,11 @@ const styles = StyleSheet.create({
     width: 146,
   },
   serviceCardActive: {
-    borderWidth: 4,
-    borderColor: '#1E293B',
-    shadowColor: '#1E293B',
-    shadowOpacity: 0.2,
-    shadowRadius: 16,
+    borderWidth: 2.5,
+    borderColor: '#1F2A44',
+    shadowColor: '#1F2A44',
+    shadowOpacity: 0.16,
+    shadowRadius: 14,
     shadowOffset: { width: 0, height: 8 },
   },
   serviceCardTitle: {
@@ -11997,18 +14420,29 @@ const styles = StyleSheet.create({
     fontSize: 17,
     lineHeight: 22,
     marginBottom: 8,
+    fontFamily: FRONTEND_SIMPLE_WEB_FONT,
   },
   serviceCardMetaRow: {
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    width: '100%',
+    marginBottom: 8,
+  },
+  serviceCardMetaRowWeb: {
+    marginBottom: 10,
+  },
+  serviceCardSupportRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     flexWrap: 'wrap',
     gap: 8,
     width: '100%',
-    marginBottom: 8,
   },
-  serviceCardMetaRowWeb: {
-    marginBottom: 10,
+  serviceCardSupportRowWeb: {
+    gap: 10,
   },
   serviceRoleBadge: {
     alignSelf: 'center',
@@ -12032,10 +14466,11 @@ const styles = StyleSheet.create({
   },
   serviceRoleBadgeTextWeb: {
     fontSize: 12,
+    fontFamily: FRONTEND_SIMPLE_WEB_FONT,
   },
   serviceOperatorInlineBadge: {
-    width: 24,
-    height: 24,
+    width: 28,
+    height: 28,
     borderRadius: 999,
     backgroundColor: 'rgba(255,255,255,0.84)',
     borderWidth: 1,
@@ -12043,12 +14478,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   serviceOperatorInlineBadgeWeb: {
-    width: 26,
-    height: 26,
+    width: 32,
+    height: 32,
   },
   serviceSalonInlineBadge: {
-    minWidth: 68,
-    height: 24,
+    minWidth: 76,
+    height: 28,
     borderRadius: 999,
     backgroundColor: '#EEF2F7',
     borderWidth: 1,
@@ -12064,13 +14499,13 @@ const styles = StyleSheet.create({
     flexShrink: 0,
   },
   serviceSalonInlineBadgeWeb: {
-    minWidth: 76,
-    height: 26,
-    paddingHorizontal: 12,
+    minWidth: 86,
+    height: 32,
+    paddingHorizontal: 14,
   },
   serviceSalonInlineBadgeText: {
     color: '#475569',
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: '800',
   },
   serviceCardPrice: {
@@ -12083,6 +14518,7 @@ const styles = StyleSheet.create({
   serviceCardPriceWeb: {
     fontSize: 15,
     marginTop: 6,
+    fontFamily: FRONTEND_SIMPLE_WEB_FONT,
   },
   serviceCardDuration: {
     fontSize: 12,
@@ -12095,6 +14531,7 @@ const styles = StyleSheet.create({
   serviceCardDurationWeb: {
     fontSize: 13,
     lineHeight: 18,
+    fontFamily: FRONTEND_SIMPLE_WEB_FONT,
   },
   serviceSelectedBadge: {
     marginTop: 10,
@@ -12136,6 +14573,7 @@ const styles = StyleSheet.create({
   },
   frontendBookingDayPickerShell: {
     marginTop: 12,
+    marginHorizontal: -20,
   },
   frontendBookingDayPickerHeader: {
     flexDirection: 'row',
@@ -12186,7 +14624,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 18,
     fontWeight: '800',
-    fontFamily: Platform.OS === 'web' ? appFonts.displayCondensed : undefined,
+    fontFamily: Platform.OS === 'web' ? FRONTEND_SIMPLE_WEB_FONT : undefined,
     color: '#475569',
     textAlign: 'center',
   },
@@ -12198,6 +14636,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(15,23,42,0.04)',
     paddingTop: 4,
     paddingBottom: 18,
+    paddingHorizontal: 0,
     position: 'relative',
     overflow: 'hidden',
     shadowColor: '#0f172a',
@@ -12210,6 +14649,10 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     paddingBottom: 8,
     alignItems: 'center',
+  },
+  frontendBookingDayPickerRowNative: {
+    paddingTop: 14,
+    paddingBottom: 10,
   },
   frontendBookingDayPickerListWeb: {
     width: '100%',
@@ -12249,6 +14692,9 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 7 },
     elevation: 5,
   },
+  frontendBookingDayGhostCardNative: {
+    marginRight: 0,
+  },
   frontendBookingDayGhostCardWeb: {
     flexShrink: 0,
   } as ViewStyle,
@@ -12269,6 +14715,16 @@ const styles = StyleSheet.create({
     shadowRadius: 18,
     shadowOffset: { width: 0, height: 10 },
     elevation: 8,
+  },
+  frontendBookingDayGhostCardPast: {
+    backgroundColor: '#EEF3F7',
+    borderColor: '#D6DEE8',
+    opacity: 0.78,
+  },
+  frontendBookingDayCardWrapNative: {
+    marginRight: DAY_CARD_GAP,
+    overflow: 'visible',
+    zIndex: 8,
   },
   frontendBookingDayWeek: {
     width: '100%',
@@ -12532,6 +14988,45 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#64748B',
     textAlign: 'center',
+  },
+  nativeFrontendDayPickerShell: {
+    marginTop: 10,
+    width: '100%',
+  },
+  nativeFrontendDayPickerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  nativeFrontendDayPickerButton: {
+    minHeight: 56,
+    borderRadius: 22,
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#DCE6F0',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingHorizontal: 18,
+    flexShrink: 0,
+  },
+  nativeFrontendDayPickerButtonWide: {
+    flex: 1,
+  },
+  nativeFrontendDayPickerButtonActive: {
+    backgroundColor: '#243252',
+    borderColor: '#243252',
+  },
+  nativeFrontendDayPickerButtonText: {
+    fontSize: 15,
+    lineHeight: 20,
+    fontWeight: '800',
+    color: '#334155',
+    textTransform: 'capitalize',
+  },
+  nativeFrontendDayPickerButtonTextActive: {
+    color: '#ffffff',
   },
   dayPickerViewport: {
     marginTop: 10,
@@ -12863,6 +15358,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     lineHeight: 20,
     fontWeight: '900',
+    fontFamily: Platform.OS === 'web' ? FRONTEND_SIMPLE_WEB_FONT : undefined,
     color: '#0F172A',
     textAlign: 'center',
   },
@@ -12916,10 +15412,10 @@ const styles = StyleSheet.create({
     borderColor: '#F3DEC2',
   },
   frontendBookingTimeCardSelected: {
-    backgroundColor: '#E7F0FF',
-    borderColor: '#2B5FD9',
+    backgroundColor: '#EEF3FB',
+    borderColor: '#1F2A44',
     borderWidth: 2,
-    shadowColor: '#2B5FD9',
+    shadowColor: '#1F2A44',
     shadowOpacity: 0.18,
     shadowRadius: 16,
     shadowOffset: { width: 0, height: 8 },
@@ -12944,8 +15440,8 @@ const styles = StyleSheet.create({
     borderColor: '#F3C7CE',
   },
   frontendBookingTimeTopPillSelected: {
-    backgroundColor: '#D8E7FF',
-    borderColor: '#A9C5FF',
+    backgroundColor: '#DCE6F4',
+    borderColor: '#A9B8D0',
   },
   frontendBookingTimeTopPillOverlap: {
     backgroundColor: '#FFF1DA',
@@ -12962,7 +15458,7 @@ const styles = StyleSheet.create({
     color: '#B42332',
   },
   frontendBookingTimeTopPillTextSelected: {
-    color: '#163D8F',
+    color: '#1F2A44',
   },
   frontendBookingTimeTopPillTextOverlap: {
     color: '#A35B00',
@@ -12974,11 +15470,12 @@ const styles = StyleSheet.create({
     fontSize: 17,
     lineHeight: 20,
     fontWeight: '900',
+    fontFamily: Platform.OS === 'web' ? FRONTEND_SIMPLE_WEB_FONT : undefined,
     color: '#245A37',
     textAlign: 'center',
   },
   frontendBookingTimeCardTextSelected: {
-    color: '#163D8F',
+    color: '#1F2A44',
   },
   frontendBookingTimeCardTextBusy: {
     color: '#C03844',
@@ -12993,11 +15490,12 @@ const styles = StyleSheet.create({
     fontSize: 10.5,
     lineHeight: 13,
     fontWeight: '700',
+    fontFamily: Platform.OS === 'web' ? FRONTEND_SIMPLE_WEB_FONT : undefined,
     color: '#64748B',
     textAlign: 'center',
   },
   frontendBookingTimeCardMetaSelected: {
-    color: '#2450AE',
+    color: '#1F2A44',
     fontWeight: '900',
   },
   frontendBookingTimesToggle: {
@@ -13050,9 +15548,9 @@ const styles = StyleSheet.create({
     borderColor: '#F3DEC2',
   },
   timeChipActive: {
-    backgroundColor: '#E8F1FF',
+    backgroundColor: '#EEF3FB',
     borderWidth: 1.5,
-    borderColor: '#1D4ED8',
+    borderColor: '#1F2A44',
     shadowOpacity: Platform.OS === 'web' ? 0.12 : 0,
   },
   timeChipDisabled: {
@@ -13099,6 +15597,7 @@ const styles = StyleSheet.create({
   expandedTimeTitleWeb: {
     fontSize: 17,
     lineHeight: 22,
+    fontFamily: FRONTEND_SIMPLE_WEB_FONT,
   },
   expandedTimeHint: {
     marginTop: 5,
@@ -13111,6 +15610,7 @@ const styles = StyleSheet.create({
   expandedTimeHintWeb: {
     fontSize: 12.5,
     lineHeight: 18,
+    fontFamily: FRONTEND_SIMPLE_WEB_FONT,
   },
   guidedTimePanel: {
     marginTop: 8,
@@ -13166,12 +15666,14 @@ const styles = StyleSheet.create({
   guidedTimeTitle: {
     fontSize: 16,
     fontWeight: '900',
+    fontFamily: Platform.OS === 'web' ? FRONTEND_SIMPLE_WEB_FONT : undefined,
     color: '#0F172A',
     textAlign: 'center',
   },
   guidedTimeTitleWeb: {
     fontSize: 19,
     lineHeight: 25,
+    fontFamily: FRONTEND_SIMPLE_WEB_FONT,
   },
   guidedTimeHint: {
     marginTop: 6,
@@ -13186,6 +15688,7 @@ const styles = StyleSheet.create({
     marginBottom: 4,
     fontSize: 13,
     lineHeight: 19,
+    fontFamily: FRONTEND_SIMPLE_WEB_FONT,
   },
   guidedTimeInlineNotice: {
     marginTop: 8,
@@ -13224,6 +15727,7 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
     paddingHorizontal: 12,
     minHeight: 84,
+    alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
   },
@@ -13233,6 +15737,7 @@ const styles = StyleSheet.create({
     paddingTop: 14,
     paddingBottom: 14,
     paddingHorizontal: 14,
+    alignItems: 'center',
     justifyContent: 'center',
     shadowColor: '#8A7358',
     shadowOpacity: 0.06,
@@ -13240,20 +15745,23 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 5 },
   },
   guidedTimeChipSelected: {
-    backgroundColor: '#E8F1FF',
-    borderColor: '#1D4ED8',
+    backgroundColor: '#EEF3FB',
+    borderColor: '#1F2A44',
   },
   guidedTimeChipText: {
     color: '#245A37',
     fontSize: 18,
     lineHeight: 21,
     fontWeight: '900',
+    fontFamily: Platform.OS === 'web' ? FRONTEND_SIMPLE_WEB_FONT : undefined,
+    textAlign: 'center',
   },
   guidedTimeChipTextWeb: {
     fontSize: 22,
     lineHeight: 24,
     fontWeight: '900',
     letterSpacing: 0.3,
+    fontFamily: Platform.OS === 'web' ? FRONTEND_SIMPLE_WEB_FONT : undefined,
   },
   guidedTimeBadge: {
     alignSelf: 'center',
@@ -13291,6 +15799,7 @@ const styles = StyleSheet.create({
     fontSize: 11,
     lineHeight: 14,
     fontWeight: '700',
+    fontFamily: Platform.OS === 'web' ? FRONTEND_SIMPLE_WEB_FONT : undefined,
     color: '#3F7C56',
     textAlign: 'center',
   },
@@ -13329,6 +15838,7 @@ const styles = StyleSheet.create({
   },
   guidedTimeToggleButtonTextWeb: {
     fontSize: 13.5,
+    fontFamily: FRONTEND_SIMPLE_WEB_FONT,
   },
   guidedTimeSubHint: {
     marginTop: 14,
@@ -13475,6 +15985,66 @@ const styles = StyleSheet.create({
     color: '#0F172A',
     textAlign: 'center',
   },
+  webInlineCancelConfirmCard: {
+    width: '100%',
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: '#fca5a5',
+    backgroundColor: '#fff1f2',
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    gap: 12,
+    alignItems: 'center',
+  },
+  webInlineCancelConfirmText: {
+    fontSize: 13.5,
+    lineHeight: 19,
+    fontWeight: '700',
+    color: '#7f1d1d',
+    textAlign: 'center',
+    fontFamily: FRONTEND_SIMPLE_WEB_FONT,
+  },
+  webInlineCancelConfirmActions: {
+    width: '100%',
+    flexDirection: 'row',
+    gap: 10,
+  },
+  webInlineCancelKeepButton: {
+    flex: 1,
+    minHeight: 48,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#cbd5e1',
+    backgroundColor: '#ffffff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+  },
+  webInlineCancelKeepButtonText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#334155',
+    textAlign: 'center',
+    fontFamily: FRONTEND_SIMPLE_WEB_FONT,
+  },
+  webInlineCancelConfirmButton: {
+    flex: 1,
+    minHeight: 48,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#ef4444',
+    backgroundColor: '#b91c1c',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+  },
+  webInlineCancelConfirmButtonText: {
+    fontSize: 13,
+    fontWeight: '900',
+    color: '#ffffff',
+    textAlign: 'center',
+    fontFamily: FRONTEND_SIMPLE_WEB_FONT,
+  },
   slotMiniBadge: {
     position: 'absolute',
     top: 7,
@@ -13510,6 +16080,7 @@ const styles = StyleSheet.create({
   timeChipText: {
     fontSize: Platform.OS === 'web' ? 15 : 14,
     fontWeight: '900',
+    fontFamily: Platform.OS === 'web' ? FRONTEND_SIMPLE_WEB_FONT : undefined,
     color: '#245A37',
     paddingHorizontal: ANDROID_TEXT_BREATHING_ROOM,
   },
@@ -13727,7 +16298,9 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#EEF4FF',
+    backgroundColor: '#ECFDF5',
+    borderWidth: 1,
+    borderColor: '#BBF7D0',
     marginRight: 12,
   },
   authBiometricBackendTextWrap: {
@@ -13831,23 +16404,24 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     width: '100%',
     maxWidth: 920,
-    minHeight: 430,
+    minHeight: 0,
     justifyContent: 'flex-start',
   },
   requestStatusCardCompact: {
-    borderRadius: 20,
-    paddingHorizontal: 14,
-    paddingTop: 12,
-    paddingBottom: 12,
-    marginBottom: 10,
+    borderRadius: 18,
+    paddingHorizontal: 10,
+    paddingTop: 8,
+    paddingBottom: 8,
+    marginBottom: 6,
     shadowOpacity: 0.03,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 3 },
+    shadowRadius: 5,
+    shadowOffset: { width: 0, height: 2 },
     elevation: 1,
   },
   requestStatusCardCompactWeb: {
     alignItems: 'stretch',
     minHeight: 0,
+    maxWidth: 920,
   },
   requestStatusHeroBlockWeb: {
     minHeight: 0,
@@ -13864,7 +16438,7 @@ const styles = StyleSheet.create({
   requestStatusHeroBlockCompactWeb: {
     minHeight: 0,
     paddingTop: 0,
-    marginBottom: 0,
+    marginBottom: -2,
     alignItems: 'stretch',
   },
   requestStatusHeaderStack: {
@@ -13874,7 +16448,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   requestStatusHeaderStackCompact: {
-    marginBottom: 8,
+    marginBottom: 6,
   },
   requestStatusBadgeWrap: {
     alignItems: 'center',
@@ -13918,11 +16492,11 @@ const styles = StyleSheet.create({
     marginBottom: 0,
     maxWidth: '100%',
     width: '100%',
-    minHeight: 82,
+    minHeight: 68,
     justifyContent: 'center',
   },
   requestStatusHeaderCopyCompact: {
-    gap: 2,
+    gap: 1,
   },
   requestStatusHeaderCopyCompactWeb: {
     flex: 1,
@@ -13956,7 +16530,7 @@ const styles = StyleSheet.create({
   },
   requestStatusMetaWeb: {
     textAlign: 'center',
-    fontFamily: appFonts.displayCondensed,
+    fontFamily: FRONTEND_SIMPLE_WEB_FONT,
   },
   requestStatusMetaCompact: {
     fontSize: 13,
@@ -14049,9 +16623,9 @@ const styles = StyleSheet.create({
   },
   requestStatusBody: {
     fontSize: 14,
-    lineHeight: 21,
+    lineHeight: 19,
     color: '#475569',
-    marginBottom: 12,
+    marginBottom: 8,
     textAlign: 'center',
   },
   requestStatusBodyWeb: {
@@ -14059,11 +16633,11 @@ const styles = StyleSheet.create({
     maxWidth: 760,
     width: '100%',
     alignSelf: 'center',
-    minHeight: 64,
+    minHeight: 48,
   },
   requestStatusBodyCompact: {
-    fontSize: 13,
-    lineHeight: 18,
+    fontSize: 12.5,
+    lineHeight: 17,
     marginBottom: 0,
   },
   requestAddressCard: {
@@ -14148,25 +16722,27 @@ const styles = StyleSheet.create({
     color: '#374151',
   },
   requestStatusHint: {
-    fontSize: 13,
-    lineHeight: 19,
+    fontSize: 12.5,
+    lineHeight: 17,
     color: '#5f6f83',
     fontWeight: '700',
-    marginBottom: 12,
+    marginBottom: 8,
     textAlign: 'center',
     maxWidth: Platform.OS === 'web' ? 760 : undefined,
     alignSelf: 'center',
   },
   requestActionsStack: {
     width: '100%',
-    gap: 10,
+    gap: 8,
     alignItems: 'stretch',
-    marginTop: 2,
+    marginTop: 0,
     maxWidth: Platform.OS === 'web' ? 760 : undefined,
     alignSelf: 'center',
   },
   archivedMonthSection: {
     marginTop: 12,
+    width: '100%',
+    alignSelf: 'stretch',
     borderRadius: 24,
     borderWidth: 1,
     borderColor: '#DCEBE7',
@@ -14174,6 +16750,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   archivedMonthToggle: {
+    width: '100%',
     minHeight: 68,
     paddingHorizontal: 18,
     paddingVertical: 15,
@@ -14185,6 +16762,36 @@ const styles = StyleSheet.create({
   archivedMonthToggleTextWrap: {
     flex: 1,
     gap: 3,
+  },
+  archivedMonthToggleTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    marginBottom: 4,
+  },
+  archivedMonthYearBadge: {
+    backgroundColor: '#EAF6F2',
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderWidth: 1,
+    borderColor: '#C8E7DD',
+  },
+  archivedMonthYearBadgeText: {
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: '900',
+    color: '#0F766E',
+    letterSpacing: 0.3,
+  },
+  archivedMonthToggleActionLabel: {
+    fontSize: 11.5,
+    lineHeight: 15,
+    fontWeight: '800',
+    color: '#5F6F83',
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
   },
   archivedMonthToggleTitle: {
     fontSize: 16,
@@ -14211,7 +16818,7 @@ const styles = StyleSheet.create({
   cancelBookingButton: {
     backgroundColor: '#fff1f2',
     borderRadius: 18,
-    paddingVertical: 13,
+    paddingVertical: 11,
     alignItems: 'center',
     borderWidth: 1,
     borderColor: '#fde2e8',
@@ -14224,20 +16831,20 @@ const styles = StyleSheet.create({
   },
   cancelBookingButtonText: {
     color: '#be123c',
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '900',
   },
   calendarButton: {
     backgroundColor: '#EAF2FF',
     borderRadius: 18,
-    paddingVertical: 13,
+    paddingVertical: 11,
     alignItems: 'center',
     borderWidth: 1,
     borderColor: '#dbeafe',
   },
   calendarButtonText: {
     color: '#1d4ed8',
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '900',
   },
   confirmationActionsRow: {

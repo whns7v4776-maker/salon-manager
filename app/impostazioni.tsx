@@ -3,7 +3,7 @@ import Constants from 'expo-constants';
 import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
 import React from 'react';
-import { Alert, Image, Keyboard, Linking, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, Keyboard, Linking, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { AppWordmark } from '../components/app-wordmark';
 import { HapticTouchable } from '../components/ui/haptic-touchable';
 import { useAppContext } from '../src/context/AppContext';
@@ -85,6 +85,7 @@ export default function ImpostazioniScreen() {
   }, [router]);
 
   const handleLogout = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => null);
     const title = tApp(appLanguage, 'settings_logout_confirm_title');
     const body = tApp(appLanguage, 'settings_logout_confirm_body');
 
@@ -93,7 +94,7 @@ export default function ImpostazioniScreen() {
       if (!confirmed) return;
       void (async () => {
         await logoutOwnerAccount();
-        router.replace('/cliente-scanner');
+        router.replace('/');
       })();
       return;
     }
@@ -105,7 +106,7 @@ export default function ImpostazioniScreen() {
         style: 'destructive',
         onPress: async () => {
           await logoutOwnerAccount();
-          router.replace('/cliente-scanner');
+          router.replace('/');
         },
       },
     ]);
@@ -209,7 +210,7 @@ export default function ImpostazioniScreen() {
       ]}
       keyboardDismissMode="on-drag"
       onScrollBeginDrag={Keyboard.dismiss}
-      keyboardShouldPersistTaps="handled"
+      keyboardShouldPersistTaps="always"
       showsVerticalScrollIndicator={false}
     >
       <View style={[styles.pageShell, { maxWidth: responsive.contentMaxWidth }]}>
@@ -229,13 +230,7 @@ export default function ImpostazioniScreen() {
               <AppWordmark />
             </View>
 
-            <View style={styles.headerSettingsButton}>
-              <Image
-                source={require('../assets/header-impostazioni-icon.png')}
-                style={styles.headerSettingsImage}
-                resizeMode="contain"
-              />
-            </View>
+            <View style={styles.headerRightSpacer} />
           </View>
 
           <View style={styles.screenHeaderRow}>
@@ -276,10 +271,12 @@ export default function ImpostazioniScreen() {
               const selected = appLanguage === option.value;
 
               return (
-                <TouchableOpacity
+                <HapticTouchable
                   key={option.value}
                   style={[styles.languageChip, selected && styles.languageChipActive]}
                   onPress={() => setAppLanguage(option.value)}
+                  hapticType="none"
+                  pressInHapticType="light"
                   activeOpacity={0.9}
                 >
                   <Text
@@ -298,18 +295,20 @@ export default function ImpostazioniScreen() {
                   >
                     {option.note}
                   </Text>
-                </TouchableOpacity>
+                </HapticTouchable>
               );
             })}
           </View>
 
-          <TouchableOpacity
+          <HapticTouchable
             style={[
               styles.biometricRow,
               biometricEnabled && styles.biometricRowActive,
               (!isMobile || biometricBusy) && styles.cardDisabled,
             ]}
             onPress={handleToggleBiometric}
+            hapticType="none"
+            pressInHapticType="light"
             activeOpacity={0.9}
             disabled={biometricBusy || !isMobile}
           >
@@ -326,26 +325,23 @@ export default function ImpostazioniScreen() {
                 ]}
               />
             </View>
-          </TouchableOpacity>
+          </HapticTouchable>
 
-          <TouchableOpacity
+          <HapticTouchable
             style={[
               styles.biometricRow,
               notificationPermission === 'granted' && styles.biometricRowActive,
               (!isMobile || notificationBusy) && styles.cardDisabled,
             ]}
             onPress={handleNotificationsPermission}
+            hapticType="none"
+            pressInHapticType="light"
             activeOpacity={0.9}
             disabled={notificationBusy || !isMobile}
           >
             <View style={styles.biometricContent}>
               <Text style={styles.biometricTitle}>{notificationTitle}</Text>
               <Text style={styles.biometricText}>{notificationDescription}</Text>
-              {Constants.executionEnvironment === 'storeClient' ? (
-                <Text style={styles.permissionHint}>
-                  In Expo Go puoi autorizzare il permesso, ma le push backend complete restano limitate.
-                </Text>
-              ) : null}
             </View>
 
             <View
@@ -363,7 +359,7 @@ export default function ImpostazioniScreen() {
                 {notificationPermission === 'granted' ? 'ON' : 'OFF'}
               </Text>
             </View>
-          </TouchableOpacity>
+          </HapticTouchable>
         </View>
 
         <View style={styles.card}>
@@ -372,26 +368,30 @@ export default function ImpostazioniScreen() {
             Rivedi in qualsiasi momento la panoramica iniziale con QR, agenda e flusso operativo.
           </Text>
 
-          <TouchableOpacity
+          <HapticTouchable
             style={styles.secondaryActionButton}
             onPress={() => {
               reopenOnboarding();
-              handleBack();
+              router.replace('/(tabs)/index');
             }}
+            hapticType="none"
+            pressInHapticType="light"
             activeOpacity={0.9}
           >
             <Text style={styles.secondaryActionButtonText}>Riapri onboarding</Text>
-          </TouchableOpacity>
+          </HapticTouchable>
         </View>
 
         <View style={[styles.card, styles.logoutCard]}>
-          <TouchableOpacity
+          <HapticTouchable
             style={styles.logoutButton}
             onPress={handleLogout}
+            hapticType="none"
+            pressInHapticType="medium"
             activeOpacity={0.9}
           >
             <Text style={styles.logoutButtonText}>{tApp(appLanguage, 'common_logout')}</Text>
-          </TouchableOpacity>
+          </HapticTouchable>
           <Text style={styles.logoutHint}>
             Esci completamente dal back office del salone e torna alla schermata principale.
           </Text>
@@ -454,20 +454,10 @@ const styles = StyleSheet.create({
     zIndex: 3,
     elevation: 9,
   },
-  headerSettingsButton: {
+  headerRightSpacer: {
     width: 52,
     height: 52,
-    borderRadius: 16,
-    backgroundColor: '#F8FAFC',
-    borderWidth: 1,
-    borderColor: 'rgba(15, 23, 42, 0.08)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 3,
-  },
-  headerSettingsImage: {
-    width: 28,
-    height: 28,
+    zIndex: 1,
   },
   screenHeaderRow: {
     alignItems: 'center',
@@ -688,21 +678,18 @@ const styles = StyleSheet.create({
     color: '#111827',
   },
   logoutCard: {
-    backgroundColor: '#fff1f2',
-    borderWidth: 1,
-    borderColor: '#fecdd3',
     alignItems: 'center',
   },
   logoutButton: {
     minWidth: 160,
-    backgroundColor: '#ffffff',
+    backgroundColor: '#fff1f2',
     borderRadius: 22,
     paddingVertical: 14,
     paddingHorizontal: 28,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1.5,
-    borderColor: '#f9a8b6',
+    borderColor: '#fecdd3',
   },
   logoutButtonText: {
     fontSize: 19,
@@ -713,7 +700,7 @@ const styles = StyleSheet.create({
     marginTop: 18,
     fontSize: 14,
     lineHeight: 21,
-    color: '#9f1239',
+    color: '#64748b',
     textAlign: 'center',
     maxWidth: 560,
   },

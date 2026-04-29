@@ -1,7 +1,7 @@
 const hasWindow = typeof window !== 'undefined';
 const hasDocument = typeof document !== 'undefined';
-const LIGHT_NOTIFICATION_ICON = '/notification-light-v3.png';
-const DARK_NOTIFICATION_ICON = '/notification-dark-v3.png';
+const LIGHT_NOTIFICATION_ICON = '/notification-light.png';
+const DARK_NOTIFICATION_ICON = '/notification-dark.png';
 
 type BrowserNotificationConstructor = {
   new (title: string, options?: NotificationOptions): Notification;
@@ -69,7 +69,7 @@ export const showWebNotification = ({
       body,
       tag,
       icon: getWebNotificationIcon(),
-      badge: LIGHT_NOTIFICATION_ICON,
+      badge: getWebNotificationIcon(),
     });
 
     notification.onclick = () => {

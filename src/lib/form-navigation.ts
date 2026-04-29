@@ -25,25 +25,24 @@ type KeyboardAwareScrollOptions = {
   focusScrollDelay?: number;
   animated?: boolean;
   keyboardHeight?: number;
+  allowWebScroll?: boolean;
+  autoScrollOnKeyboardShow?: boolean;
+  shouldScrollNode?: (node: unknown) => boolean;
+};
+
+type KeyboardAwareScrollOverride = {
+  topOffset?: number;
+  scrollDelay?: number;
+  animated?: boolean;
 };
 
 const DEFAULT_TOP_OFFSET = Platform.OS === 'ios' ? 156 : 124;
-const FOCUS_SETTLE_OFFSET = Platform.OS === 'ios' ? 26 : 18;
 
 const resolveScrollableNode = (scrollable: Scrollable | null) => {
   if (!scrollable) return null;
 
   return (
     (scrollable as Scrollable & { getNativeScrollRef?: () => unknown }).getNativeScrollRef?.() ??
-    (scrollable as Scrollable & { getScrollResponder?: () => unknown }).getScrollResponder?.() ??
-    scrollable
-  );
-};
-
-const resolveScrollableResponder = (scrollable: Scrollable | null) => {
-  if (!scrollable) return null;
-
-  return (
     (scrollable as Scrollable & { getScrollResponder?: () => unknown }).getScrollResponder?.() ??
     scrollable
   );
@@ -115,112 +114,87 @@ const scrollNodeIntoView = (
   const scrollable = scrollRef.current;
   if (!node || !scrollable) return;
 
-  if (Platform.OS === 'web') {
+  if (Platform.OS === 'web' && !options?.allowWebScroll) {
     // Web must not be auto-scrolled by JS while typing.
     // Keep scrolling manual to avoid viewport jumps/keyboard collapse.
     return;
   }
 
-  const responder = resolveScrollableResponder(scrollable);
   const scrollNode = resolveScrollableNode(scrollable);
   const inputHandle = findNodeHandle(node as any);
   const scrollHandle = findNodeHandle(scrollNode as any);
-  const responderCanScrollToKeyboard =
-    !!inputHandle &&
-    !!responder &&
-    typeof (
-      responder as {
-        scrollResponderScrollNativeHandleToKeyboard?: unknown;
-      }
-    ).scrollResponderScrollNativeHandleToKeyboard === 'function';
-
-  if (!responderCanScrollToKeyboard && !scrollHandle) {
+  if (!scrollHandle || !inputHandle) {
     return;
   }
 
-  const topOffset = Math.max(options?.topOffset ?? 0, DEFAULT_TOP_OFFSET);
   const delay = Math.max(0, options?.scrollDelay ?? 48);
   const animated = options?.animated ?? true;
-  const followUpDelay = delay > 0 ? delay + 140 : 140;
-
-  const scrollWithResponder = () => {
-    if (!responderCanScrollToKeyboard || !inputHandle) return false;
-
-    try {
-      (
-        responder as {
-          scrollResponderScrollNativeHandleToKeyboard: (
+  const keyboardGap = Platform.OS === 'ios' ? 14 : 10;
+  const topOffset = options?.topOffset ?? DEFAULT_TOP_OFFSET;
+  const additionalKeyboardOffset = Math.max(keyboardGap, topOffset);
+  const responderScrollToKeyboard = (
+    (
+      scrollable as Scrollable & {
+        getScrollResponder?: () => unknown;
+      }
+    ).getScrollResponder?.() as
+      | {
+          scrollResponderScrollNativeHandleToKeyboard?: (
             nodeHandle: number,
             additionalOffset?: number,
             preventNegativeScrollOffset?: boolean
           ) => void;
         }
-      ).scrollResponderScrollNativeHandleToKeyboard(inputHandle, topOffset, true);
-    } catch {
-      return false;
-    }
+      | undefined
+  )?.scrollResponderScrollNativeHandleToKeyboard;
 
-    return true;
-  };
+  if (typeof responderScrollToKeyboard === 'function') {
+    runAfterLayout(() => {
+      responderScrollToKeyboard(inputHandle, additionalKeyboardOffset, true);
+    }, delay);
+    return;
+  }
 
   const measureAndScroll = () => {
-    const usedResponder = scrollWithResponder();
-
-    if (!inputHandle || !scrollHandle) {
-      return;
-    }
-
     try {
-      UIManager.measureLayout(
-        inputHandle,
-        scrollHandle,
-        () => null,
-        (_left, top, _width, height) => {
-          const settledTopOffset = Math.max(0, topOffset - FOCUS_SETTLE_OFFSET);
-          const targetOffset = top - settledTopOffset;
+      const windowHeight = Dimensions.get('window').height;
+      const screenHeight = Dimensions.get('screen').height;
+      const keyboardHeight = Math.max(0, options?.keyboardHeight ?? 0);
+      const resizedByKeyboard = Math.max(0, screenHeight - windowHeight);
+      const overlayKeyboardHeight = Math.max(0, keyboardHeight - resizedByKeyboard);
+      const visibleBottom = windowHeight - overlayKeyboardHeight - keyboardGap;
 
-          scrollContainerTo(scrollable, targetOffset, animated);
+      UIManager.measureInWindow(inputHandle, (_x, y, _w, measuredHeight) => {
+        const nodeBottom = y + measuredHeight;
+        const overlap = nodeBottom - visibleBottom;
 
-          if (!usedResponder) {
-            return;
-          }
-
-          const windowHeight = Dimensions.get('window').height;
-          const screenHeight = Dimensions.get('screen').height;
-          const keyboardHeight = Math.max(0, options?.keyboardHeight ?? 0);
-          const resizedByKeyboard = Math.max(0, screenHeight - windowHeight);
-          const overlayKeyboardHeight = Math.max(0, keyboardHeight - resizedByKeyboard);
-          const keyboardGap = Platform.OS === 'ios' ? 14 : 10;
-          const visibleBottom = windowHeight - overlayKeyboardHeight - keyboardGap;
-
-          try {
-            UIManager.measureInWindow(inputHandle, (_x, y, _w, measuredHeight) => {
-              const nodeBottom = y + Math.max(measuredHeight, height);
-              const overlap = nodeBottom - visibleBottom;
-
-              if (overlap > 0) {
-                scrollContainerTo(scrollable, targetOffset + overlap + keyboardGap, animated);
-              }
-            });
-          } catch {
-            return;
-          }
+        if (overlap <= 0) {
+          return;
         }
-      );
+
+        UIManager.measureLayout(
+          inputHandle,
+          scrollHandle,
+          () => null,
+          (_left, top) => {
+            const targetOffset = Math.max(0, top - topOffset + overlap + keyboardGap);
+            scrollContainerTo(scrollable, targetOffset, animated);
+          }
+        );
+      });
     } catch {
       return;
     }
   };
 
   runAfterLayout(measureAndScroll, delay);
-  runAfterLayout(measureAndScroll, followUpDelay);
 };
 
 export const useKeyboardAwareScroll = (
   scrollRef: ScrollableRef,
   options?: KeyboardAwareScrollOptions
 ) => {
-  const topOffset = Math.max(options?.topOffset ?? 0, DEFAULT_TOP_OFFSET);
+  const topOffset = options?.topOffset ?? DEFAULT_TOP_OFFSET;
   const scrollDelay = Math.max(0, options?.scrollDelay ?? 48);
   const focusScrollDelay = Math.max(scrollDelay, options?.focusScrollDelay ?? 96);
   const animated = options?.animated ?? true;
@@ -228,6 +202,10 @@ export const useKeyboardAwareScroll = (
 
   useEffect(() => {
     if (Platform.OS === 'web') {
+      return;
+    }
+
+    if (options?.autoScrollOnKeyboardShow !== true) {
       return;
     }
 
@@ -243,6 +221,10 @@ export const useKeyboardAwareScroll = (
             currentlyFocusedInput?: () => TextInput | null;
           }
         ).currentlyFocusedInput?.();
+
+        if (options?.shouldScrollNode && !options.shouldScrollNode(focusedInput ?? null)) {
+          return;
+        }
 
         scrollNodeIntoView(focusedInput ?? null, scrollRef, {
           topOffset,
@@ -263,36 +245,47 @@ export const useKeyboardAwareScroll = (
     );
 
     return () => subscriptions.forEach((subscription) => subscription.remove());
-  }, [animated, scrollDelay, scrollRef, topOffset]);
+  }, [animated, options, scrollDelay, scrollRef, topOffset]);
 
   const scrollToField = useCallback(
-    (inputRef: InputRef) => {
+    (inputRef: InputRef, override?: KeyboardAwareScrollOverride) => {
+      if (options?.shouldScrollNode && !options.shouldScrollNode(inputRef.current)) {
+        return;
+      }
+
       scrollNodeIntoView(inputRef.current, scrollRef, {
-        topOffset,
-        scrollDelay,
-        animated,
+        topOffset: override?.topOffset ?? topOffset,
+        scrollDelay: override?.scrollDelay ?? scrollDelay,
+        animated: override?.animated ?? animated,
         keyboardHeight: keyboardHeightRef.current || resolveKeyboardHeight(),
       });
     },
-    [animated, scrollDelay, scrollRef, topOffset]
+    [animated, options, scrollDelay, scrollRef, topOffset]
   );
 
   const scrollToNode = useCallback(
-    (nodeRef: NodeRef) => {
+    (nodeRef: NodeRef, override?: KeyboardAwareScrollOverride) => {
+      if (options?.shouldScrollNode && !options.shouldScrollNode(nodeRef.current)) {
+        return;
+      }
+
       scrollNodeIntoView(nodeRef.current, scrollRef, {
-        topOffset,
-        scrollDelay,
-        animated,
+        topOffset: override?.topOffset ?? topOffset,
+        scrollDelay: override?.scrollDelay ?? scrollDelay,
+        animated: override?.animated ?? animated,
         keyboardHeight: keyboardHeightRef.current || resolveKeyboardHeight(),
       });
     },
-    [animated, scrollDelay, scrollRef, topOffset]
+    [animated, options, scrollDelay, scrollRef, topOffset]
   );
 
   const focusField = useCallback(
     (inputRef: InputRef) => {
       inputRef.current?.focus();
       if (Platform.OS === 'web') {
+        return;
+      }
+      if (options?.shouldScrollNode && !options.shouldScrollNode(inputRef.current)) {
         return;
       }
       scrollNodeIntoView(inputRef.current, scrollRef, {
@@ -302,7 +295,7 @@ export const useKeyboardAwareScroll = (
         keyboardHeight: keyboardHeightRef.current || resolveKeyboardHeight(),
       });
     },
-    [animated, focusScrollDelay, scrollRef, topOffset]
+    [animated, focusScrollDelay, options, scrollRef, topOffset]
   );
 
   return { focusField, scrollToField, scrollToNode };

@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { BlurView } from 'expo-blur';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { useNavigation } from '@react-navigation/native';
 import { useFocusEffect, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -12,6 +12,7 @@ import {
   InteractionManager,
   type InteractionManagerStatic,
   Keyboard,
+  KeyboardAvoidingView,
   Modal,
   Platform,
   ScrollView,
@@ -19,6 +20,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  TouchableWithoutFeedback,
   View
 } from 'react-native';
 import { Gesture, GestureDetector, NativeViewGestureHandler } from 'react-native-gesture-handler';
@@ -79,10 +81,28 @@ import {
 const GIORNI_SETTIMANA_IT = ['Dom', 'Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab'];
 const MESI_IT = ['gen', 'feb', 'mar', 'apr', 'mag', 'giu', 'lug', 'ago', 'set', 'ott', 'nov', 'dic'];
 const IS_ANDROID = Platform.OS === 'android';
+const IS_IOS = Platform.OS === 'ios';
+const INLINE_MONTH_LABELS = ['gen', 'feb', 'mar', 'apr', 'mag', 'giu', 'lug', 'ago', 'set', 'ott', 'nov', 'dic'];
+const INLINE_WEEKDAY_LABELS = ['D', 'L', 'M', 'M', 'G', 'V', 'S'];
 const ANDROID_TEXT_BREATHING_ROOM = IS_ANDROID ? 8 : 0;
 const buildUniqueEntityId = (prefix: string) =>
   `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 const normalizeCustomerNameInput = (value: string) => value.toLocaleUpperCase('it-IT');
+const normalizeBirthdayValue = (value?: string | null) => {
+  const raw = (value ?? '').trim();
+  if (!raw) return '';
+  const normalized = raw.replace(/\//g, '-');
+  if (/^\d{4}-\d{2}-\d{2}$/.test(normalized)) return normalized;
+  return '';
+};
+const formatBirthdayLabel = (value?: string | null) => {
+  const normalizedValue = normalizeBirthdayValue(value);
+  if (!normalizedValue) return '';
+  const [year, month, day] = normalizedValue.split('-');
+  return `${day}/${month}/${year}`;
+};
+const formatNumericFieldLabel = (label: string, value: string, suffix = '') =>
+  value ? `${label}: ${value}${suffix}` : label;
 const normalizeAgendaCustomerIdentityText = (value?: string | null) =>
   (value ?? '').trim().toLowerCase();
 const buildAgendaCustomerIdentityKey = ({
@@ -141,7 +161,7 @@ const buildBlockedQuickBookingCustomerIdentityKeys = ({
   return blockedCustomerIdentityKeys;
 };
 const DAY_CARD_WIDTH = IS_ANDROID ? 66 : 56;
-const DAY_CARD_GAP = IS_ANDROID ? -16 : -8;
+const DAY_CARD_GAP = IS_ANDROID ? -8 : -6;
 const DAY_CARD_FULL_WIDTH = DAY_CARD_WIDTH + DAY_CARD_GAP;
 const WEEK_PLANNER_ROW_HEIGHT = 40;
 const WEEK_PLANNER_DAY_WIDTH = 44;
@@ -222,6 +242,10 @@ const WEEK_PLANNER_EDGE_BLEED_RIGHT = 18;
 const WEEK_PLANNER_RIGHT_CLIP_GUARD = 8;
 const WEEK_PLANNER_TIME_COL_TOTAL = 46;
 const WEEK_PLANNER_LANE_HEADER_HEIGHT = 34;
+const WEEK_PLANNER_TIME_BOUNDARY_ROW_HEIGHT = 20;
+const WEEK_PLANNER_TIME_BOUNDARY_ROW_OFFSET = -Math.round(
+  WEEK_PLANNER_TIME_BOUNDARY_ROW_HEIGHT * 0.4
+);
 const WEEK_DRAG_JITTER_THRESHOLD = 1;
 
 const PALETTE = {
@@ -498,6 +522,59 @@ const getStartOfWeekIso = (value: string) => {
 const formatDateCompact = (value: string) => {
   const [year, month, day] = value.split('-');
   return `${day}/${month}/${year}`;
+};
+
+type InlineCalendarCell = {
+  key: string;
+  value: Date | null;
+  label: string;
+  isDisabled: boolean;
+};
+
+const sameInlineDay = (first: Date, second: Date) =>
+  first.getFullYear() === second.getFullYear() &&
+  first.getMonth() === second.getMonth() &&
+  first.getDate() === second.getDate();
+
+const formatInlineMonthYear = (value: Date) =>
+  `${INLINE_MONTH_LABELS[value.getMonth()]} ${value.getFullYear()}`;
+
+const buildInlineMonthCells = (monthDate: Date): InlineCalendarCell[] => {
+  const year = monthDate.getFullYear();
+  const month = monthDate.getMonth();
+  const firstDay = new Date(year, month, 1);
+  const startWeekday = firstDay.getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const cells: InlineCalendarCell[] = [];
+
+  for (let index = 0; index < startWeekday; index += 1) {
+    cells.push({
+      key: `empty-${month}-${index}`,
+      value: null,
+      label: '',
+      isDisabled: true,
+    });
+  }
+
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    cells.push({
+      key: `${year}-${month}-${day}`,
+      value: new Date(year, month, day),
+      label: String(day),
+      isDisabled: false,
+    });
+  }
+
+  while (cells.length % 7 !== 0) {
+    cells.push({
+      key: `tail-${month}-${cells.length}`,
+      value: null,
+      label: '',
+      isDisabled: true,
+    });
+  }
+
+  return cells;
 };
 
 function AnimatedChevron({
@@ -917,6 +994,7 @@ const AgendaDayPicker = React.memo(function AgendaDayPicker({
           const availability = getDateAvailabilityInfo(availabilitySettings, day.value);
           const disabled = availability.closed;
           const pendingOnDay = pendingRequestsCountByDate[day.value] ?? 0;
+          const isCenteredSelectedCard = index === selectedIndex;
           const cardCenter = index * DAY_CARD_FULL_WIDTH;
           const footerLabel = disabled
             ? tApp(appLanguage, 'agenda_unavailable_short')
@@ -952,7 +1030,7 @@ const AgendaDayPicker = React.memo(function AgendaDayPicker({
           });
           const animatedTranslateX = scrollX.interpolate({
             inputRange,
-            outputRange: IS_ANDROID ? [66, 44, 24, 0, -24, -44, -66] : [0, 0, 0, 0, 0, 0, 0],
+            outputRange: [0, 0, 0, 0, 0, 0, 0],
             extrapolate: 'clamp',
           });
           const animatedOpacity = scrollX.interpolate({
@@ -963,7 +1041,7 @@ const AgendaDayPicker = React.memo(function AgendaDayPicker({
               cardCenter + DAY_CARD_FULL_WIDTH * 0.34,
               cardCenter + DAY_CARD_FULL_WIDTH * 0.82,
             ],
-            outputRange: IS_ANDROID ? [1, 0.72, 0, 0.72, 1] : [1, 0.1, 0, 0.1, 1],
+            outputRange: [1, 1, 1, 1, 1],
             extrapolate: 'clamp',
           });
 
@@ -993,16 +1071,20 @@ const AgendaDayPicker = React.memo(function AgendaDayPicker({
                   disabled && styles.dayCardClosed,
                 ]}
                 onPress={() => {
+                  if (disabled) {
+                    onDayLongPress(day.value);
+                    return;
+                  }
                   handleDayCardPress(day.value);
                 }}
                 onLongPress={() => onDayLongPress(day.value)}
-                delayLongPress={IS_ANDROID ? 220 : 320}
+                delayLongPress={220}
                 pressRetentionOffset={{ top: 28, left: 28, right: 28, bottom: 28 }}
                 hitSlop={{ top: 10, left: 10, right: 10, bottom: 10 }}
                 longPressHapticType="medium"
                 activeOpacity={0.9}
               >
-                {pendingOnDay > 0 ? (
+                {pendingOnDay > 0 && !isCenteredSelectedCard ? (
                   <View style={styles.dayCardPendingBadge}>
                     <Text style={styles.dayCardPendingBadgeText}>
                       {pendingOnDay > 9 ? '9+' : `+${pendingOnDay}`}
@@ -1101,6 +1183,7 @@ const AgendaDayPicker = React.memo(function AgendaDayPicker({
       onDayLongPress,
       pendingRequestsCountByDate,
       scrollX,
+      selectedIndex,
       handleDayCardPress,
     ]
   );
@@ -1124,31 +1207,17 @@ const AgendaDayPicker = React.memo(function AgendaDayPicker({
         nestedScrollEnabled={IS_ANDROID}
         overScrollMode={IS_ANDROID ? 'never' : 'auto'}
         renderToHardwareTextureAndroid={IS_ANDROID}
+        disableVirtualization
         contentContainerStyle={styles.dayPickerRow}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
         onStartShouldSetResponderCapture={() => false}
-        onMoveShouldSetResponderCapture={() => shouldCaptureDayPickerSwipe}
-        onResponderTerminationRequest={() => !shouldCaptureDayPickerSwipe}
-        onResponderGrant={() => {
-          if (shouldCaptureDayPickerSwipe) {
-            setDisableParentSwipe(true);
-          }
-        }}
-        onTouchStart={() => {
-          if (shouldCaptureDayPickerSwipe) {
-            setDisableParentSwipe(true);
-          }
-        }}
-        onTouchMove={() => {
-          if (shouldCaptureDayPickerSwipe) {
-            setDisableParentSwipe(true);
-          }
-        }}
-        initialNumToRender={9}
-        maxToRenderPerBatch={16}
-        windowSize={9}
-        updateCellsBatchingPeriod={1}
+        onMoveShouldSetResponderCapture={() => false}
+        onResponderTerminationRequest={() => true}
+        initialNumToRender={giorniDisponibili.length}
+        maxToRenderPerBatch={giorniDisponibili.length}
+        windowSize={Math.max(21, giorniDisponibili.length)}
+        updateCellsBatchingPeriod={0}
         keyExtractor={(item) => item.value}
         getItemLayout={(_, index) => ({
           length: DAY_CARD_FULL_WIDTH,
@@ -1285,26 +1354,16 @@ const AgendaDayPicker = React.memo(function AgendaDayPicker({
     <View
       style={styles.dayPickerWrap}
       renderToHardwareTextureAndroid={IS_ANDROID}
-      onStartShouldSetResponderCapture={() => false}
-      onStartShouldSetResponder={() => false}
-      onMoveShouldSetResponderCapture={() => shouldCaptureDayPickerSwipe}
-      onMoveShouldSetResponder={() => shouldCaptureDayPickerSwipe}
-      onResponderTerminationRequest={() => !shouldCaptureDayPickerSwipe}
-      onResponderGrant={() => {
-        if (shouldCaptureDayPickerSwipe) {
-          setDisableParentSwipe(true);
-        }
-      }}
       onTouchStart={() => {
         if (shouldCaptureDayPickerSwipe) {
           setDisableParentSwipe(true);
         }
       }}
-      onTouchMove={() => {
-        if (shouldCaptureDayPickerSwipe) {
-          setDisableParentSwipe(true);
-        }
-      }}
+      onStartShouldSetResponderCapture={() => false}
+      onStartShouldSetResponder={() => false}
+      onMoveShouldSetResponderCapture={() => false}
+      onMoveShouldSetResponder={() => false}
+      onResponderTerminationRequest={() => true}
       onTouchEnd={() => {
         if (shouldCaptureDayPickerSwipe && !isDraggingRef.current && !isMomentumRef.current) {
           setDisableParentSwipe(false);
@@ -1321,9 +1380,6 @@ const AgendaDayPicker = React.memo(function AgendaDayPicker({
         <View>{dayPickerList}</View>
       </NativeViewGestureHandler>
       <View pointerEvents="box-none" style={styles.dayPickerCenterOverlay}>
-        <View pointerEvents="none" style={styles.dayPickerCenterFrame} />
-        <View pointerEvents="none" style={styles.dayPickerCenterHighlight} />
-        <View pointerEvents="none" style={styles.dayPickerCenterInnerGlow} />
         {selectedDay ? (
           <View
             pointerEvents="none"
@@ -1332,6 +1388,7 @@ const AgendaDayPicker = React.memo(function AgendaDayPicker({
               styles.dayCard,
               styles.dayCardActive,
               styles.dayCardActiveShadow,
+              styles.dayCardCenterSelected,
               selectedAvailability?.closed && styles.dayCardClosedSelected,
             ]}
           >
@@ -1342,71 +1399,95 @@ const AgendaDayPicker = React.memo(function AgendaDayPicker({
                 </Text>
               </View>
             ) : null}
-            <View style={styles.dayCardHeader}>
+            <View style={styles.dayCardContent}>
+              <View style={styles.dayCardHeader}>
+                <Text
+                  numberOfLines={1}
+                  ellipsizeMode="clip"
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.8}
+                  style={[styles.dayWeek, styles.dayCardTextActive]}
+                >
+                  {selectedDay.weekdayShort}
+                </Text>
+              </View>
               <Text
                 numberOfLines={1}
                 ellipsizeMode="clip"
                 adjustsFontSizeToFit
                 minimumFontScale={0.8}
-                style={[styles.dayWeek, styles.dayCardTextActive]}
+                style={[styles.dayNumber, styles.dayCardTextActive]}
               >
-                {selectedDay.weekdayShort}
+                {selectedDay.dayNumber}
               </Text>
-            </View>
-            <Text
-              numberOfLines={1}
-              ellipsizeMode="clip"
-              adjustsFontSizeToFit
-              minimumFontScale={0.8}
-              style={[styles.dayNumber, styles.dayCardTextActive]}
-            >
-              {selectedDay.dayNumber}
-            </Text>
-            {selectedDayStatusLabel ? (
-              <View
-                style={[
-                  styles.dayStatusBadge,
-                  styles.dayStatusBadgeClosedSelected,
-                  selectedAvailability?.reason === 'holiday' && styles.dayStatusBadgeHoliday,
-                ]}
-              >
-                <Text
-                  numberOfLines={1}
-                  ellipsizeMode="clip"
-                  adjustsFontSizeToFit
-                  minimumFontScale={0.78}
+              {selectedDayStatusLabel ? (
+                <View
                   style={[
-                    styles.dayStatusBadgeText,
-                    styles.dayStatusBadgeTextClosedSelected,
+                    styles.dayStatusBadge,
+                    styles.dayStatusBadgeClosedSelected,
+                    selectedAvailability?.reason === 'holiday' && styles.dayStatusBadgeHoliday,
                   ]}
                 >
-                  {selectedDayStatusLabel}
-                </Text>
-              </View>
-            ) : (
-              <View style={styles.dayStatusBadgeSpacer} />
-            )}
-            <Text
-              numberOfLines={1}
-              ellipsizeMode="clip"
-              adjustsFontSizeToFit
-              minimumFontScale={0.8}
-              style={[styles.dayMonth, styles.dayCardTextActive]}
-            >
-              {selectedDay.monthShort}
-            </Text>
-            <View style={[styles.dayCardFooter, styles.dayCardFooterActive]}>
+                  <Text
+                    numberOfLines={1}
+                    ellipsizeMode="clip"
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.78}
+                    style={[
+                      styles.dayStatusBadgeText,
+                      styles.dayStatusBadgeTextClosedSelected,
+                    ]}
+                  >
+                    {selectedDayStatusLabel}
+                  </Text>
+                </View>
+              ) : (
+                <View style={styles.dayStatusBadgeSpacer} />
+              )}
               <Text
                 numberOfLines={1}
                 ellipsizeMode="clip"
                 adjustsFontSizeToFit
-                minimumFontScale={0.72}
-                style={[styles.dayCardFooterText, styles.dayCardFooterTextActive]}
+                minimumFontScale={0.8}
+                style={[styles.dayMonth, styles.dayCardTextActive]}
               >
-                {tApp(appLanguage, 'agenda_selected_short')}
+                {selectedDay.monthShort}
               </Text>
+              <View style={[styles.dayCardFooter, styles.dayCardFooterActive]}>
+                <Text
+                  numberOfLines={1}
+                  ellipsizeMode="clip"
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.72}
+                  style={[styles.dayCardFooterText, styles.dayCardFooterTextActive]}
+                >
+                  {tApp(appLanguage, 'agenda_selected_short')}
+                </Text>
+              </View>
             </View>
           </View>
+        ) : null}
+        {selectedDay && selectedAvailability?.closed && selectedDayStatusLabel ? (
+          <HapticTouchable
+            style={styles.dayPickerCenterLockedBadgeHotspot}
+            onPressIn={() => {
+              if (shouldCaptureDayPickerSwipe) {
+                setDisableParentSwipe(true);
+              }
+            }}
+            onPressOut={() => {
+              if (shouldCaptureDayPickerSwipe && !isDraggingRef.current && !isMomentumRef.current) {
+                setDisableParentSwipe(false);
+              }
+            }}
+            onPress={() => onDayLongPress(selectedDay.value)}
+            onLongPress={() => onDayLongPress(selectedDay.value)}
+            delayLongPress={220}
+            pressRetentionOffset={{ top: 24, left: 24, right: 24, bottom: 24 }}
+            hitSlop={{ top: 12, left: 12, right: 12, bottom: 12 }}
+            longPressHapticType="medium"
+            activeOpacity={0.96}
+          />
         ) : null}
       </View>
     </View>
@@ -1612,6 +1693,7 @@ const dedupeAppointments = (items: AppuntamentoItem[], fallbackDate: string) => 
 
 export default function AgendaScreen() {
   const navigation = useNavigation();
+  const { setDisableParentSwipe } = useTabSwipeLock();
   const searchParams = useLocalSearchParams<{ start?: string | string[] }>();
   const hasRedirectedToHomeRef = useRef(false);
   const responsive = useResponsiveLayout();
@@ -1682,6 +1764,8 @@ export default function AgendaScreen() {
   const [quickCustomerNameInput, setQuickCustomerNameInput] = useState('');
   const [quickCustomerPhoneInput, setQuickCustomerPhoneInput] = useState('');
   const [quickCustomerEmailInput, setQuickCustomerEmailInput] = useState('');
+  const [quickCustomerInstagramInput, setQuickCustomerInstagramInput] = useState('');
+  const [quickCustomerBirthdayInput, setQuickCustomerBirthdayInput] = useState('');
   const [quickCustomerErrors, setQuickCustomerErrors] = useState<{
     nome?: string;
     telefono?: string;
@@ -1691,19 +1775,39 @@ export default function AgendaScreen() {
   const [agendaCustomerNameInput, setAgendaCustomerNameInput] = useState('');
   const [agendaCustomerPhoneInput, setAgendaCustomerPhoneInput] = useState('');
   const [agendaCustomerEmailInput, setAgendaCustomerEmailInput] = useState('');
+  const [agendaCustomerInstagramInput, setAgendaCustomerInstagramInput] = useState('');
+  const [agendaCustomerBirthdayInput, setAgendaCustomerBirthdayInput] = useState('');
   const [agendaCustomerErrors, setAgendaCustomerErrors] = useState<{
     nome?: string;
     telefono?: string;
     email?: string;
   }>({});
+  const [customerBirthdayPickerTarget, setCustomerBirthdayPickerTarget] = useState<'quick' | 'agenda' | null>(null);
   const [showAgendaServiceComposer, setShowAgendaServiceComposer] = useState(false);
   const [agendaServiceNameInput, setAgendaServiceNameInput] = useState('');
   const [agendaServicePriceInput, setAgendaServicePriceInput] = useState('');
   const [agendaServiceOriginalPriceInput, setAgendaServiceOriginalPriceInput] = useState('');
-  const [agendaServiceDurationInput, setAgendaServiceDurationInput] = useState('60');
+  const [agendaServiceDurationInput, setAgendaServiceDurationInput] = useState('');
+  const [agendaServiceNumberPickerTarget, setAgendaServiceNumberPickerTarget] = useState<
+    'price' | 'originalPrice' | 'duration' | null
+  >(null);
+  const [agendaInlineNumberPickerValue, setAgendaInlineNumberPickerValue] = useState(0);
+  const [quickInlineBirthdayDraft, setQuickInlineBirthdayDraft] = useState<Date>(new Date());
+  const [quickInlineBirthdayMonth, setQuickInlineBirthdayMonth] = useState<Date>(new Date());
   const [agendaServiceRoleInput, setAgendaServiceRoleInput] = useState('');
   const [agendaServiceRolePickerOpen, setAgendaServiceRolePickerOpen] = useState(false);
   const [agendaServiceCustomRoleOpen, setAgendaServiceCustomRoleOpen] = useState(false);
+  const [agendaComposerDialog, setAgendaComposerDialog] = useState<{
+    visible: boolean;
+    tone: 'success' | 'warning' | 'error';
+    title: string;
+    message: string;
+  }>({
+    visible: false,
+    tone: 'success',
+    title: '',
+    message: '',
+  });
   const weekdayLabels = [
     tApp(appLanguage, 'agenda_weekday_sunday'),
     tApp(appLanguage, 'agenda_weekday_monday'),
@@ -1768,6 +1872,7 @@ export default function AgendaScreen() {
   );
   const agendaClientSectionOffsetRef = useRef(0);
   const agendaWeekPlannerSectionOffsetRef = useRef(0);
+  const agendaWeekPlannerGridOffsetRef = useRef(0);
   const agendaServiceSectionOffsetRef = useRef(0);
   const agendaTimeSectionOffsetRef = useRef(0);
   const agendaSummarySectionOffsetRef = useRef(0);
@@ -1777,13 +1882,20 @@ export default function AgendaScreen() {
   const agendaCustomerNameRef = useRef<TextInput | null>(null);
   const agendaCustomerPhoneRef = useRef<TextInput | null>(null);
   const agendaCustomerEmailRef = useRef<TextInput | null>(null);
+  const agendaCustomerInstagramRef = useRef<TextInput | null>(null);
+  const suppressAgendaCustomerKeyboardAutoScrollRef = useRef(false);
+  const agendaCustomerComposerScrollRef = useRef<ScrollView | null>(null);
+  const agendaCustomerBirthdayFieldRef = useRef<View | null>(null);
   const agendaServiceNameRef = useRef<TextInput | null>(null);
   const agendaServicePriceRef = useRef<TextInput | null>(null);
   const agendaServiceOriginalPriceRef = useRef<TextInput | null>(null);
   const agendaServiceDurationRef = useRef<TextInput | null>(null);
+  const agendaServiceComposerScrollRef = useRef<ScrollView | null>(null);
   const quickCustomerNameRef = useRef<TextInput | null>(null);
   const quickCustomerPhoneRef = useRef<TextInput | null>(null);
   const quickCustomerEmailRef = useRef<TextInput | null>(null);
+  const quickCustomerInstagramRef = useRef<TextInput | null>(null);
+  const quickCustomerBirthdayFieldRef = useRef<View | null>(null);
   const quickCustomerSearchRef = useRef<TextInput | null>(null);
   const quickServiceSearchRef = useRef<TextInput | null>(null);
   const quickBookingScrollRef = useRef<ScrollView | null>(null);
@@ -1857,22 +1969,52 @@ export default function AgendaScreen() {
   const weekPlannerBoundsRef = useRef({ left: 0, top: 0, right: 0, bottom: 0 });
   const dayPickerScrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const daySelectionScrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const { focusField, scrollToField } = useKeyboardAwareScroll(listRef, {
-    topOffset: responsive.isDesktop ? 88 : 148,
-  });
+  const agendaListKeyboardOptions = useMemo(
+    () => ({
+      topOffset: responsive.isDesktop ? 88 : 148,
+    }),
+    [responsive.isDesktop]
+  );
+  const quickBookingKeyboardOptions = useMemo(
+    () => ({
+      topOffset: responsive.isDesktop ? 108 : 236,
+      scrollDelay: 72,
+      focusScrollDelay: 124,
+    }),
+    [responsive.isDesktop]
+  );
+  const agendaComposerKeyboardOptions = useMemo(
+    () => ({
+      topOffset: responsive.isDesktop ? 108 : 226,
+      scrollDelay: 0,
+      focusScrollDelay: 12,
+      allowWebScroll: true,
+      shouldScrollNode: () => !suppressAgendaCustomerKeyboardAutoScrollRef.current,
+    }),
+    [responsive.isDesktop]
+  );
+  const agendaServiceComposerKeyboardOptions = useMemo(
+    () => ({
+      topOffset: responsive.isDesktop ? 108 : 226,
+      scrollDelay: 0,
+      focusScrollDelay: 12,
+      allowWebScroll: true,
+    }),
+    [responsive.isDesktop]
+  );
+  const { focusField, scrollToField } = useKeyboardAwareScroll(listRef, agendaListKeyboardOptions);
 
   const { focusField: focusQuickBookingField, scrollToField: scrollQuickBookingField } =
-    useKeyboardAwareScroll(quickBookingScrollRef, {
-      topOffset: responsive.isDesktop ? 108 : 188,
-      scrollDelay: 72,
-      focusScrollDelay: 124,
-    });
+    useKeyboardAwareScroll(quickBookingScrollRef, quickBookingKeyboardOptions);
   const { focusField: focusServicePickerField, scrollToField: scrollServicePickerField } =
-    useKeyboardAwareScroll(servicePickerScrollRef, {
-      topOffset: responsive.isDesktop ? 108 : 188,
-      scrollDelay: 72,
-      focusScrollDelay: 124,
-    });
+    useKeyboardAwareScroll(servicePickerScrollRef, quickBookingKeyboardOptions);
+  const {
+    focusField: focusAgendaCustomerComposerField,
+    scrollToField: scrollAgendaCustomerComposerField,
+    scrollToNode: scrollAgendaCustomerComposerNode,
+  } = useKeyboardAwareScroll(agendaCustomerComposerScrollRef, agendaComposerKeyboardOptions);
+  const { focusField: focusAgendaServiceComposerField, scrollToField: scrollAgendaServiceComposerField } =
+    useKeyboardAwareScroll(agendaServiceComposerScrollRef, agendaServiceComposerKeyboardOptions);
   const focusQuickBookingNextField = useCallback(
     (inputRef: React.RefObject<TextInput | null>) => {
       InteractionManager.runAfterInteractions(() => {
@@ -1891,7 +2033,137 @@ export default function AgendaScreen() {
     },
     [focusServicePickerField, scrollServicePickerField]
   );
+  const focusAgendaCustomerComposerNextField = useCallback(
+    (inputRef: React.RefObject<TextInput | null>) => {
+      InteractionManager.runAfterInteractions(() => {
+        focusAgendaCustomerComposerField(inputRef);
+      });
+    },
+    [focusAgendaCustomerComposerField]
+  );
+  const focusAgendaServiceComposerNextField = useCallback(
+    (inputRef: React.RefObject<TextInput | null>) => {
+      InteractionManager.runAfterInteractions(() => {
+        focusAgendaServiceComposerField(inputRef);
+      });
+    },
+    [focusAgendaServiceComposerField]
+  );
+  const scrollAgendaCustomerComposerToBottom = useCallback(() => {
+    InteractionManager.runAfterInteractions(() => {
+      setTimeout(() => {
+        agendaCustomerComposerScrollRef.current?.scrollToEnd({ animated: true });
+      }, 80);
+    });
+  }, []);
+  const revealQuickCustomerBirthdayField = useCallback(() => {
+    InteractionManager.runAfterInteractions(() => {
+      setTimeout(() => scrollAgendaCustomerComposerNode(quickCustomerBirthdayFieldRef), 110);
+      setTimeout(() => scrollAgendaCustomerComposerToBottom(), 180);
+    });
+  }, [scrollAgendaCustomerComposerNode, scrollAgendaCustomerComposerToBottom]);
+  const revealAgendaCustomerBirthdayField = useCallback(() => {
+    InteractionManager.runAfterInteractions(() => {
+      setTimeout(() => scrollAgendaCustomerComposerNode(agendaCustomerBirthdayFieldRef), 110);
+      setTimeout(() => scrollAgendaCustomerComposerToBottom(), 180);
+    });
+  }, [scrollAgendaCustomerComposerNode, scrollAgendaCustomerComposerToBottom]);
+
+  useEffect(() => {
+    if (!showServiceComposerInPicker) return;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        agendaServiceComposerScrollRef.current?.scrollTo?.({ y: 0, animated: false });
+      });
+    });
+  }, [showServiceComposerInPicker]);
+
+  useEffect(() => {
+    if (!showAgendaCustomerComposer) return;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        agendaCustomerComposerScrollRef.current?.scrollTo?.({ y: 0, animated: false });
+      });
+    });
+  }, [showAgendaCustomerComposer]);
+
   const todayDate = useMemo(() => getTodayDateString(), []);
+  const agendaDefaultServiceDuration = useMemo(
+    () => Math.max(15, getSlotIntervalForDate(availabilitySettings, quickSlotDraft?.date || data)),
+    [availabilitySettings, data, quickSlotDraft]
+  );
+  const agendaInlineNumberPickerConfig = useMemo(() => {
+    if (!agendaServiceNumberPickerTarget) return null;
+
+    if (agendaServiceNumberPickerTarget === 'price') {
+      return {
+        title: 'Prezzo servizio',
+        suffix: ' €',
+        step: 1,
+        min: 0,
+        max: 500,
+        presets: [15, 20, 25, 30, 35, 40, 50, 60, 80, 100],
+        initialValue: agendaServicePriceInput
+          ? Number(agendaServicePriceInput.replace(',', '.'))
+          : 25,
+      };
+    }
+
+    if (agendaServiceNumberPickerTarget === 'originalPrice') {
+      return {
+        title: 'Prezzo pieno',
+        suffix: ' €',
+        step: 1,
+        min: 0,
+        max: 500,
+        presets: [20, 25, 30, 35, 40, 50, 60, 80, 100, 120],
+        initialValue: agendaServiceOriginalPriceInput
+          ? Number(agendaServiceOriginalPriceInput.replace(',', '.'))
+          : 35,
+      };
+    }
+
+    return {
+      title: 'Durata servizio',
+      suffix: ' min',
+      step: 15,
+      min: 15,
+      max: 360,
+      presets: [15, 30, 45, 60, 75, 90, 120, 150, 180],
+      initialValue: agendaServiceDurationInput
+        ? Number(agendaServiceDurationInput)
+        : agendaDefaultServiceDuration,
+    };
+  }, [
+    agendaDefaultServiceDuration,
+    agendaServiceDurationInput,
+    agendaServiceNumberPickerTarget,
+    agendaServiceOriginalPriceInput,
+    agendaServicePriceInput,
+  ]);
+  useEffect(() => {
+    if (!agendaInlineNumberPickerConfig) return;
+    setAgendaInlineNumberPickerValue(agendaInlineNumberPickerConfig.initialValue);
+  }, [agendaInlineNumberPickerConfig]);
+  useEffect(() => {
+    if (!customerBirthdayPickerTarget) return;
+    const sourceValue =
+      customerBirthdayPickerTarget === 'quick'
+        ? quickCustomerBirthdayInput || todayDate
+        : agendaCustomerBirthdayInput || todayDate;
+    const nextDate = parseIsoDate(sourceValue);
+    setQuickInlineBirthdayDraft(nextDate);
+    setQuickInlineBirthdayMonth(new Date(nextDate.getFullYear(), nextDate.getMonth(), 1));
+  }, [
+    agendaCustomerBirthdayInput,
+    customerBirthdayPickerTarget,
+    quickCustomerBirthdayInput,
+    todayDate,
+  ]);
+  const quickInlineBirthdayCells = useMemo(
+    () => buildInlineMonthCells(quickInlineBirthdayMonth),
+    [quickInlineBirthdayMonth]
+  );
   const displayTimeSlots = useMemo(
     () => buildDisplayTimeSlots(availabilitySettings, data),
     [availabilitySettings, data]
@@ -2633,6 +2905,7 @@ const resetWeekDrag = useCallback(() => {
         )
       )
     );
+    const seenRequestKeysIgnoringOperator = new Set<string>();
 
       const requestBlocksAsAppointments = richiestePrenotazione
       .filter((item) => item.stato === 'In attesa' || item.stato === 'Accettata')
@@ -2706,11 +2979,7 @@ const resetWeekDrag = useCallback(() => {
           },
         };
       })
-      .filter(({ status, resolvedBlock }) => {
-        if (status === 'In attesa') {
-          return true;
-        }
-
+      .filter(({ resolvedBlock }) => {
         const uniquenessKey = getAppointmentUniquenessKey(
           {
             data: resolvedBlock.data,
@@ -2735,10 +3004,19 @@ const resetWeekDrag = useCallback(() => {
           todayDate
         );
 
-        return (
-          !realAppointmentKeys.has(uniquenessKey) &&
-          !realAppointmentKeysIgnoringOperator.has(uniquenessKeyIgnoringOperator)
-        );
+        if (
+          realAppointmentKeys.has(uniquenessKey) ||
+          realAppointmentKeysIgnoringOperator.has(uniquenessKeyIgnoringOperator)
+        ) {
+          return false;
+        }
+
+        if (seenRequestKeysIgnoringOperator.has(uniquenessKeyIgnoringOperator)) {
+          return false;
+        }
+
+        seenRequestKeysIgnoringOperator.add(uniquenessKeyIgnoringOperator);
+        return true;
       })
       .map(({ resolvedBlock }) => resolvedBlock);
 
@@ -2762,15 +3040,83 @@ const resetWeekDrag = useCallback(() => {
   ]);
 
   const pendingRequestsCountByDate = useMemo(
-    () =>
-      richiestePrenotazione
+    () => {
+      const realAppointmentKeys = new Set(
+        appuntamentiNormalizzati.map((item) =>
+          getAppointmentUniquenessKey(
+            {
+              data: item.data,
+              ora: item.ora,
+              cliente: item.cliente,
+              servizio: item.servizio,
+              operatoreId: item.operatoreId,
+              durataMinuti: item.durataMinuti,
+              prezzo: item.prezzo,
+            },
+            todayDate
+          )
+        )
+      );
+      const realAppointmentKeysIgnoringOperator = new Set(
+        appuntamentiNormalizzati.map((item) =>
+          getAppointmentUniquenessKeyIgnoringOperator(
+            {
+              data: item.data,
+              ora: item.ora,
+              cliente: item.cliente,
+              servizio: item.servizio,
+              durataMinuti: item.durataMinuti,
+              prezzo: item.prezzo,
+            },
+            todayDate
+          )
+        )
+      );
+      const seenPendingKeysIgnoringOperator = new Set<string>();
+
+      return richiestePrenotazione
         .filter((item) => item.stato === 'In attesa')
         .reduce<Record<string, number>>((accumulator, item) => {
+          const customerName = `${item.nome} ${item.cognome}`.trim();
+          const uniquenessKey = getAppointmentUniquenessKey(
+            {
+              data: item.data,
+              ora: item.ora,
+              cliente: customerName,
+              servizio: item.servizio,
+              operatoreId: item.operatoreId,
+              durataMinuti: item.durataMinuti,
+              prezzo: item.prezzo,
+            },
+            todayDate
+          );
+          const uniquenessKeyIgnoringOperator = getAppointmentUniquenessKeyIgnoringOperator(
+            {
+              data: item.data,
+              ora: item.ora,
+              cliente: customerName,
+              servizio: item.servizio,
+              durataMinuti: item.durataMinuti,
+              prezzo: item.prezzo,
+            },
+            todayDate
+          );
+
+          if (
+            realAppointmentKeys.has(uniquenessKey) ||
+            realAppointmentKeysIgnoringOperator.has(uniquenessKeyIgnoringOperator) ||
+            seenPendingKeysIgnoringOperator.has(uniquenessKeyIgnoringOperator)
+          ) {
+            return accumulator;
+          }
+
+          seenPendingKeysIgnoringOperator.add(uniquenessKeyIgnoringOperator);
           const dateValue = item.data || todayDate;
           accumulator[dateValue] = (accumulator[dateValue] ?? 0) + 1;
           return accumulator;
-        }, {}),
-    [richiestePrenotazione, todayDate]
+        }, {});
+    },
+    [appuntamentiNormalizzati, richiestePrenotazione, todayDate]
   );
 
   const getWeekAppointmentStartingAt = useCallback(
@@ -3129,6 +3475,9 @@ const resetWeekDrag = useCallback(() => {
           normalizedCapacityRole
         );
         const resolvedActiveOperatorId = item.operatoreId?.trim() ?? '';
+        const hasExplicitHistoricalOperatorReference =
+          (!!resolvedActiveOperatorId && !isSalonCapacityOperatorId(resolvedActiveOperatorId)) ||
+          !!(item.operatoreNome?.trim() ?? '');
         const activeRoleOperatorLanes = getActiveOperatorLanesForRole(capacityLabel);
 
         if (activeRoleOperatorLanes.length > 0) {
@@ -3171,7 +3520,10 @@ const resetWeekDrag = useCallback(() => {
           .sort((first, second) => first.key.localeCompare(second.key))
           .find(
             (lane) =>
-              lane.capacityKey === capacityKey && appointmentStartMinutes >= lane.lastEndMinutes
+              lane.capacityKey === capacityKey &&
+              appointmentStartMinutes >= lane.lastEndMinutes &&
+              (hasExplicitHistoricalOperatorReference ||
+                !lane.key.startsWith('orphan-salon-lane:'))
           );
 
         if (reusableLane) {
@@ -3184,7 +3536,8 @@ const resetWeekDrag = useCallback(() => {
         }
 
         const laneIndex = salonLaneMap.size;
-        const laneKey = hasAnyActiveOperatorLaneForRole(capacityLabel)
+        const laneKey =
+          hasExplicitHistoricalOperatorReference && hasAnyActiveOperatorLaneForRole(capacityLabel)
           ? `orphan-salon-lane:${capacityKey}:${laneIndex}`
           : `salon-lane:${capacityKey}:${laneIndex}`;
         appointmentLaneKeys[item.id] = laneKey;
@@ -3949,6 +4302,11 @@ const resetWeekDrag = useCallback(() => {
     weekVisibleDates,
   ]);
 
+  const weekPlannerNeedsTimeColumnOverflow = useMemo(
+    () => Platform.OS !== 'web' || weekPlannerHasHorizontalOverflow,
+    [weekPlannerHasHorizontalOverflow]
+  );
+
   React.useEffect(() => {
     weekVisibleColWidthRef.current = weekVisibleColWidth;
   }, [weekVisibleColWidth]);
@@ -3975,7 +4333,7 @@ const resetWeekDrag = useCallback(() => {
     const rowStep = WEEK_PLANNER_ROW_HEIGHT + WEEK_PLANNER_ROW_GAP;
     const weekPlannerTimeGridStartOffset =
       WEEK_PLANNER_DAY_HEADER_TOTAL_HEIGHT +
-      (weekPlannerHasLaneHeaders ? WEEK_PLANNER_LANE_HEADER_HEIGHT : 0);
+      (weekPlannerShouldReserveLaneHeaderSpace ? WEEK_PLANNER_LANE_HEADER_HEIGHT : 0);
     const minutesFromStart = Math.max(0, minutesNow - weekStartMinutes);
     const totalProgress = minutesFromStart / Math.max(1, weekBaseSlotInterval);
     const topOffset = weekPlannerTimeGridStartOffset + totalProgress * rowStep - 3;
@@ -3989,7 +4347,7 @@ const resetWeekDrag = useCallback(() => {
     availabilitySettings,
     weekBaseSlotInterval,
     weekEndMinutes,
-    weekPlannerHasLaneHeaders,
+    weekPlannerShouldReserveLaneHeaderSpace,
     weekPlannerNow,
     weekStartMinutes,
     weekVisibleDates,
@@ -4645,6 +5003,10 @@ const resetWeekDrag = useCallback(() => {
       }
 
       const serviceCapacityId = buildSalonCapacityOperatorId(serviceItem.nome, servizi);
+      const normalizedServiceRole = normalizeRoleName(serviceItem.mestiereRichiesto ?? '');
+      const normalizedPreferredOperatorRole = normalizeRoleName(
+        quickBookingPreferredOperator?.mestiere ?? ''
+      );
 
       if (
         quickBookingPreferredSalonCapacityId &&
@@ -4654,6 +5016,14 @@ const resetWeekDrag = useCallback(() => {
       }
 
       if (quickBookingPreferredOperatorId) {
+        if (
+          normalizedServiceRole &&
+          normalizedPreferredOperatorRole &&
+          normalizedServiceRole !== normalizedPreferredOperatorRole
+        ) {
+          return 'Mestiere diverso';
+        }
+
         const serviceCompatibleOperators = getEligibleOperatorsForService({
           serviceName: serviceItem.nome,
           services: servizi,
@@ -4670,20 +5040,12 @@ const resetWeekDrag = useCallback(() => {
         }
       }
 
-      if (
-        isQuickBookingExtraSalonLane &&
-        quickBookingExistingSalonCapacityIds.has(serviceCapacityId)
-      ) {
-        return 'Ramo gia presente';
-      }
-
       return '';
     },
     [
       availabilitySettings,
-      isQuickBookingExtraSalonLane,
-      quickBookingExistingSalonCapacityIds,
       quickBookingPreferredOperatorId,
+      quickBookingPreferredOperator,
       quickBookingPreferredSalonCapacityId,
       quickSlotDraft,
       operatori,
@@ -5061,45 +5423,119 @@ const resetWeekDrag = useCallback(() => {
 
       if (isSlotBlockedByOverride(availabilitySettings, dateValue, startTime)) return false;
 
-      const now = new Date();
-      const todayIso = getTodayDateString();
-      if (dateValue === todayIso && timeToMinutes(startTime) < now.getHours() * 60 + now.getMinutes()) {
+      const requiresOperators =
+        operatori.length > 0 &&
+        doesServiceUseOperators(appointment.servizio, servizi) &&
+        doesAppointmentUseOperatorCapacity(appointment);
+      const assignedOperatorId = appointment.operatoreId?.trim() ?? '';
+      const assignedOperatorName = appointment.operatoreNome?.trim() ?? '';
+      const hasExplicitAssignedOperator =
+        (!!assignedOperatorId && !isSalonCapacityOperatorId(assignedOperatorId)) ||
+        !!assignedOperatorName;
+      const compatibleOperators = requiresOperators
+        ? getEligibleOperatorsForService({
+            serviceName: appointment.servizio,
+            services: servizi,
+            operators: operatori,
+            appointmentDate: dateValue,
+            settings: availabilitySettings,
+          })
+        : [];
+
+      if (requiresOperators && compatibleOperators.length === 0) {
         return false;
       }
 
-      const requiresOperators =
-        operatori.length > 0 && doesServiceUseOperators(appointment.servizio, servizi);
-      const assignedOperatorId = appointment.operatoreId?.trim() ?? '';
+      if (
+        requiresOperators &&
+        assignedOperatorId &&
+        !isSalonCapacityOperatorId(assignedOperatorId) &&
+        !compatibleOperators.some((item) => item.id.trim() === assignedOperatorId)
+      ) {
+        return false;
+      }
 
-      if (requiresOperators && assignedOperatorId) {
-        const compatibleOperators = getEligibleOperatorsForService({
-          serviceName: appointment.servizio,
+      const overlappingAppointments = appointmentsPool.filter((item) => {
+        if ((item.data ?? todayDate) !== dateValue) return false;
+
+        return doesTimeRangeConflictWithAppointment({
+          startTime,
+          durationMinutes,
+          appointment: item,
           services: servizi,
-          operators: operatori,
-          appointmentDate: dateValue,
           settings: availabilitySettings,
         });
+      });
 
-        if (!compatibleOperators.some((item) => item.id.trim() === assignedOperatorId)) {
+      const relevantOverlappingAppointments = overlappingAppointments.filter((item) => {
+        const existingOperatorId = item.operatoreId?.trim() ?? '';
+        const existingOperatorName = item.operatoreNome?.trim() ?? '';
+        return (
+          !isSalonCapacityOperatorId(existingOperatorId) &&
+          !!(existingOperatorId || existingOperatorName) &&
+          doesServiceUseOperators(item.servizio, servizi)
+        );
+      });
+
+      if (!requiresOperators) {
+        const salonCapacityConflict = findConflictingAppointmentShared({
+          appointmentDate: dateValue,
+          startTime,
+          serviceName: appointment.servizio,
+          appointments: appointmentsPool,
+          services: servizi,
+          useOperators: false,
+        });
+
+        if (salonCapacityConflict) {
           return false;
         }
-      }
+      } else if (hasExplicitAssignedOperator) {
+        if (
+          relevantOverlappingAppointments.some((item) =>
+            doOperatorsMatch({
+              selectedOperatorId: assignedOperatorId,
+              selectedOperatorName: assignedOperatorName,
+              existingOperatorId: item.operatoreId,
+              existingOperatorName: item.operatoreNome,
+            })
+          )
+        ) {
+          return false;
+        }
+      } else {
+        const compatibleOperatorKeys = new Set(
+          compatibleOperators
+            .map((item) =>
+              buildAgendaOperatorIdentityKey({
+                operatorId: item.id,
+                operatorName: item.nome,
+              })
+            )
+            .filter(Boolean)
+        );
+        const busyCompatibleOperatorKeys = new Set(
+          relevantOverlappingAppointments
+            .map((item) =>
+              buildAgendaOperatorIdentityKey({
+                operatorId: item.operatoreId,
+                operatorName: item.operatoreNome,
+              })
+            )
+            .filter((key) => compatibleOperatorKeys.has(key))
+        );
+        const anonymousOverlaps = relevantOverlappingAppointments.filter((item) => {
+          return (
+            !buildAgendaOperatorIdentityKey({
+              operatorId: item.operatoreId,
+              operatorName: item.operatoreNome,
+            })
+          );
+        }).length;
 
-      const conflict = requiresOperators
-        ? findConflictingAppointmentShared({
-            appointmentDate: dateValue,
-            startTime,
-            serviceName: appointment.servizio,
-            appointments: appointmentsPool,
-            services: servizi,
-            operatorId: assignedOperatorId || undefined,
-            operatorName: appointment.operatoreNome?.trim() || undefined,
-            useOperators: requiresOperators,
-          })
-        : null;
-
-      if (conflict) {
-        return false;
+        if (compatibleOperatorKeys.size - busyCompatibleOperatorKeys.size - anonymousOverlaps <= 0) {
+          return false;
+        }
       }
 
       const declaredRequiredMachineryIds = getServiceRequiredMachineryIds(appointment.servizio);
@@ -5119,20 +5555,7 @@ const resetWeekDrag = useCallback(() => {
       const appointmentStart = timeToMinutes(startTime);
       const appointmentEnd = appointmentStart + durationMinutes;
 
-      return !appointmentsPool.some((item) => {
-        if ((item.data ?? todayDate) !== dateValue) return false;
-
-        const existingStart = timeToMinutes(item.ora);
-        const existingEnd =
-          existingStart +
-          (typeof item.durataMinuti === 'number'
-            ? item.durataMinuti
-            : getServiceDuration(item.servizio));
-
-        if (!(appointmentStart < existingEnd && appointmentEnd > existingStart)) {
-          return false;
-        }
-
+      return !overlappingAppointments.some((item) => {
         const occupiedMachineryIds =
           (item.macchinarioIds ?? []).length > 0
             ? item.macchinarioIds ?? []
@@ -5146,8 +5569,10 @@ const resetWeekDrag = useCallback(() => {
     [
       activeMachineryMap,
       availabilitySettings,
+      buildAgendaOperatorIdentityKey,
+      doesAppointmentUseOperatorCapacity,
+      doesTimeRangeConflictWithAppointment,
       getAppointmentDurationMinutes,
-      getServiceDuration,
       getServiceRequiredMachineryIds,
       operatori,
       servizi,
@@ -5194,30 +5619,62 @@ const resetWeekDrag = useCallback(() => {
 
       const validateAtTime = (candidateTime: string) => {
         const targetCellState = getWeekCellState(targetDate, candidateTime);
-        const occupyingAppointment = getWeekAppointmentOccupyingSlot(targetDate, candidateTime);
-        const rawTargetAppointment =
-          getWeekAppointmentStartingAt(targetDate, candidateTime) ?? occupyingAppointment;
-        const targetAppointment = isSyntheticWeekAppointmentId(rawTargetAppointment?.id)
-          ? null
-          : rawTargetAppointment;
-        const resolvedTargetTime = targetAppointment?.ora ?? candidateTime;
+        const sourceDate = sourceAppointment.data ?? todayDate;
+        const targetBlockingPool = (blockingAppointmentsByDate[targetDate] ?? []).filter(
+          (item) => item.id !== sourceAppointment.id
+        );
 
         if (targetCellState === 'outside' || targetCellState === 'blocked') {
-          return { valid: false, targetAppointment: null as AppuntamentoItem | null, resolvedTargetTime };
+          return {
+            valid: false,
+            targetAppointment: null as AppuntamentoItem | null,
+            resolvedTargetTime: candidateTime,
+          };
         }
 
         if (
-          (sourceAppointment.data ?? todayDate) === targetDate &&
-          sourceAppointment.ora === resolvedTargetTime
+          sourceDate === targetDate &&
+          sourceAppointment.ora === candidateTime
         ) {
-          return { valid: false, targetAppointment: null as AppuntamentoItem | null, resolvedTargetTime };
+          return {
+            valid: false,
+            targetAppointment: null as AppuntamentoItem | null,
+            resolvedTargetTime: candidateTime,
+          };
         }
 
-        if (targetCellState === 'occupied' && isSyntheticWeekAppointmentId(rawTargetAppointment?.id)) {
-          return { valid: false, targetAppointment: null as AppuntamentoItem | null, resolvedTargetTime };
+        const canPlaceSourceDirectly = canPlaceAppointmentAtSlot({
+          appointment: sourceAppointment,
+          dateValue: targetDate,
+          startTime: candidateTime,
+          appointmentsPool: targetBlockingPool,
+        });
+
+        if (canPlaceSourceDirectly) {
+          return {
+            valid: true,
+            targetAppointment: null as AppuntamentoItem | null,
+            resolvedTargetTime: candidateTime,
+          };
         }
 
-        if (targetAppointment) {
+        const overlappingTargetAppointments = (blockingAppointmentsByDate[targetDate] ?? [])
+          .filter((item) => item.id !== sourceAppointment.id)
+          .filter((item) => !isSyntheticWeekAppointmentId(item.id))
+          .filter((item) =>
+            doesTimeRangeConflictWithAppointment({
+              startTime: candidateTime,
+              durationMinutes: getAppointmentDurationMinutes(sourceAppointment),
+              appointment: item,
+              services: servizi,
+              settings: availabilitySettings,
+            })
+          )
+          .sort((first, second) => first.ora.localeCompare(second.ora));
+
+        for (const targetAppointment of overlappingTargetAppointments) {
+          const resolvedTargetTime = targetAppointment.ora;
+
           const sourceUsesOperatorCapacity = doesAppointmentUseOperatorCapacity(sourceAppointment);
           const targetUsesOperatorCapacity = doesAppointmentUseOperatorCapacity(targetAppointment);
           const sourceLaneKey = getWeekOperatorLaneKey(sourceAppointment);
@@ -5227,10 +5684,10 @@ const resetWeekDrag = useCallback(() => {
             sourceUsesOperatorCapacity && targetUsesOperatorCapacity && sourceLaneKey === targetLaneKey;
 
           if (!isSalonToSalonSwap && !isSameOperatorLaneSwap) {
-            return { valid: false, targetAppointment: null as AppuntamentoItem | null, resolvedTargetTime };
+            continue;
           }
 
-          const swapAppointmentsPool = appuntamenti.filter(
+          const swapAppointmentsPool = (blockingAppointmentsByDate[targetDate] ?? []).filter(
             (item) => item.id !== sourceAppointment.id && item.id !== targetAppointment.id
           );
           const canPlaceSourceIntoTarget = canPlaceAppointmentAtSlot({
@@ -5239,39 +5696,28 @@ const resetWeekDrag = useCallback(() => {
             startTime: resolvedTargetTime,
             appointmentsPool: swapAppointmentsPool,
           });
+          const sourceBlockingPool = (blockingAppointmentsByDate[sourceDate] ?? []).filter(
+            (item) => item.id !== sourceAppointment.id && item.id !== targetAppointment.id
+          );
           const canPlaceTargetIntoSource = canPlaceAppointmentAtSlot({
             appointment: targetAppointment,
-            dateValue: sourceAppointment.data ?? todayDate,
+            dateValue: sourceDate,
             startTime: sourceAppointment.ora,
-            appointmentsPool: swapAppointmentsPool,
+            appointmentsPool: sourceBlockingPool,
           });
 
           if (!canPlaceSourceIntoTarget || !canPlaceTargetIntoSource) {
-            return { valid: false, targetAppointment: null as AppuntamentoItem | null, resolvedTargetTime };
+            continue;
           }
 
           return { valid: true, targetAppointment, resolvedTargetTime };
         }
 
-        const excludedIds = new Set([sourceAppointment.id]);
-        const appointmentsPool = appuntamenti.filter((item) => !excludedIds.has(item.id));
-
-        const canPlaceSource = canPlaceAppointmentAtSlot({
-          appointment: sourceAppointment,
-          dateValue: targetDate,
-          startTime: resolvedTargetTime,
-          appointmentsPool,
-        });
-
-        if (targetCellState === 'occupied' && !canPlaceSource) {
-          return { valid: false, targetAppointment: null as AppuntamentoItem | null, resolvedTargetTime };
-        }
-
-        if (!canPlaceSource) {
-          return { valid: false, targetAppointment: null as AppuntamentoItem | null, resolvedTargetTime };
-        }
-
-        return { valid: true, targetAppointment, resolvedTargetTime };
+        return {
+          valid: false,
+          targetAppointment: null as AppuntamentoItem | null,
+          resolvedTargetTime: candidateTime,
+        };
       };
 
       const directValidation = validateAtTime(targetTime);
@@ -5286,14 +5732,15 @@ const resetWeekDrag = useCallback(() => {
       return fallbackValidation ?? directValidation;
     },
     [
-      appuntamenti,
+      availabilitySettings,
+      blockingAppointmentsByDate,
       canPlaceAppointmentAtSlot,
       doesAppointmentUseOperatorCapacity,
+      doesTimeRangeConflictWithAppointment,
       getAppointmentDurationMinutes,
-      getWeekAppointmentOccupyingSlot,
       getWeekOperatorLaneKey,
-      getWeekAppointmentStartingAt,
       getWeekCellState,
+      servizi,
       todayDate,
       weekTimeSlots,
     ]
@@ -6396,25 +6843,48 @@ const completeWeekDrag = useCallback(() => {
       setQuickBookingServiceId('');
       setQuickBookingCustomerId('');
       setQuickBookingOperatorId('');
-      setShowQuickCustomerComposer(false);
+      setShowAgendaCustomerComposer(false);
       setQuickCustomerNameInput('');
       setQuickCustomerPhoneInput('');
       setQuickCustomerEmailInput('');
+      setQuickCustomerInstagramInput('');
+      setQuickCustomerBirthdayInput('');
     },
     []
   );
 
   const closeQuickSlotModal = useCallback(() => {
+    Keyboard.dismiss();
+    setDisableParentSwipe(false);
+    resetWeekDrag();
     setQuickSlotDraft(null);
     setQuickBookingServiceId('');
     setQuickBookingCustomerId('');
     setQuickBookingOperatorId('');
     setQuickServiceSearchQuery('');
+    setServicePickerTarget(null);
     setShowQuickCustomerComposer(false);
+    setShowServiceComposerInPicker(false);
+    setShowAgendaCustomerComposer(false);
+    setShowAgendaServiceComposer(false);
+    setCustomerBirthdayPickerTarget(null);
+    setAgendaServiceNumberPickerTarget(null);
     setQuickCustomerNameInput('');
     setQuickCustomerPhoneInput('');
     setQuickCustomerEmailInput('');
-  }, []);
+    setQuickCustomerInstagramInput('');
+    setQuickCustomerBirthdayInput('');
+  }, [resetWeekDrag, setDisableParentSwipe]);
+
+  useEffect(() => {
+    if (quickSlotDraft) return;
+    setDisableParentSwipe(false);
+    setShowServiceComposerInPicker(false);
+    setShowAgendaCustomerComposer(false);
+    setShowAgendaServiceComposer(false);
+    setCustomerBirthdayPickerTarget((current) => (current === 'quick' ? null : current));
+    setAgendaServiceNumberPickerTarget(null);
+  }, [quickSlotDraft, setDisableParentSwipe]);
 
   const closeWeekAppointmentDetails = useCallback(() => {
     setWeekAppointmentDetails(null);
@@ -6878,7 +7348,10 @@ const completeWeekDrag = useCallback(() => {
       nextErrors.telefono = 'Numero di telefono errato (deve avere 10 cifre)';
     }
 
-    if (quickCustomerEmailInput.trim() && !isValidEmail(quickCustomerEmailInput)) {
+    if (!quickCustomerEmailInput.trim()) {
+      invalidFields.push('Email obbligatoria');
+      nextErrors.email = 'Email obbligatoria';
+    } else if (!isValidEmail(quickCustomerEmailInput)) {
       invalidFields.push('Email non valida');
       nextErrors.email = 'Email non valida';
     }
@@ -6898,8 +7371,8 @@ const completeWeekDrag = useCallback(() => {
         nome: quickCustomerNameInput.trim(),
         telefono: quickCustomerPhoneInput.trim(),
         email: quickCustomerEmailInput.trim(),
-        instagram: '',
-        birthday: '',
+        instagram: quickCustomerInstagramInput.trim(),
+        birthday: normalizeBirthdayValue(quickCustomerBirthdayInput),
         nota: '',
         fonte: 'salone',
         viewedBySalon: true,
@@ -6909,11 +7382,20 @@ const completeWeekDrag = useCallback(() => {
       ...current,
     ]);
     setQuickBookingCustomerId(nextId);
-    setShowQuickCustomerComposer(false);
+    setShowAgendaCustomerComposer(false);
     setQuickCustomerNameInput('');
     setQuickCustomerPhoneInput('');
     setQuickCustomerEmailInput('');
-  }, [quickCustomerEmailInput, quickCustomerNameInput, quickCustomerPhoneInput, setClienti]);
+    setQuickCustomerInstagramInput('');
+    setQuickCustomerBirthdayInput('');
+  }, [
+    quickCustomerBirthdayInput,
+    quickCustomerEmailInput,
+    quickCustomerInstagramInput,
+    quickCustomerNameInput,
+    quickCustomerPhoneInput,
+    setClienti,
+  ]);
 
   const addCustomerFromAgenda = useCallback(() => {
     const invalidFields: string[] = [];
@@ -6936,7 +7418,10 @@ const completeWeekDrag = useCallback(() => {
       nextErrors.telefono = 'Numero di telefono errato (deve avere 10 cifre)';
     }
 
-    if (agendaCustomerEmailInput.trim() && !isValidEmail(agendaCustomerEmailInput)) {
+    if (!agendaCustomerEmailInput.trim()) {
+      invalidFields.push('Email obbligatoria');
+      nextErrors.email = 'Email obbligatoria';
+    } else if (!isValidEmail(agendaCustomerEmailInput)) {
       invalidFields.push('Email non valida');
       nextErrors.email = 'Email non valida';
     }
@@ -6957,8 +7442,8 @@ const completeWeekDrag = useCallback(() => {
         nome: nextCustomerName,
         telefono: agendaCustomerPhoneInput.trim(),
         email: agendaCustomerEmailInput.trim(),
-        instagram: '',
-        birthday: '',
+        instagram: agendaCustomerInstagramInput.trim(),
+        birthday: normalizeBirthdayValue(agendaCustomerBirthdayInput),
         nota: '',
         fonte: 'salone',
         viewedBySalon: true,
@@ -6974,18 +7459,108 @@ const completeWeekDrag = useCallback(() => {
     setAgendaCustomerNameInput('');
     setAgendaCustomerPhoneInput('');
     setAgendaCustomerEmailInput('');
+    setAgendaCustomerInstagramInput('');
+    setAgendaCustomerBirthdayInput('');
     setTimeout(scrollAgendaToService, 120);
   }, [
+    agendaCustomerBirthdayInput,
     agendaCustomerEmailInput,
+    agendaCustomerInstagramInput,
     agendaCustomerNameInput,
     agendaCustomerPhoneInput,
     scrollAgendaToService,
     setClienti,
   ]);
 
+  const resetQuickCustomerComposer = useCallback(() => {
+    setQuickCustomerErrors({});
+    setQuickCustomerNameInput('');
+    setQuickCustomerPhoneInput('');
+    setQuickCustomerEmailInput('');
+    setQuickCustomerInstagramInput('');
+    setQuickCustomerBirthdayInput('');
+  }, []);
+
+  const resetAgendaCustomerComposer = useCallback(() => {
+    setAgendaCustomerErrors({});
+    setAgendaCustomerNameInput('');
+    setAgendaCustomerPhoneInput('');
+    setAgendaCustomerEmailInput('');
+    setAgendaCustomerInstagramInput('');
+    setAgendaCustomerBirthdayInput('');
+  }, []);
+
+  const resetAgendaServiceComposer = useCallback(() => {
+    setAgendaServiceNameInput('');
+    setAgendaServicePriceInput('');
+    setAgendaServiceOriginalPriceInput('');
+    setAgendaServiceDurationInput('');
+    setAgendaServiceRoleInput('');
+    setAgendaServiceRolePickerOpen(false);
+    setAgendaServiceCustomRoleOpen(false);
+  }, []);
+
+  const openAgendaServiceNumberPicker = useCallback(
+    (target: 'price' | 'originalPrice' | 'duration') => {
+      const textInputState = TextInput.State as typeof TextInput.State & {
+        currentlyFocusedInput?: () => TextInput | null;
+        blurTextInput?: (node: number | TextInput | null) => void;
+      };
+      const currentlyFocusedInput = textInputState.currentlyFocusedInput?.() ?? null;
+
+      currentlyFocusedInput?.blur?.();
+      agendaServiceNameRef.current?.blur();
+      textInputState.blurTextInput?.(currentlyFocusedInput);
+      setAgendaServiceNumberPickerTarget(null);
+      Keyboard.dismiss();
+      const delay = Platform.OS === 'ios' ? 320 : 120;
+      setTimeout(() => {
+        requestAnimationFrame(() => {
+          setAgendaServiceNumberPickerTarget(target);
+        });
+      }, delay);
+    },
+    []
+  );
+
+  const closeAgendaInlineNumberPicker = useCallback(() => {
+    setAgendaServiceNumberPickerTarget(null);
+  }, []);
+
+  const confirmAgendaInlineNumberPicker = useCallback(() => {
+    const nextValue = String(Math.max(0, Math.round(agendaInlineNumberPickerValue)));
+
+    if (agendaServiceNumberPickerTarget === 'price') {
+      setAgendaServicePriceInput(nextValue);
+    } else if (agendaServiceNumberPickerTarget === 'originalPrice') {
+      setAgendaServiceOriginalPriceInput(nextValue);
+    } else if (agendaServiceNumberPickerTarget === 'duration') {
+      setAgendaServiceDurationInput(nextValue);
+    }
+
+    setAgendaServiceNumberPickerTarget(null);
+  }, [agendaInlineNumberPickerValue, agendaServiceNumberPickerTarget]);
+
+  const canSubmitQuickCustomerRequired =
+    !!quickCustomerNameInput.trim() &&
+    isValidPhone10(quickCustomerPhoneInput) &&
+    !!quickCustomerEmailInput.trim() &&
+    isValidEmail(quickCustomerEmailInput);
+
+  const canSubmitAgendaCustomerRequired =
+    !!agendaCustomerNameInput.trim() &&
+    isValidPhone10(agendaCustomerPhoneInput) &&
+    !!agendaCustomerEmailInput.trim() &&
+    isValidEmail(agendaCustomerEmailInput);
+
   const addServiceFromAgenda = useCallback(() => {
     if (!agendaServiceNameInput.trim() || !agendaServicePriceInput.trim() || !agendaServiceDurationInput.trim()) {
-      Alert.alert('Dati mancanti', 'Inserisci nome, prezzo e durata del servizio.');
+      setAgendaComposerDialog({
+        visible: true,
+        tone: 'error',
+        title: 'Dati mancanti',
+        message: 'Inserisci nome, prezzo e durata del servizio.',
+      });
       return;
     }
 
@@ -7002,12 +7577,22 @@ const completeWeekDrag = useCallback(() => {
       nextPrice < 0 ||
       nextDuration <= 0
     ) {
-      Alert.alert('Valori non validi', 'Controlla prezzo, prezzo pieno e durata del nuovo servizio.');
+      setAgendaComposerDialog({
+        visible: true,
+        tone: 'error',
+        title: 'Valori non validi',
+        message: 'Controlla prezzo, prezzo pieno e durata del nuovo servizio.',
+      });
       return;
     }
 
     if (!agendaServiceRoleInput.trim()) {
-      Alert.alert('Mestiere obbligatorio', 'Inserisci il mestiere richiesto del servizio.');
+      setAgendaComposerDialog({
+        visible: true,
+        tone: 'error',
+        title: 'Mestiere obbligatorio',
+        message: 'Inserisci il mestiere richiesto del servizio.',
+      });
       return;
     }
 
@@ -7017,7 +7602,12 @@ const completeWeekDrag = useCallback(() => {
     );
 
     if (alreadyExists) {
-      Alert.alert('Servizio gia presente', 'Esiste gia un servizio con questo nome.');
+      setAgendaComposerDialog({
+        visible: true,
+        tone: 'warning',
+        title: 'Servizio gia presente',
+        message: 'Esiste gia un servizio con questo nome.',
+      });
       return;
     }
 
@@ -7066,10 +7656,10 @@ const completeWeekDrag = useCallback(() => {
       setAgendaServiceNameInput('');
       setAgendaServicePriceInput('');
       setAgendaServiceOriginalPriceInput('');
-      setAgendaServiceDurationInput('60');
+      setAgendaServiceDurationInput('');
       setAgendaServiceRoleInput('');
 
-      if (
+      const shouldWarnMissingOperator =
         shouldWarnAgendaAboutMissingOperatorsForRole({
           roleName: nextServiceRole,
           services: [
@@ -7080,20 +7670,29 @@ const completeWeekDrag = useCallback(() => {
           ],
           operators: operatori,
         })
-      ) {
-        Alert.alert(
-          'Operatore da collegare',
-          `Hai salvato il servizio con mestiere "${nextServiceRole}" in un salone con più mestieri, ma non esiste ancora nessun operatore con quel mestiere. Se non lo imposti, dal frontend il cliente potrebbe non trovare slot prenotabili.`
-        );
-      }
+      ;
+
+      const successMessage = shouldWarnMissingOperator
+        ? `Servizio aggiunto correttamente.\n\nHai salvato il servizio con mestiere "${nextServiceRole}" in un salone con più mestieri, ma non esiste ancora nessun operatore con quel mestiere. Se non lo imposti, dal frontend il cliente potrebbe non trovare slot prenotabili.`
+        : 'Servizio aggiunto correttamente.';
 
       if (servicePickerTarget === 'quick') {
         haptic.success().catch(() => null);
-        Alert.alert('Servizio aggiunto', 'Servizio aggiunto correttamente.');
+        setAgendaComposerDialog({
+          visible: true,
+          tone: shouldWarnMissingOperator ? 'warning' : 'success',
+          title: shouldWarnMissingOperator ? 'Servizio aggiunto, collega un operatore' : 'Servizio aggiunto',
+          message: successMessage,
+        });
         return;
       }
 
-      Alert.alert('Servizio aggiunto', 'Servizio aggiunto correttamente.');
+      setAgendaComposerDialog({
+        visible: true,
+        tone: shouldWarnMissingOperator ? 'warning' : 'success',
+        title: shouldWarnMissingOperator ? 'Servizio aggiunto, collega un operatore' : 'Servizio aggiunto',
+        message: successMessage,
+      });
       setTimeout(scrollAgendaToTime, 120);
     };
 
@@ -7580,9 +8179,7 @@ const completeWeekDrag = useCallback(() => {
     const shouldScrollToClient = options?.scrollToClient ?? true;
     const deepScrollToWeekPlanner = options?.deepScrollToWeekPlanner ?? false;
     const weekPlannerExtraOffset = deepScrollToWeekPlanner
-      ? responsive.isDesktop
-        ? 300
-        : 500
+      ? agendaWeekPlannerGridOffsetRef.current
       : 0;
 
     if (daySelectionScrollTimeoutRef.current) {
@@ -8794,13 +9391,18 @@ const completeWeekDrag = useCallback(() => {
       </View>
           ) : null}
 
-	          <View
+          <View
               style={[
                 styles.weekPlannerTimeColumn,
-                weekPlannerHasHorizontalOverflow && styles.weekPlannerTimeColumnOverflow,
+                weekPlannerNeedsTimeColumnOverflow && styles.weekPlannerTimeColumnOverflow,
               ]}
             >
-	          <View style={styles.weekPlannerCornerCell}>
+	          <View
+              style={[
+                styles.weekPlannerCornerCell,
+                weekPlannerHasLaneHeaders && styles.weekPlannerCornerCellWithLanes,
+              ]}
+            >
 	            <View style={styles.weekPlannerTimeColumnSpacer} />
 	          </View>
 		          {weekPlannerHasLaneHeaders ? <View style={styles.weekPlannerTimeLaneHeaderSpacer} /> : null}
@@ -8908,6 +9510,9 @@ const completeWeekDrag = useCallback(() => {
           >
           <View
               key={`week-grid-${data}-${weekEffectiveVisibleDays}-${weekInteractionEpoch}`}
+              onLayout={(event) => {
+                agendaWeekPlannerGridOffsetRef.current = event.nativeEvent.layout.y;
+              }}
               style={styles.weekPlannerGridShell}
             >
           {weekVisibleDates.map((day, dayIndex) => {
@@ -8915,9 +9520,12 @@ const completeWeekDrag = useCallback(() => {
             const pendingOnDay = pendingRequestsCountByDate[day.value] ?? 0;
             const isLastDayColumn = dayIndex === weekVisibleDates.length - 1;
             const dayAvailability = getDateAvailabilityInfo(availabilitySettings, day.value);
+            const isSunday = parseIsoDate(day.value).getDay() === 0;
             const isClosedDay = dayAvailability.closed;
             const isHolidayLikeDay =
-              dayAvailability.reason === 'holiday' || dayAvailability.reason === 'vacation';
+              isSunday ||
+              dayAvailability.reason === 'holiday' ||
+              dayAvailability.reason === 'vacation';
             const weekOperatorLaneLayout = weekOperatorLaneLayoutByDate[day.value] ?? {
               lanes: [],
               appointmentLaneKeys: {},
@@ -9254,23 +9862,38 @@ const completeWeekDrag = useCallback(() => {
                                     activeOpacity={laneQuickBookAvailable ? 0.9 : 1}
                                     disabled={!laneQuickBookAvailable}
                                   >
-                                    <Text
-                                      numberOfLines={1}
-                                      ellipsizeMode="clip"
-                                      adjustsFontSizeToFit
-                                      minimumFontScale={0.64}
-                                      style={[
-                                        styles.weekPlannerCellText,
-                                        styles.weekPlannerOperatorLaneText,
-                                        isHistoricalLaneDisabled &&
-                                          styles.weekPlannerCellTextDisabledLane,
-                                        laneQuickBookAvailable && styles.weekPlannerCellTextAvailable,
-                                        isPastFreeSlot && styles.weekPlannerCellTextPast,
-                                        cellState === 'outside' && styles.weekPlannerCellTextMuted,
-                                      ]}
-                                    >
-                                      {laneQuickBookAvailable ? '+' : ''}
-                                    </Text>
+                                    {laneQuickBookAvailable ? (
+                                      <Text
+                                        numberOfLines={1}
+                                        ellipsizeMode="clip"
+                                        adjustsFontSizeToFit
+                                        minimumFontScale={0.64}
+                                        style={[
+                                          styles.weekPlannerCellText,
+                                          styles.weekPlannerOperatorLaneText,
+                                          styles.weekPlannerCellTextAvailable,
+                                        ]}
+                                      >
+                                        +
+                                      </Text>
+                                    ) : (
+                                      <Text
+                                        numberOfLines={1}
+                                        ellipsizeMode="clip"
+                                        adjustsFontSizeToFit
+                                        minimumFontScale={0.64}
+                                        style={[
+                                          styles.weekPlannerCellText,
+                                          styles.weekPlannerOperatorLaneText,
+                                          isHistoricalLaneDisabled &&
+                                            styles.weekPlannerCellTextDisabledLane,
+                                          isPastFreeSlot && styles.weekPlannerCellTextPast,
+                                          cellState === 'outside' && styles.weekPlannerCellTextMuted,
+                                        ]}
+                                      >
+                                        {''}
+                                      </Text>
+                                    )}
                                   </HapticTouchable>
                                 )}
                               </View>
@@ -9333,24 +9956,34 @@ const completeWeekDrag = useCallback(() => {
                             activeOpacity={canQuickBook ? 0.9 : 1}
                             disabled={!canQuickBook}
                         >
-                          <Text
-                            numberOfLines={1}
-                            ellipsizeMode="clip"
-                            adjustsFontSizeToFit
-                            minimumFontScale={0.75}
-                            style={[
-                              styles.weekPlannerCellText,
-                              canQuickBook && styles.weekPlannerCellTextAvailable,
-                              isPastFreeSlot && styles.weekPlannerCellTextPast,
-                              cellState === 'outside' && styles.weekPlannerCellTextMuted,
-                            ]}
-                          >
-                            {canQuickBook
-                              ? '+'
-                              : isPastFreeSlot
-                                ? 'Passato'
-                                : ''}
-                          </Text>
+                          {canQuickBook ? (
+                            <Text
+                              numberOfLines={1}
+                              ellipsizeMode="clip"
+                              adjustsFontSizeToFit
+                              minimumFontScale={0.75}
+                              style={[
+                                styles.weekPlannerCellText,
+                                styles.weekPlannerCellTextAvailable,
+                              ]}
+                            >
+                              +
+                            </Text>
+                          ) : (
+                            <Text
+                              numberOfLines={1}
+                              ellipsizeMode="clip"
+                              adjustsFontSizeToFit
+                              minimumFontScale={0.75}
+                              style={[
+                                styles.weekPlannerCellText,
+                                isPastFreeSlot && styles.weekPlannerCellTextPast,
+                                cellState === 'outside' && styles.weekPlannerCellTextMuted,
+                              ]}
+                            >
+                              {isPastFreeSlot ? 'Passato' : ''}
+                            </Text>
+                          )}
                         </HapticTouchable>
                       )}
                     </View>
@@ -10281,22 +10914,15 @@ const completeWeekDrag = useCallback(() => {
                 <HapticTouchable
                   style={styles.quickInlineAddButton}
                   onPress={() => {
-                        setServicePickerTarget('quick');
-                        setShowServiceComposerInPicker((current) => !current);
-                    if (!showServiceComposerInPicker) {
-                      requestAnimationFrame(() => {
-                        requestAnimationFrame(() => {
-                          focusQuickBookingNextField(agendaServiceNameRef);
-                        });
-                      });
-                    }
+                    setServicePickerTarget('quick');
+                    setShowServiceComposerInPicker(true);
                   }}
                   hapticType="none"
                   pressInHapticType="light"
                   activeOpacity={1}
                 >
                   <Text style={styles.quickInlineAddButtonText}>
-                    {showServiceComposerInPicker ? 'Chiudi +' : '+ Servizio'}
+                    + Servizio
                   </Text>
                 </HapticTouchable>
               </View>
@@ -10312,11 +10938,6 @@ const completeWeekDrag = useCallback(() => {
                     onPress={() => {
                       setServicePickerTarget('quick');
                       setShowServiceComposerInPicker(true);
-                      requestAnimationFrame(() => {
-                        requestAnimationFrame(() => {
-                          focusQuickBookingNextField(agendaServiceNameRef);
-                        });
-                      });
                     }}
                     hapticType="medium"
                     activeOpacity={0.9}
@@ -10346,300 +10967,165 @@ const completeWeekDrag = useCallback(() => {
                       </Text>
                     </View>
                   ) : (
-                    <ScrollView
-                      horizontal
-                      showsHorizontalScrollIndicator={false}
-                      contentContainerStyle={styles.quickServiceColumnsScrollContent}
-                    >
-                      {quickBookingServiceColumns.map((column, columnIndex) => (
-                        <View
-                          key={`quick-service-column-${columnIndex}`}
-                          style={[styles.quickServiceColumn, { width: quickServiceColumnWidth }]}
-                        >
-                          {column.map((item) => {
-                            const selected = item.id === quickBookingServiceId;
-                            const selectable = quickBookingAvailableServiceIds.has(item.id);
-                            const accent = getAgendaServiceAccent(item.nome);
-                            const laneRestrictionReason = getQuickBookingServiceLaneRestrictionReason(item);
-                            const computedUnavailableReason = !selectable
-                              ? laneRestrictionReason || getQuickBookingServiceUnavailableReason(item)
-                              : '';
-                            const unavailableReason =
-                              !selectable && !laneRestrictionReason
-                                ? 'Orario non prenotabile'
-                                : computedUnavailableReason;
-                            const isLaneRestricted = laneRestrictionReason !== '';
-                            const showCorrectLaneHint =
-                              unavailableReason === 'Mestiere diverso' ||
-                              unavailableReason === 'Operatore diverso';
+                    <View>
+                      <ScrollView
+                        horizontal
+                        showsHorizontalScrollIndicator
+                        contentContainerStyle={styles.quickServiceColumnsScrollContent}
+                      >
+                        {quickBookingServiceColumns.map((column, columnIndex) => (
+                          <View
+                            key={`quick-service-column-${columnIndex}`}
+                            style={[styles.quickServiceColumn, { width: quickServiceColumnWidth }]}
+                          >
+                            {column.map((item) => {
+                              const selected = item.id === quickBookingServiceId;
+                              const selectable = quickBookingAvailableServiceIds.has(item.id);
+                              const accent = getAgendaServiceAccent(item.nome);
+                              const laneRestrictionReason = getQuickBookingServiceLaneRestrictionReason(item);
+                              const computedUnavailableReason = !selectable
+                                ? laneRestrictionReason || getQuickBookingServiceUnavailableReason(item)
+                                : '';
+                              const unavailableReason =
+                                !selectable && !laneRestrictionReason
+                                  ? 'Orario non prenotabile'
+                                  : computedUnavailableReason;
+                              const isLaneRestricted = laneRestrictionReason !== '';
+                              const showCorrectLaneHint =
+                                unavailableReason === 'Mestiere diverso' ||
+                                unavailableReason === 'Operatore diverso';
 
-                            return (
-                              <HapticTouchable
-                                key={`quick-inline-service-${item.id}`}
-                                style={[
-                                  styles.quickServiceCard,
-                                  {
-                                    width: '100%',
-                                    backgroundColor: accent.bg,
-                                    borderColor: selected ? '#111827' : accent.border,
-                                  },
-                                  !selectable && styles.quickBookingChipDisabled,
-                                  isLaneRestricted && styles.quickServiceCardLaneRestricted,
-                                  selected && styles.quickServiceCardSelected,
-                                ]}
-                                onPress={() => {
-                                  if (!selectable) {
-                                    haptic.error().catch(() => null);
-                                    return;
-                                  }
-                                  setQuickBookingServiceId(item.id);
-                                  setQuickBookingOperatorId('');
-                                }}
-                                hapticType="none"
-                                pressInHapticType="light"
-                                activeOpacity={selectable ? 1 : 1}
-                                disabled={!selectable}
-                              >
-                                {selected ? (
-                                  <View style={styles.quickServiceCardSelectedBadge}>
-                                    <Text style={styles.quickServiceCardSelectedBadgeText}>Scelto</Text>
-                                  </View>
-                                ) : null}
-                                <Text
+                              return (
+                                <HapticTouchable
+                                  key={`quick-inline-service-${item.id}`}
                                   style={[
-                                    styles.quickServiceCardTitle,
-                                    selected && styles.quickServiceCardTitleSelected,
+                                    styles.quickServiceCard,
+                                    {
+                                      width: '100%',
+                                      backgroundColor: accent.bg,
+                                      borderColor: selected ? '#111827' : accent.border,
+                                    },
+                                    !selectable && styles.quickBookingChipDisabled,
+                                    isLaneRestricted && styles.quickServiceCardLaneRestricted,
+                                    selected && styles.quickServiceCardSelected,
                                   ]}
-                                  numberOfLines={1}
-                                  adjustsFontSizeToFit
-                                  minimumFontScale={0.64}
-                                  ellipsizeMode="clip"
+                                  onPress={() => {
+                                    if (!selectable) {
+                                      haptic.error().catch(() => null);
+                                      return;
+                                    }
+                                    setQuickBookingServiceId(item.id);
+                                    setQuickBookingOperatorId('');
+                                  }}
+                                  hapticType="none"
+                                  pressInHapticType="light"
+                                  activeOpacity={selectable ? 1 : 1}
+                                  disabled={!selectable}
                                 >
-                                  {item.nome}
-                                </Text>
-                                <Text
-                                  style={[
-                                    styles.quickServiceRoleBadge,
-                                    selected && styles.quickServiceRoleBadgeSelected,
-                                  ]}
-                                  numberOfLines={1}
-                                  adjustsFontSizeToFit
-                                  minimumFontScale={0.72}
-                                  ellipsizeMode="clip"
-                                >
-                                  {item.mestiereRichiesto || 'Servizio'}
-                                </Text>
-                                <Text
-                                  style={[
-                                    styles.quickServiceDuration,
-                                    selected && styles.quickServiceCardMetaSelected,
-                                  ]}
-                                  numberOfLines={1}
-                                  adjustsFontSizeToFit
-                                  minimumFontScale={0.68}
-                                  ellipsizeMode="clip"
-                                >
-                                  Durata: {formatSlotInterval(item.durataMinuti ?? 60)}
-                                </Text>
-                                <Text
-                                  style={[
-                                    styles.quickServicePrice,
-                                    selected && styles.quickServicePriceSelected,
-                                  ]}
-                                  numberOfLines={1}
-                                  adjustsFontSizeToFit
-                                  minimumFontScale={0.72}
-                                  ellipsizeMode="clip"
-                                >
-                                  € {item.prezzo.toFixed(2)}
-                                </Text>
-                                {!selectable ? (
-                                  <View pointerEvents="none" style={styles.quickServiceCardDisabledOverlay}>
-                                    <View
-                                      style={[
-                                        styles.quickServiceCardDisabledBadge,
-                                        !isLaneRestricted && styles.quickServiceCardDisabledBadgeMuted,
-                                      ]}
-                                    >
-                                      <Text
-                                        style={[
-                                          styles.quickServiceCardDisabledBadgeText,
-                                          !isLaneRestricted &&
-                                            styles.quickServiceCardDisabledBadgeTextMuted,
-                                        ]}
-                                        numberOfLines={1}
-                                        adjustsFontSizeToFit
-                                        minimumFontScale={0.8}
-                                      >
-                                        {unavailableReason}
-                                      </Text>
-                                      {showCorrectLaneHint ? (
-                                        <Text
-                                          style={styles.quickServiceCardDisabledBadgeSubtext}
-                                          numberOfLines={2}
-                                          adjustsFontSizeToFit
-                                          minimumFontScale={0.78}
-                                        >
-                                          {unavailableReason === 'Operatore diverso'
-                                            ? "Vai dall'operatore corretto"
-                                            : 'Vai nella colonna corretta'}
-                                        </Text>
-                                      ) : null}
+                                  {selected ? (
+                                    <View style={styles.quickServiceCardSelectedBadge}>
+                                      <Text style={styles.quickServiceCardSelectedBadgeText}>Scelto</Text>
                                     </View>
-                                  </View>
-                                ) : null}
-                              </HapticTouchable>
-                            );
-                          })}
-                        </View>
-                      ))}
-                    </ScrollView>
+                                  ) : null}
+                                  <Text
+                                    style={[
+                                      styles.quickServiceCardTitle,
+                                      selected && styles.quickServiceCardTitleSelected,
+                                    ]}
+                                    numberOfLines={1}
+                                    adjustsFontSizeToFit
+                                    minimumFontScale={0.64}
+                                    ellipsizeMode="clip"
+                                  >
+                                    {item.nome}
+                                  </Text>
+                                  <Text
+                                    style={[
+                                      styles.quickServiceRoleBadge,
+                                      selected && styles.quickServiceRoleBadgeSelected,
+                                    ]}
+                                    numberOfLines={1}
+                                    adjustsFontSizeToFit
+                                    minimumFontScale={0.72}
+                                    ellipsizeMode="clip"
+                                  >
+                                    {item.mestiereRichiesto || 'Servizio'}
+                                  </Text>
+                                  <Text
+                                    style={[
+                                      styles.quickServiceDuration,
+                                      selected && styles.quickServiceCardMetaSelected,
+                                    ]}
+                                    numberOfLines={1}
+                                    adjustsFontSizeToFit
+                                    minimumFontScale={0.68}
+                                    ellipsizeMode="clip"
+                                  >
+                                    Durata: {formatSlotInterval(item.durataMinuti ?? 60)}
+                                  </Text>
+                                  <Text
+                                    style={[
+                                      styles.quickServicePrice,
+                                      selected && styles.quickServicePriceSelected,
+                                    ]}
+                                    numberOfLines={1}
+                                    adjustsFontSizeToFit
+                                    minimumFontScale={0.72}
+                                    ellipsizeMode="clip"
+                                  >
+                                    € {item.prezzo.toFixed(2)}
+                                  </Text>
+                                  {!selectable ? (
+                                    <View pointerEvents="none" style={styles.quickServiceCardDisabledOverlay}>
+                                      <View
+                                        style={[
+                                          styles.quickServiceCardDisabledBadge,
+                                          !isLaneRestricted && styles.quickServiceCardDisabledBadgeMuted,
+                                        ]}
+                                      >
+                                        <Text
+                                          style={[
+                                            styles.quickServiceCardDisabledBadgeText,
+                                            !isLaneRestricted &&
+                                              styles.quickServiceCardDisabledBadgeTextMuted,
+                                          ]}
+                                          numberOfLines={1}
+                                          adjustsFontSizeToFit
+                                          minimumFontScale={0.8}
+                                        >
+                                          {unavailableReason}
+                                        </Text>
+                                        {showCorrectLaneHint ? (
+                                          <Text
+                                            style={styles.quickServiceCardDisabledBadgeSubtext}
+                                            numberOfLines={2}
+                                            adjustsFontSizeToFit
+                                            minimumFontScale={0.78}
+                                          >
+                                            {unavailableReason === 'Operatore diverso'
+                                              ? "Vai dall'operatore corretto"
+                                              : 'Vai nella colonna corretta'}
+                                          </Text>
+                                        ) : null}
+                                      </View>
+                                    </View>
+                                  ) : null}
+                                </HapticTouchable>
+                              );
+                            })}
+                          </View>
+                        ))}
+                      </ScrollView>
+                      <Text style={styles.quickServiceScrollHint}>
+                        Scorri verso sinistra per visualizzare altri servizi
+                      </Text>
+                    </View>
                   )}
                 </View>
               )}
               </View>
 
-              {showServiceComposerInPicker ? (
-                <View style={styles.inlineComposerCard}>
-                  <ClearableTextInput
-                    ref={agendaServiceNameRef}
-                    style={[styles.input, styles.compactTopInput]}
-                    placeholder="Nome servizio"
-                    placeholderTextColor="#8f8f8f"
-                    value={agendaServiceNameInput}
-                    onChangeText={setAgendaServiceNameInput}
-                    onFocus={() => scrollQuickBookingField(agendaServiceNameRef)}
-                    returnKeyType="next"
-                    onSubmitEditing={() => focusQuickBookingNextField(agendaServicePriceRef)}
-                    blurOnSubmit={false}
-                  />
-                  <ClearableTextInput
-                    ref={agendaServicePriceRef}
-                    style={styles.input}
-                    placeholder="Prezzo"
-                    placeholderTextColor="#8f8f8f"
-                    value={agendaServicePriceInput}
-                    onChangeText={setAgendaServicePriceInput}
-                    onFocus={() => scrollQuickBookingField(agendaServicePriceRef)}
-                    keyboardType="decimal-pad"
-                    returnKeyType="next"
-                    onSubmitEditing={() => focusQuickBookingNextField(agendaServiceDurationRef)}
-                    blurOnSubmit={false}
-                  />
-                  <ClearableTextInput
-                    ref={agendaServiceDurationRef}
-                    style={styles.input}
-                    placeholder="Durata in minuti"
-                    placeholderTextColor="#8f8f8f"
-                    value={agendaServiceDurationInput}
-                    onChangeText={setAgendaServiceDurationInput}
-                    onFocus={() => scrollQuickBookingField(agendaServiceDurationRef)}
-                    keyboardType="number-pad"
-                    returnKeyType="done"
-                    onSubmitEditing={() => focusQuickBookingNextField(agendaServiceOriginalPriceRef)}
-                    blurOnSubmit={false}
-                  />
-                  <HapticTouchable
-                    style={[styles.input, styles.agendaRoleSelectorInput]}
-                    onPress={() => setAgendaServiceRolePickerOpen((current) => !current)}
-                    hapticType="none"
-                    pressInHapticType="light"
-                    activeOpacity={1}
-                  >
-                    <Text
-                      style={[
-                        styles.agendaRoleSelectorText,
-                        !agendaServiceRoleInput && styles.agendaRoleSelectorPlaceholder,
-                      ]}
-                    >
-                      {agendaServiceRoleInput || 'Mestiere richiesto obbligatorio'}
-                    </Text>
-                    <Text style={styles.agendaRoleChevron}>
-                      {agendaServiceRolePickerOpen ? '▴' : '▾'}
-                    </Text>
-                  </HapticTouchable>
-
-                  {agendaServiceRolePickerOpen ? (
-                    <View style={styles.agendaRolePickerPanel}>
-                      <Text style={styles.agendaRolePickerTitle}>Mestieri suggeriti</Text>
-                      <View style={styles.agendaRoleChipsWrap}>
-                        {PRESET_ROLE_OPTIONS.map((option) => {
-                          const selected = agendaServiceRoleInput === option;
-                          return (
-                            <HapticTouchable
-                              key={`agenda-role-quick-${option}`}
-                              style={[styles.agendaRoleChip, selected && styles.agendaRoleChipSelected]}
-                              onPress={() => {
-                                setAgendaServiceRoleInput(option);
-                                setAgendaServiceCustomRoleOpen(false);
-                              }}
-                              hapticType="none"
-                              pressInHapticType="light"
-                              activeOpacity={1}
-                            >
-                              <Text
-                                style={[
-                                  styles.agendaRoleChipText,
-                                  selected && styles.agendaRoleChipTextSelected,
-                                ]}
-                              >
-                                {option}
-                              </Text>
-                            </HapticTouchable>
-                          );
-                        })}
-                        <HapticTouchable
-                          style={[styles.agendaRoleChip, styles.agendaRoleChipCreate]}
-                          onPress={() => setAgendaServiceCustomRoleOpen((current) => !current)}
-                          hapticType="none"
-                          pressInHapticType="light"
-                          activeOpacity={1}
-                        >
-                          <Text style={styles.agendaRoleChipCreateText}>
-                            {agendaServiceCustomRoleOpen ? 'Chiudi +' : '+ Nuovo mestiere'}
-                          </Text>
-                        </HapticTouchable>
-                      </View>
-
-                      {agendaServiceCustomRoleOpen ? (
-                        <ClearableTextInput
-                          style={[styles.input, styles.compactTopInput]}
-                          placeholder="Nuovo mestiere"
-                          placeholderTextColor="#8f8f8f"
-                          value={agendaServiceRoleInput}
-                          onChangeText={setAgendaServiceRoleInput}
-                          onSubmitEditing={Keyboard.dismiss}
-                          returnKeyType="done"
-                        />
-                      ) : null}
-                    </View>
-                  ) : null}
-
-                  <ClearableTextInput
-                    ref={agendaServiceOriginalPriceRef}
-                    style={styles.input}
-                    placeholder="Prezzo peino opzionale (Sconto)"
-                    placeholderTextColor="#8f8f8f"
-                    value={agendaServiceOriginalPriceInput}
-                    onChangeText={setAgendaServiceOriginalPriceInput}
-                    onFocus={() => scrollQuickBookingField(agendaServiceOriginalPriceRef)}
-                    keyboardType="decimal-pad"
-                    returnKeyType="done"
-                    onSubmitEditing={Keyboard.dismiss}
-                    blurOnSubmit={false}
-                  />
-
-                  <HapticTouchable
-                    style={styles.secondaryButtonWide}
-                    onPress={addServiceFromAgenda}
-                    hapticType="none"
-                    pressInHapticType="medium"
-                    activeOpacity={1}
-                  >
-                    <Text style={styles.secondaryButtonWideText}>Salva servizio</Text>
-                  </HapticTouchable>
-                </View>
-              ) : null}
+              {null}
 
               {quickBookingUsesOperators ? (
                 <View style={styles.quickSectionBlock}>
@@ -10710,13 +11196,13 @@ const completeWeekDrag = useCallback(() => {
                 <View style={styles.quickSectionHeaderActions}>
                   <HapticTouchable
                     style={styles.quickInlineAddButton}
-                    onPress={() => setShowQuickCustomerComposer((current) => !current)}
+                    onPress={() => setShowAgendaCustomerComposer(true)}
                     hapticType="none"
                     pressInHapticType="light"
                     activeOpacity={1}
                   >
                     <Text style={styles.quickInlineAddButtonText}>
-                      {showQuickCustomerComposer ? 'Chiudi +' : '+ Cliente'}
+                      + Cliente
                     </Text>
                   </HapticTouchable>
                 </View>
@@ -10845,87 +11331,7 @@ const completeWeekDrag = useCallback(() => {
                 </View>
               </View>
 
-              {showQuickCustomerComposer ? (
-                <View style={styles.quickCustomerComposer}>
-                  <ClearableTextInput
-                    ref={quickCustomerNameRef}
-                    style={[
-                      styles.input,
-                      styles.compactTopInput,
-                      quickCustomerErrors.nome && styles.inputError,
-                    ]}
-                    placeholder="Nome cliente"
-                    placeholderTextColor="#8f8f8f"
-                    autoCapitalize="characters"
-                    value={quickCustomerNameInput}
-                    onChangeText={(value) => {
-                      setQuickCustomerNameInput(normalizeCustomerNameInput(value));
-                      if (quickCustomerErrors.nome) {
-                        setQuickCustomerErrors((current) => ({ ...current, nome: undefined }));
-                      }
-                    }}
-                    onFocus={() => scrollQuickBookingField(quickCustomerNameRef)}
-                    returnKeyType="next"
-                    onSubmitEditing={() => focusQuickBookingNextField(quickCustomerPhoneRef)}
-                    blurOnSubmit={false}
-                  />
-                  {quickCustomerErrors.nome ? (
-                    <Text style={styles.fieldErrorText}>{quickCustomerErrors.nome}</Text>
-                  ) : null}
-                  <ClearableTextInput
-                    ref={quickCustomerPhoneRef}
-                    style={[styles.input, quickCustomerErrors.telefono && styles.inputError]}
-                    placeholder="Telefono"
-                    placeholderTextColor="#8f8f8f"
-                    value={quickCustomerPhoneInput}
-                    onChangeText={(value) => {
-                      setQuickCustomerPhoneInput(limitPhoneToTenDigits(value));
-                      if (quickCustomerErrors.telefono) {
-                        setQuickCustomerErrors((current) => ({ ...current, telefono: undefined }));
-                      }
-                    }}
-                    onFocus={() => scrollQuickBookingField(quickCustomerPhoneRef)}
-                    keyboardType="phone-pad"
-                    returnKeyType="next"
-                    onSubmitEditing={() => focusQuickBookingNextField(quickCustomerEmailRef)}
-                    blurOnSubmit={false}
-                  />
-                  {quickCustomerErrors.telefono ? (
-                    <Text style={styles.fieldErrorText}>{quickCustomerErrors.telefono}</Text>
-                  ) : null}
-                  <ClearableTextInput
-                    ref={quickCustomerEmailRef}
-                    style={[styles.input, quickCustomerErrors.email && styles.inputError]}
-                    placeholder="Email facoltativa"
-                    placeholderTextColor="#8f8f8f"
-                    value={quickCustomerEmailInput}
-                    onChangeText={(value) => {
-                      setQuickCustomerEmailInput(value);
-                      if (quickCustomerErrors.email) {
-                        setQuickCustomerErrors((current) => ({ ...current, email: undefined }));
-                      }
-                    }}
-                    onFocus={() => scrollQuickBookingField(quickCustomerEmailRef)}
-                    keyboardType="email-address"
-                    autoCapitalize="none"
-                    returnKeyType="done"
-                    onSubmitEditing={Keyboard.dismiss}
-                  />
-                  {quickCustomerErrors.email ? (
-                    <Text style={styles.fieldErrorText}>{quickCustomerErrors.email}</Text>
-                  ) : null}
-
-                  <HapticTouchable
-                    style={styles.secondaryButtonWide}
-                    onPress={addCustomerFromQuickBooking}
-                    hapticType="none"
-                    pressInHapticType="medium"
-                    activeOpacity={1}
-                  >
-                    <Text style={styles.secondaryButtonWideText}>Salva cliente rapido</Text>
-                  </HapticTouchable>
-                </View>
-              ) : null}
+              {null}
 
               <View style={styles.quickBookingSummaryCard}>
                 <Text style={styles.summaryTitle}>Riepilogo rapido</Text>
@@ -10979,6 +11385,709 @@ const completeWeekDrag = useCallback(() => {
                 </Text>
               </TouchableOpacity>
             </View>
+            {showServiceComposerInPicker || showAgendaCustomerComposer ? (
+              <View
+                style={[
+                  styles.quickBookingNestedOverlay,
+                  showServiceComposerInPicker && styles.quickBookingNestedOverlayService,
+                  showAgendaCustomerComposer && styles.quickBookingNestedOverlayCustomer,
+                ]}
+              >
+                <HapticTouchable
+                  style={styles.quickBookingNestedBackdrop}
+                  activeOpacity={1}
+                  hapticType="none"
+                  pressInHapticType="light"
+                  onPress={() => {
+                    setShowServiceComposerInPicker(false);
+                    setShowAgendaCustomerComposer(false);
+                  }}
+                />
+                <KeyboardAvoidingView
+                  style={[
+                    styles.quickBookingNestedKeyboardShell,
+                    showServiceComposerInPicker && styles.quickBookingNestedKeyboardShellService,
+                    showAgendaCustomerComposer && styles.quickBookingNestedKeyboardShellCustomer,
+                  ]}
+                  behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+                  keyboardVerticalOffset={Platform.OS === 'ios' ? 84 : 0}
+                >
+                  <View
+                    style={[
+                      styles.quickBookingNestedCard,
+                      showServiceComposerInPicker && styles.quickBookingNestedCardService,
+                      showAgendaCustomerComposer && styles.quickBookingNestedCardCustomer,
+                    ]}
+                  >
+                    <View
+                      style={[
+                        styles.quickBookingHeaderRow,
+                        styles.quickBookingNestedHeaderRow,
+                        showAgendaCustomerComposer && styles.quickBookingNestedHeaderRowCustomer,
+                      ]}
+                    >
+                      <View
+                        style={[
+                          styles.quickBookingHeaderTextWrap,
+                          showAgendaCustomerComposer && styles.quickBookingHeaderTextWrapCustomer,
+                        ]}
+                      >
+                        <Text style={styles.calendarTitle}>
+                          {showServiceComposerInPicker ? 'Aggiungi Servizi' : 'Aggiungi nuovo cliente'}
+                        </Text>
+                        <Text
+                          style={[
+                            styles.quickBookingNestedIntroText,
+                            showAgendaCustomerComposer && styles.quickBookingNestedIntroTextCustomer,
+                          ]}
+                        >
+                          {showServiceComposerInPicker
+                            ? 'Stesso modulo della sezione Servizi, direttamente dentro il popup slot.'
+                            : 'Stesso modulo della sezione Clienti, direttamente dentro il popup slot.'}
+                        </Text>
+                      </View>
+                      <HapticTouchable
+                        style={styles.timeConfigCloseButton}
+                        onPress={() => {
+                          setShowServiceComposerInPicker(false);
+                          setShowAgendaCustomerComposer(false);
+                        }}
+                        hapticType="error"
+                        activeOpacity={0.9}
+                      >
+                        <Text style={styles.timeConfigCloseButtonText}>×</Text>
+                      </HapticTouchable>
+                    </View>
+
+                    {showServiceComposerInPicker ? (
+                      <ScrollView
+                        ref={agendaServiceComposerScrollRef}
+                        style={[
+                          styles.quickBookingNestedScroll,
+                          showServiceComposerInPicker && styles.quickBookingNestedScrollService,
+                          showAgendaCustomerComposer && styles.quickBookingNestedScrollCustomer,
+                        ]}
+                        showsVerticalScrollIndicator={false}
+                        contentContainerStyle={styles.quickBookingNestedFormContent}
+                        keyboardShouldPersistTaps="handled"
+                        keyboardDismissMode="interactive"
+                        onScrollBeginDrag={Keyboard.dismiss}
+                        bounces={false}
+                        alwaysBounceVertical={false}
+                      >
+                        <ClearableTextInput
+                          ref={agendaServiceNameRef}
+                          style={[styles.input, styles.centeredInput]}
+                          placeholder="Nome servizio"
+                          placeholderTextColor="#9a9a9a"
+                          value={agendaServiceNameInput}
+                          onChangeText={setAgendaServiceNameInput}
+                          returnKeyType="next"
+                          onSubmitEditing={() => {
+                            Keyboard.dismiss();
+                            openAgendaServiceNumberPicker('price');
+                          }}
+                          blurOnSubmit={false}
+                        />
+
+                        <HapticTouchable
+                          style={[styles.input, styles.numericPickerField]}
+                          onPress={() => {
+                            Keyboard.dismiss();
+                            openAgendaServiceNumberPicker('price');
+                          }}
+                          activeOpacity={0.9}
+                        >
+                          <Text
+                            style={[
+                              styles.numericPickerFieldText,
+                              !agendaServicePriceInput && styles.numericPickerFieldPlaceholder,
+                            ]}
+                          >
+                            {formatNumericFieldLabel('Prezzo', agendaServicePriceInput, agendaServicePriceInput ? ' €' : '')}
+                          </Text>
+                        </HapticTouchable>
+
+                        <HapticTouchable
+                          style={[styles.input, styles.numericPickerField]}
+                          onPress={() => {
+                            Keyboard.dismiss();
+                            openAgendaServiceNumberPicker('duration');
+                          }}
+                          activeOpacity={0.9}
+                        >
+                          <Text
+                            style={[
+                              styles.numericPickerFieldText,
+                              !agendaServiceDurationInput && styles.numericPickerFieldPlaceholder,
+                            ]}
+                          >
+                            {formatNumericFieldLabel('Durata', agendaServiceDurationInput, agendaServiceDurationInput ? ' min' : '')}
+                          </Text>
+                        </HapticTouchable>
+
+                        <HapticTouchable
+                          style={[styles.input, styles.agendaRoleSelectorInput]}
+                          onPress={() => {
+                            Keyboard.dismiss();
+                            setAgendaServiceRolePickerOpen((current) => !current);
+                          }}
+                          activeOpacity={0.9}
+                        >
+                          <Text
+                            style={[
+                              styles.agendaRoleSelectorText,
+                              !agendaServiceRoleInput && styles.agendaRoleSelectorPlaceholder,
+                            ]}
+                          >
+                            {agendaServiceRoleInput || 'Mestiere richiesto: es. barber, colore, nails'}
+                          </Text>
+                          <Text style={styles.agendaRoleChevron}>
+                            {agendaServiceRolePickerOpen ? '▴' : '▾'}
+                          </Text>
+                        </HapticTouchable>
+
+                        {agendaServiceRolePickerOpen ? (
+                          <View style={styles.agendaRolePickerPanel}>
+                            <Text style={styles.agendaRolePickerTitle}>Mestieri suggeriti</Text>
+                            <View style={styles.agendaRoleChipsWrap}>
+                              {PRESET_ROLE_OPTIONS.map((option) => {
+                                const selected = agendaServiceRoleInput === option;
+                                return (
+                                  <HapticTouchable
+                                    key={`agenda-role-inline-${option}`}
+                                    style={[styles.agendaRoleChip, selected && styles.agendaRoleChipSelected]}
+                                    onPress={() => {
+                                      setAgendaServiceRoleInput(option);
+                                      setAgendaServiceCustomRoleOpen(false);
+                                      setAgendaServiceRolePickerOpen(false);
+                                    }}
+                                    activeOpacity={0.9}
+                                  >
+                                    <Text
+                                      style={[
+                                        styles.agendaRoleChipText,
+                                        selected && styles.agendaRoleChipTextSelected,
+                                      ]}
+                                    >
+                                      {option}
+                                    </Text>
+                                  </HapticTouchable>
+                                );
+                              })}
+                              <HapticTouchable
+                                style={[styles.agendaRoleChip, styles.agendaRoleChipCreate]}
+                                onPress={() => setAgendaServiceCustomRoleOpen((current) => !current)}
+                                activeOpacity={0.9}
+                              >
+                                <Text style={styles.agendaRoleChipCreateText}>
+                                  {agendaServiceCustomRoleOpen ? 'Chiudi +' : '+ Crea nuovo mestiere'}
+                                </Text>
+                              </HapticTouchable>
+                            </View>
+
+                            {agendaServiceCustomRoleOpen ? (
+                              <ClearableTextInput
+                                style={[styles.input, styles.compactTopInput]}
+                                placeholder="Nuovo mestiere personalizzato"
+                                placeholderTextColor="#9a9a9a"
+                                value={agendaServiceRoleInput}
+                                onChangeText={setAgendaServiceRoleInput}
+                                returnKeyType="done"
+                                onSubmitEditing={Keyboard.dismiss}
+                              />
+                            ) : null}
+                          </View>
+                        ) : null}
+
+                        <View style={styles.discountFieldRow}>
+                          <HapticTouchable
+                            style={[styles.input, styles.numericPickerField, styles.discountFieldMain]}
+                            onPress={() => {
+                              Keyboard.dismiss();
+                              openAgendaServiceNumberPicker('originalPrice');
+                            }}
+                            activeOpacity={0.9}
+                          >
+                            <Text
+                              style={[
+                                styles.numericPickerFieldText,
+                                !agendaServiceOriginalPriceInput && styles.numericPickerFieldPlaceholder,
+                              ]}
+                            >
+                              {formatNumericFieldLabel(
+                                'Prezzo pieno opzionale sconto',
+                                agendaServiceOriginalPriceInput,
+                                agendaServiceOriginalPriceInput ? ' €' : ''
+                              )}
+                            </Text>
+                          </HapticTouchable>
+                          {agendaServiceOriginalPriceInput ? (
+                            <HapticTouchable
+                              style={styles.discountFieldClearButton}
+                              onPress={() => setAgendaServiceOriginalPriceInput('')}
+                              activeOpacity={0.9}
+                              hapticType="error"
+                            >
+                              <Text style={styles.discountFieldClearButtonText}>X</Text>
+                            </HapticTouchable>
+                          ) : null}
+                        </View>
+
+                        <View style={styles.quickComposerActionsRow}>
+                          <HapticTouchable
+                            style={styles.quickComposerDangerButton}
+                            onPress={resetAgendaServiceComposer}
+                            hapticType="error"
+                            activeOpacity={0.9}
+                          >
+                            <Text style={styles.quickComposerDangerButtonText}>Svuota campi</Text>
+                          </HapticTouchable>
+
+                          <HapticTouchable
+                            style={styles.darkButton}
+                            onPress={addServiceFromAgenda}
+                            hapticType="medium"
+                            activeOpacity={0.9}
+                          >
+                            <Text style={styles.darkButtonText}>Aggiungi servizio</Text>
+                          </HapticTouchable>
+                        </View>
+                      </ScrollView>
+                    ) : (
+                      <TouchableWithoutFeedback
+                        onPress={Keyboard.dismiss}
+                        accessible={false}
+                      >
+                      <View style={styles.quickBookingNestedPane}>
+                      {quickSlotDraft && customerBirthdayPickerTarget === 'quick' ? (
+                        <View style={styles.quickInlineIntegratedPane}>
+                          <View style={styles.quickInlineIntegratedSheet}>
+                            <View style={styles.quickInlinePickerHandle} />
+                            <Text style={styles.quickInlinePickerTitle}>
+                              Data di nascita (Opzionale)
+                            </Text>
+                            <Text style={styles.quickInlinePickerDateValue}>
+                              {formatBirthdayLabel(toIsoDate(quickInlineBirthdayDraft))}
+                            </Text>
+                            {IS_IOS ? (
+                              <View style={styles.quickInlineDatePickerWrap}>
+                                <DateTimePicker
+                                  value={quickInlineBirthdayDraft}
+                                  mode="date"
+                                  display="spinner"
+                                  onChange={(_event, nextDate) => {
+                                    if (nextDate) {
+                                      setQuickInlineBirthdayDraft(nextDate);
+                                      setQuickInlineBirthdayMonth(
+                                        new Date(nextDate.getFullYear(), nextDate.getMonth(), 1)
+                                      );
+                                    }
+                                  }}
+                                  locale="it-IT"
+                                  themeVariant="light"
+                                  style={styles.quickInlineDatePicker}
+                                />
+                              </View>
+                            ) : (
+                              <View style={styles.quickInlineCalendarWrap}>
+                                <View style={styles.quickInlineCalendarHeader}>
+                                  <HapticTouchable
+                                    style={styles.quickInlineCalendarNavButton}
+                                    onPress={() =>
+                                      setQuickInlineBirthdayMonth(
+                                        new Date(
+                                          quickInlineBirthdayMonth.getFullYear(),
+                                          quickInlineBirthdayMonth.getMonth() - 1,
+                                          1
+                                        )
+                                      )
+                                    }
+                                    activeOpacity={0.9}
+                                  >
+                                    <Text style={styles.quickInlineCalendarNavButtonText}>‹</Text>
+                                  </HapticTouchable>
+                                  <Text style={styles.quickInlineCalendarHeaderText}>
+                                    {formatInlineMonthYear(quickInlineBirthdayMonth)}
+                                  </Text>
+                                  <HapticTouchable
+                                    style={styles.quickInlineCalendarNavButton}
+                                    onPress={() =>
+                                      setQuickInlineBirthdayMonth(
+                                        new Date(
+                                          quickInlineBirthdayMonth.getFullYear(),
+                                          quickInlineBirthdayMonth.getMonth() + 1,
+                                          1
+                                        )
+                                      )
+                                    }
+                                    activeOpacity={0.9}
+                                  >
+                                    <Text style={styles.quickInlineCalendarNavButtonText}>›</Text>
+                                  </HapticTouchable>
+                                </View>
+
+                                <View style={styles.quickInlineWeekdayRow}>
+                                  {INLINE_WEEKDAY_LABELS.map((label, index) => (
+                                    <Text
+                                      key={`quick-inline-weekday-${label}-${index}`}
+                                      style={styles.quickInlineWeekdayText}
+                                    >
+                                      {label}
+                                    </Text>
+                                  ))}
+                                </View>
+
+                                <View style={styles.quickInlineCalendarGrid}>
+                                  {quickInlineBirthdayCells.map((cell) => {
+                                    const selected =
+                                      !!cell.value && sameInlineDay(cell.value, quickInlineBirthdayDraft);
+
+                                    return (
+                                      <HapticTouchable
+                                        key={cell.key}
+                                        style={[
+                                          styles.quickInlineCalendarDay,
+                                          !cell.value && styles.quickInlineCalendarDayEmpty,
+                                          selected && styles.quickInlineCalendarDayActive,
+                                        ]}
+                                        onPress={() => {
+                                          if (!cell.value) return;
+                                          setQuickInlineBirthdayDraft(cell.value);
+                                          setQuickInlineBirthdayMonth(
+                                            new Date(
+                                              cell.value.getFullYear(),
+                                              cell.value.getMonth(),
+                                              1
+                                            )
+                                          );
+                                        }}
+                                        activeOpacity={cell.value ? 0.9 : 1}
+                                        disabled={!cell.value}
+                                      >
+                                        <Text
+                                          style={[
+                                            styles.quickInlineCalendarDayText,
+                                            selected && styles.quickInlineCalendarDayTextActive,
+                                          ]}
+                                        >
+                                          {cell.label}
+                                        </Text>
+                                      </HapticTouchable>
+                                    );
+                                  })}
+                                </View>
+                              </View>
+                            )}
+                            <View style={styles.quickInlinePickerActions}>
+                              <HapticTouchable
+                                style={styles.secondaryButton}
+                                onPress={() => setCustomerBirthdayPickerTarget(null)}
+                                activeOpacity={0.9}
+                              >
+                                <Text style={styles.secondaryButtonText}>Annulla</Text>
+                              </HapticTouchable>
+                              <HapticTouchable
+                                style={styles.darkButton}
+                                onPress={() => {
+                                  setQuickCustomerBirthdayInput(toIsoDate(quickInlineBirthdayDraft));
+                                  setCustomerBirthdayPickerTarget(null);
+                                  requestAnimationFrame(() => {
+                                    scrollAgendaCustomerComposerToBottom();
+                                  });
+                                }}
+                                activeOpacity={0.9}
+                              >
+                                <Text style={styles.darkButtonText}>Conferma</Text>
+                              </HapticTouchable>
+                            </View>
+                          </View>
+                        </View>
+                      ) : (
+                      <ScrollView
+                        ref={agendaCustomerComposerScrollRef}
+                        style={[styles.quickBookingNestedScroll, styles.quickBookingNestedScrollCustomer]}
+                        showsVerticalScrollIndicator={false}
+                        contentContainerStyle={styles.quickBookingNestedFormContent}
+                        keyboardShouldPersistTaps="handled"
+                        keyboardDismissMode="interactive"
+                        onScrollBeginDrag={Keyboard.dismiss}
+                        bounces={false}
+                        alwaysBounceVertical={false}
+                      >
+                        <ClearableTextInput
+                          ref={quickCustomerNameRef}
+                          placeholder="Inserisci nome e cognome"
+                          placeholderTextColor="#9a9a9a"
+                          value={quickCustomerNameInput}
+                          onChangeText={(value) => {
+                            setQuickCustomerNameInput(value);
+                            if (quickCustomerErrors.nome) {
+                              setQuickCustomerErrors((current) => ({ ...current, nome: undefined }));
+                            }
+                          }}
+                          style={[styles.input, quickCustomerErrors.nome && styles.inputError]}
+                          returnKeyType="next"
+                          onSubmitEditing={() => focusAgendaCustomerComposerNextField(quickCustomerPhoneRef)}
+                          blurOnSubmit={false}
+                        />
+                        {quickCustomerErrors.nome ? (
+                          <Text style={styles.fieldErrorText}>{quickCustomerErrors.nome}</Text>
+                        ) : null}
+
+                        <ClearableTextInput
+                          ref={quickCustomerPhoneRef}
+                          placeholder="Inserisci numero di telefono"
+                          placeholderTextColor="#9a9a9a"
+                          value={quickCustomerPhoneInput}
+                          onChangeText={(value) => {
+                            const nextValue = limitPhoneToTenDigits(value);
+                            setQuickCustomerPhoneInput(nextValue);
+                            setQuickCustomerErrors((current) => ({
+                              ...current,
+                              telefono:
+                                nextValue.length === 0
+                                  ? undefined
+                                  : isValidPhone10(nextValue)
+                                    ? undefined
+                                    : 'Numero di telefono errato (deve avere 10 cifre)',
+                            }));
+                          }}
+                          keyboardType="phone-pad"
+                          style={[styles.input, quickCustomerErrors.telefono && styles.inputError]}
+                          returnKeyType="next"
+                          onSubmitEditing={() => focusAgendaCustomerComposerNextField(quickCustomerEmailRef)}
+                          blurOnSubmit={false}
+                        />
+                        {quickCustomerErrors.telefono ? (
+                          <Text style={styles.fieldErrorText}>{quickCustomerErrors.telefono}</Text>
+                        ) : null}
+
+                        <ClearableTextInput
+                          ref={quickCustomerEmailRef}
+                          placeholder="Inserisci email"
+                          placeholderTextColor="#9a9a9a"
+                          value={quickCustomerEmailInput}
+                          onChangeText={(value) => {
+                            setQuickCustomerEmailInput(value);
+                            setQuickCustomerErrors((current) => ({
+                              ...current,
+                              email:
+                                value.trim().length === 0
+                                  ? undefined
+                                  : isValidEmail(value)
+                                    ? undefined
+                                    : 'Email non valida',
+                            }));
+                          }}
+                          autoCapitalize="none"
+                          keyboardType="email-address"
+                          style={[styles.input, quickCustomerErrors.email && styles.inputError]}
+                          returnKeyType="next"
+                          onSubmitEditing={() => focusAgendaCustomerComposerNextField(quickCustomerInstagramRef)}
+                          blurOnSubmit={false}
+                        />
+                        {quickCustomerErrors.email ? (
+                          <Text style={styles.fieldErrorText}>{quickCustomerErrors.email}</Text>
+                        ) : null}
+
+                        <ClearableTextInput
+                          ref={quickCustomerInstagramRef}
+                          placeholder="Instagram (Opzionale)"
+                          placeholderTextColor="#9a9a9a"
+                          value={quickCustomerInstagramInput}
+                          onChangeText={setQuickCustomerInstagramInput}
+                          onFocus={() => {
+                            suppressAgendaCustomerKeyboardAutoScrollRef.current = true;
+                            revealQuickCustomerBirthdayField();
+                          }}
+                          onBlur={() => {
+                            suppressAgendaCustomerKeyboardAutoScrollRef.current = false;
+                          }}
+                          autoCapitalize="none"
+                          style={styles.input}
+                          returnKeyType="done"
+                          onSubmitEditing={() => {
+                            Keyboard.dismiss();
+                            requestAnimationFrame(() => {
+                              setCustomerBirthdayPickerTarget('quick');
+                            });
+                          }}
+                          blurOnSubmit={false}
+                        />
+
+                        <View ref={quickCustomerBirthdayFieldRef} collapsable={false}>
+                          <HapticTouchable
+                            style={[styles.input, styles.quickCustomerDateButton]}
+                            onPress={() => {
+                              Keyboard.dismiss();
+                              setCustomerBirthdayPickerTarget('quick');
+                            }}
+                            activeOpacity={0.9}
+                          >
+                            <Text
+                              numberOfLines={1}
+                              adjustsFontSizeToFit
+                              minimumFontScale={0.78}
+                              style={[
+                                styles.quickCustomerDateButtonText,
+                                !quickCustomerBirthdayInput && styles.quickCustomerDateButtonPlaceholder,
+                              ]}
+                            >
+                              {formatBirthdayLabel(quickCustomerBirthdayInput) || 'Data di nascita (Opzionale)'}
+                            </Text>
+                          </HapticTouchable>
+                        </View>
+
+                        {quickCustomerBirthdayInput ? (
+                          <HapticTouchable
+                            style={styles.quickCustomerClearDateChip}
+                            onPress={() => setQuickCustomerBirthdayInput('')}
+                            activeOpacity={0.9}
+                          >
+                            <Text style={styles.quickCustomerClearDateChipText}>Rimuovi data</Text>
+                          </HapticTouchable>
+                        ) : null}
+
+                        <Text style={styles.quickCustomerRequiredHint}>
+                          Obbligatori: nome e cognome, numero di telefono, email.
+                        </Text>
+
+                        <View style={styles.quickComposerActionsRow}>
+                          <HapticTouchable
+                            style={styles.quickComposerDangerButton}
+                            onPress={resetQuickCustomerComposer}
+                            hapticType="error"
+                            activeOpacity={0.9}
+                          >
+                            <Text style={styles.quickComposerDangerButtonText}>Svuota campi</Text>
+                          </HapticTouchable>
+
+                          <HapticTouchable
+                            style={[
+                              styles.darkButton,
+                              !canSubmitQuickCustomerRequired && styles.darkButtonDisabled,
+                            ]}
+                            onPress={addCustomerFromQuickBooking}
+                            hapticType="medium"
+                            activeOpacity={0.9}
+                            disabled={!canSubmitQuickCustomerRequired}
+                          >
+                            <Text
+                              style={[
+                                styles.darkButtonText,
+                                !canSubmitQuickCustomerRequired && styles.darkButtonTextDisabled,
+                              ]}
+                            >
+                              Aggiungi cliente
+                            </Text>
+                          </HapticTouchable>
+                        </View>
+
+                      </ScrollView>
+                      )}
+                      </View>
+                      </TouchableWithoutFeedback>
+                    )}
+
+                    {quickSlotDraft && agendaInlineNumberPickerConfig ? (
+                      <View style={styles.quickInlinePickerOverlay}>
+                        <HapticTouchable
+                          style={styles.quickInlinePickerBackdrop}
+                          activeOpacity={1}
+                          hapticType="none"
+                          onPress={closeAgendaInlineNumberPicker}
+                        />
+                        <View style={styles.quickInlinePickerSheet}>
+                          <Text style={styles.quickInlinePickerTitle}>
+                            {agendaInlineNumberPickerConfig.title}
+                          </Text>
+                          <Text style={styles.quickInlinePickerValue}>
+                            {agendaInlineNumberPickerValue}
+                            {agendaInlineNumberPickerConfig.suffix}
+                          </Text>
+
+                          <View style={styles.quickInlinePickerStepperRow}>
+                            <HapticTouchable
+                              style={styles.quickInlinePickerStepperButton}
+                              onPress={() =>
+                                setAgendaInlineNumberPickerValue((current) =>
+                                  Math.max(
+                                    agendaInlineNumberPickerConfig.min,
+                                    current - agendaInlineNumberPickerConfig.step
+                                  )
+                                )
+                              }
+                              activeOpacity={0.9}
+                            >
+                              <Text style={styles.quickInlinePickerStepperButtonText}>-</Text>
+                            </HapticTouchable>
+                            <HapticTouchable
+                              style={styles.quickInlinePickerStepperButton}
+                              onPress={() =>
+                                setAgendaInlineNumberPickerValue((current) =>
+                                  Math.min(
+                                    agendaInlineNumberPickerConfig.max,
+                                    current + agendaInlineNumberPickerConfig.step
+                                  )
+                                )
+                              }
+                              activeOpacity={0.9}
+                            >
+                              <Text style={styles.quickInlinePickerStepperButtonText}>+</Text>
+                            </HapticTouchable>
+                          </View>
+
+                          <View style={styles.quickInlinePickerPresetsWrap}>
+                            {agendaInlineNumberPickerConfig.presets.map((preset) => {
+                              const selected = preset === agendaInlineNumberPickerValue;
+                              return (
+                                <HapticTouchable
+                                  key={`quick-inline-picker-${agendaInlineNumberPickerConfig.title}-${preset}`}
+                                  style={[
+                                    styles.quickInlinePickerPresetChip,
+                                    selected && styles.quickInlinePickerPresetChipActive,
+                                  ]}
+                                  onPress={() => setAgendaInlineNumberPickerValue(preset)}
+                                  activeOpacity={0.9}
+                                >
+                                  <Text
+                                    style={[
+                                      styles.quickInlinePickerPresetChipText,
+                                      selected && styles.quickInlinePickerPresetChipTextActive,
+                                    ]}
+                                  >
+                                    {preset}
+                                    {agendaInlineNumberPickerConfig.suffix}
+                                  </Text>
+                                </HapticTouchable>
+                              );
+                            })}
+                          </View>
+
+                          <View style={styles.quickInlinePickerActions}>
+                            <HapticTouchable
+                              style={styles.secondaryButton}
+                              onPress={closeAgendaInlineNumberPicker}
+                              activeOpacity={0.9}
+                            >
+                              <Text style={styles.secondaryButtonText}>Annulla</Text>
+                            </HapticTouchable>
+                            <HapticTouchable
+                              style={styles.darkButton}
+                              onPress={confirmAgendaInlineNumberPicker}
+                              activeOpacity={0.9}
+                            >
+                              <Text style={styles.darkButtonText}>Conferma</Text>
+                            </HapticTouchable>
+                          </View>
+                        </View>
+                      </View>
+                    ) : null}
+                  </View>
+                </KeyboardAvoidingView>
+              </View>
+            ) : null}
             </View>
           </View>
         </View>
@@ -11590,11 +12699,11 @@ const completeWeekDrag = useCallback(() => {
               <View style={styles.servicePickerActionsRow}>
                 <HapticTouchable
                   style={styles.quickCustomerAddChip}
-                  onPress={() => setShowServiceComposerInPicker((current) => !current)}
+                  onPress={() => setShowServiceComposerInPicker(true)}
                   activeOpacity={0.9}
                 >
                   <Text style={styles.quickCustomerAddChipText}>
-                    {showServiceComposerInPicker ? 'Chiudi nuovo servizio' : '+ Nuovo servizio'}
+                    + Nuovo servizio
                   </Text>
                 </HapticTouchable>
               </View>
@@ -11619,158 +12728,230 @@ const completeWeekDrag = useCallback(() => {
                   </Text>
                 </View>
               ) : (
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.quickServiceColumnsScrollContent}
-              >
-                {servicePickerServiceColumns.map((column, columnIndex) => (
-                  <View
-                    key={`service-picker-column-${columnIndex}`}
-                    style={[styles.quickServiceColumn, { width: quickServiceColumnWidth }]}
-                  >
-                  {column.map((item) => {
-                  const selected =
-                    servicePickerTarget === 'quick'
-                      ? item.id === quickBookingServiceId
-                      : normalizeServiceName(item.nome) === normalizeServiceName(servizio);
-                  const selectable =
-                    servicePickerTarget !== 'quick' ||
-                    !quickSlotDraft ||
-                    ((item.durataMinuti ?? 60) <=
-                      getContiguousFreeWindowMinutes(quickSlotDraft.date, quickSlotDraft.time) &&
-                      canScheduleServiceAtSlot({
-                        dateValue: quickSlotDraft.date,
-                        startTime: quickSlotDraft.time,
-                        serviceName: item.nome,
-                        selectedOperatorId: null,
-                      }));
-
-                  return (
-                    <HapticTouchable
-                      key={`service-picker-${item.id}`}
-                      style={[
-                        styles.quickServiceCard,
-                        selected && styles.quickBookingChipActive,
-                        !selectable && styles.quickBookingChipDisabled,
-                        { width: '100%' },
-                      ]}
-                      onPress={() => {
-                        if (!selectable) {
-                          haptic.error().catch(() => null);
-                          return;
-                        }
-                        selectServiceForTarget(item);
-                      }}
-                      activeOpacity={selectable ? 0.9 : 1}
-                      disabled={!selectable}
+              <View>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator
+                  contentContainerStyle={styles.quickServiceColumnsScrollContent}
+                >
+                  {servicePickerServiceColumns.map((column, columnIndex) => (
+                    <View
+                      key={`service-picker-column-${columnIndex}`}
+                      style={[styles.quickServiceColumn, { width: quickServiceColumnWidth }]}
                     >
-                      {selected ? (
-                        <View style={styles.quickServiceCardSelectedBadge}>
-                          <Text style={styles.quickServiceCardSelectedBadgeText}>Scelto</Text>
-                        </View>
-                      ) : null}
-                      <Text
+                    {column.map((item) => {
+                    const selected =
+                      servicePickerTarget === 'quick'
+                        ? item.id === quickBookingServiceId
+                        : normalizeServiceName(item.nome) === normalizeServiceName(servizio);
+                    const selectable =
+                      servicePickerTarget !== 'quick' ||
+                      !quickSlotDraft ||
+                      ((item.durataMinuti ?? 60) <=
+                        getContiguousFreeWindowMinutes(quickSlotDraft.date, quickSlotDraft.time) &&
+                        canScheduleServiceAtSlot({
+                          dateValue: quickSlotDraft.date,
+                          startTime: quickSlotDraft.time,
+                          serviceName: item.nome,
+                          selectedOperatorId: null,
+                        }));
+
+                    return (
+                      <HapticTouchable
+                        key={`service-picker-${item.id}`}
                         style={[
-                          styles.quickServiceCardTitle,
-                          selected && styles.quickServiceCardTitleSelected,
+                          styles.quickServiceCard,
+                          selected && styles.quickBookingChipActive,
+                          !selectable && styles.quickBookingChipDisabled,
+                          { width: '100%' },
                         ]}
-                        numberOfLines={1}
-                        adjustsFontSizeToFit
-                        minimumFontScale={0.64}
-                        ellipsizeMode="clip"
+                        onPress={() => {
+                          if (!selectable) {
+                            haptic.error().catch(() => null);
+                            return;
+                          }
+                          selectServiceForTarget(item);
+                        }}
+                        activeOpacity={selectable ? 0.9 : 1}
+                        disabled={!selectable}
                       >
-                        {item.nome}
-                      </Text>
-                      <Text
-                        style={[
-                          styles.quickServiceRoleBadge,
-                          selected && styles.quickServiceRoleBadgeSelected,
-                        ]}
-                        numberOfLines={1}
-                        adjustsFontSizeToFit
-                        minimumFontScale={0.72}
-                        ellipsizeMode="clip"
-                      >
-                        {item.mestiereRichiesto || 'Servizio'}
-                      </Text>
-                      <Text
-                        style={[
-                          styles.quickServiceDuration,
-                          selected && styles.quickServiceCardMetaSelected,
-                        ]}
-                        numberOfLines={1}
-                        adjustsFontSizeToFit
-                        minimumFontScale={0.68}
-                        ellipsizeMode="clip"
-                      >
-                        Durata: {formatSlotInterval(item.durataMinuti ?? 60)}
-                      </Text>
-                      <Text
-                        style={[
-                          styles.quickServicePrice,
-                          selected && styles.quickServicePriceSelected,
-                        ]}
-                        numberOfLines={1}
-                        adjustsFontSizeToFit
-                        minimumFontScale={0.72}
-                        ellipsizeMode="clip"
-                      >
-                        € {item.prezzo.toFixed(2)}
-                      </Text>
-                    </HapticTouchable>
-                  );
-                })}
-                  </View>
-                ))}
-              </ScrollView>
+                        {selected ? (
+                          <View style={styles.quickServiceCardSelectedBadge}>
+                            <Text style={styles.quickServiceCardSelectedBadgeText}>Scelto</Text>
+                          </View>
+                        ) : null}
+                        <Text
+                          style={[
+                            styles.quickServiceCardTitle,
+                            selected && styles.quickServiceCardTitleSelected,
+                          ]}
+                          numberOfLines={1}
+                          adjustsFontSizeToFit
+                          minimumFontScale={0.64}
+                          ellipsizeMode="clip"
+                        >
+                          {item.nome}
+                        </Text>
+                        <Text
+                          style={[
+                            styles.quickServiceRoleBadge,
+                            selected && styles.quickServiceRoleBadgeSelected,
+                          ]}
+                          numberOfLines={1}
+                          adjustsFontSizeToFit
+                          minimumFontScale={0.72}
+                          ellipsizeMode="clip"
+                        >
+                          {item.mestiereRichiesto || 'Servizio'}
+                        </Text>
+                        <Text
+                          style={[
+                            styles.quickServiceDuration,
+                            selected && styles.quickServiceCardMetaSelected,
+                          ]}
+                          numberOfLines={1}
+                          adjustsFontSizeToFit
+                          minimumFontScale={0.68}
+                          ellipsizeMode="clip"
+                        >
+                          Durata: {formatSlotInterval(item.durataMinuti ?? 60)}
+                        </Text>
+                        <Text
+                          style={[
+                            styles.quickServicePrice,
+                            selected && styles.quickServicePriceSelected,
+                          ]}
+                          numberOfLines={1}
+                          adjustsFontSizeToFit
+                          minimumFontScale={0.72}
+                          ellipsizeMode="clip"
+                        >
+                          € {item.prezzo.toFixed(2)}
+                        </Text>
+                      </HapticTouchable>
+                    );
+                  })}
+                    </View>
+                  ))}
+                </ScrollView>
+                <Text style={styles.quickServiceScrollHint}>
+                  Scorri verso sinistra per visualizzare altri servizi
+                </Text>
+              </View>
               )}
 
-              {showServiceComposerInPicker ? (
-                <View style={styles.inlineComposerCard}>
-                  <ClearableTextInput
-                    ref={agendaServiceNameRef}
-                    style={[styles.input, styles.compactTopInput]}
-                    placeholder="Nome servizio"
-                    placeholderTextColor="#8f8f8f"
-                    value={agendaServiceNameInput}
-                    onChangeText={setAgendaServiceNameInput}
-                    onFocus={() => scrollServicePickerField(agendaServiceNameRef)}
-                    returnKeyType="next"
-                    onSubmitEditing={() => focusServicePickerNextField(agendaServicePriceRef)}
-                    blurOnSubmit={false}
-                  />
-                  <ClearableTextInput
-                    ref={agendaServicePriceRef}
-                    style={styles.input}
-                    placeholder="Prezzo"
-                    placeholderTextColor="#8f8f8f"
-                    value={agendaServicePriceInput}
-                    onChangeText={setAgendaServicePriceInput}
-                    onFocus={() => scrollServicePickerField(agendaServicePriceRef)}
-                    keyboardType="decimal-pad"
-                    returnKeyType="next"
-                    onSubmitEditing={() => focusServicePickerNextField(agendaServiceDurationRef)}
-                    blurOnSubmit={false}
-                  />
-                  <ClearableTextInput
-                    ref={agendaServiceDurationRef}
-                    style={styles.input}
-                    placeholder="Durata in minuti"
-                    placeholderTextColor="#8f8f8f"
-                    value={agendaServiceDurationInput}
-                    onChangeText={setAgendaServiceDurationInput}
-                    onFocus={() => scrollServicePickerField(agendaServiceDurationRef)}
-                    keyboardType="number-pad"
-                    returnKeyType="done"
-                    onSubmitEditing={() => focusServicePickerNextField(agendaServiceOriginalPriceRef)}
-                    blurOnSubmit={false}
-                  />
-                  <HapticTouchable
-                    style={[styles.input, styles.agendaRoleSelectorInput]}
-                    onPress={() => setAgendaServiceRolePickerOpen((current) => !current)}
-                    pressScale={0.985}
-                    pressOpacity={0.98}
+              {null}
+            </ScrollView>
+          </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={showServiceComposerInPicker && !quickSlotDraft}
+        transparent
+        animationType="fade"
+        presentationStyle="overFullScreen"
+        statusBarTranslucent
+        onRequestClose={() => setShowServiceComposerInPicker(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <KeyboardAvoidingView
+            style={styles.modalKeyboardAvoider}
+            behavior={undefined}
+            keyboardVerticalOffset={0}
+          >
+            <View style={styles.quickCustomerSearchModalCard}>
+              <View style={styles.quickBookingHeaderRow}>
+                <View style={styles.quickBookingHeaderTextWrap}>
+                  <Text style={styles.calendarTitle}>Aggiungi Servizi</Text>
+                  <Text style={styles.quickBookingNestedIntroText}>
+                    Copia fedele del modulo Servizi, dentro il calendario.
+                  </Text>
+                </View>
+                <HapticTouchable
+                  style={styles.timeConfigCloseButton}
+                  onPress={() => setShowServiceComposerInPicker(false)}
+                  hapticType="error"
+                  activeOpacity={0.9}
+                >
+                  <Text style={styles.timeConfigCloseButtonText}>×</Text>
+                </HapticTouchable>
+              </View>
+
+              <ScrollView
+                ref={agendaServiceComposerScrollRef}
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={styles.quickBookingNestedFormContent}
+                keyboardShouldPersistTaps="handled"
+                keyboardDismissMode="interactive"
+              >
+                <ClearableTextInput
+                  ref={agendaServiceNameRef}
+                  style={[styles.input, styles.centeredInput]}
+                  placeholder="Nome servizio"
+                  placeholderTextColor="#9a9a9a"
+                  value={agendaServiceNameInput}
+                  onChangeText={setAgendaServiceNameInput}
+                  returnKeyType="next"
+                  onSubmitEditing={() => {
+                    Keyboard.dismiss();
+                    openAgendaServiceNumberPicker('price');
+                  }}
+                  blurOnSubmit={false}
+                />
+
+                <HapticTouchable
+                  style={[styles.input, styles.numericPickerField]}
+                  onPress={() => {
+                    Keyboard.dismiss();
+                    openAgendaServiceNumberPicker('price');
+                  }}
+                  activeOpacity={0.9}
+                  >
+                    <Text
+                      style={[
+                        styles.numericPickerFieldText,
+                        !agendaServicePriceInput && styles.numericPickerFieldPlaceholder,
+                    ]}
+                  >
+                    {formatNumericFieldLabel(
+                      'Prezzo',
+                      agendaServicePriceInput,
+                      agendaServicePriceInput ? ' €' : ''
+                    )}
+                  </Text>
+                </HapticTouchable>
+
+                <HapticTouchable
+                  style={[styles.input, styles.numericPickerField]}
+                  onPress={() => {
+                    Keyboard.dismiss();
+                    openAgendaServiceNumberPicker('duration');
+                  }}
+                  activeOpacity={0.9}
+                  >
+                    <Text
+                      style={[
+                        styles.numericPickerFieldText,
+                        !agendaServiceDurationInput && styles.numericPickerFieldPlaceholder,
+                    ]}
+                  >
+                    {formatNumericFieldLabel(
+                      'Durata',
+                      agendaServiceDurationInput,
+                      agendaServiceDurationInput ? ' min' : ''
+                    )}
+                  </Text>
+                </HapticTouchable>
+
+                <HapticTouchable
+                  style={[styles.input, styles.agendaRoleSelectorInput]}
+                  onPress={() => {
+                    Keyboard.dismiss();
+                    setAgendaServiceRolePickerOpen((current) => !current);
+                  }}
+                  activeOpacity={0.9}
                   >
                     <Text
                       style={[
@@ -11778,96 +12959,394 @@ const completeWeekDrag = useCallback(() => {
                         !agendaServiceRoleInput && styles.agendaRoleSelectorPlaceholder,
                       ]}
                     >
-                      {agendaServiceRoleInput || 'Mestiere richiesto obbligatorio'}
+                      {agendaServiceRoleInput || 'Mestiere richiesto: es. barber, colore, nails'}
                     </Text>
-                    <Text style={styles.agendaRoleChevron}>
-                      {agendaServiceRolePickerOpen ? '▴' : '▾'}
+                  <Text style={styles.agendaRoleChevron}>
+                    {agendaServiceRolePickerOpen ? '▴' : '▾'}
+                  </Text>
+                </HapticTouchable>
+
+                {agendaServiceRolePickerOpen ? (
+                  <View style={styles.agendaRolePickerPanel}>
+                    <Text style={styles.agendaRolePickerTitle}>Mestieri suggeriti</Text>
+                    <View style={styles.agendaRoleChipsWrap}>
+                      {PRESET_ROLE_OPTIONS.map((option) => {
+                        const selected = agendaServiceRoleInput === option;
+                        return (
+                          <HapticTouchable
+                            key={`agenda-role-composer-${option}`}
+                            style={[styles.agendaRoleChip, selected && styles.agendaRoleChipSelected]}
+                            onPress={() => {
+                              setAgendaServiceRoleInput(option);
+                              setAgendaServiceCustomRoleOpen(false);
+                              setAgendaServiceRolePickerOpen(false);
+                            }}
+                            activeOpacity={0.9}
+                          >
+                            <Text
+                              style={[
+                                styles.agendaRoleChipText,
+                                selected && styles.agendaRoleChipTextSelected,
+                              ]}
+                            >
+                              {option}
+                            </Text>
+                          </HapticTouchable>
+                        );
+                      })}
+                      <HapticTouchable
+                        style={[styles.agendaRoleChip, styles.agendaRoleChipCreate]}
+                        onPress={() => setAgendaServiceCustomRoleOpen((current) => !current)}
+                        activeOpacity={0.9}
+                      >
+                        <Text style={styles.agendaRoleChipCreateText}>
+                          {agendaServiceCustomRoleOpen ? 'Chiudi +' : '+ Crea nuovo mestiere'}
+                        </Text>
+                      </HapticTouchable>
+                    </View>
+
+                    {agendaServiceCustomRoleOpen ? (
+                      <ClearableTextInput
+                        style={[styles.input, styles.compactTopInput]}
+                        placeholder="Nuovo mestiere personalizzato"
+                        placeholderTextColor="#9a9a9a"
+                        value={agendaServiceRoleInput}
+                        onChangeText={setAgendaServiceRoleInput}
+                        returnKeyType="done"
+                        onSubmitEditing={Keyboard.dismiss}
+                      />
+                    ) : null}
+                  </View>
+                ) : null}
+
+                <View style={styles.discountFieldRow}>
+                  <HapticTouchable
+                    style={[styles.input, styles.numericPickerField, styles.discountFieldMain]}
+                    onPress={() => {
+                      Keyboard.dismiss();
+                      openAgendaServiceNumberPicker('originalPrice');
+                    }}
+                    activeOpacity={0.9}
+                  >
+                    <Text
+                      style={[
+                        styles.numericPickerFieldText,
+                        !agendaServiceOriginalPriceInput && styles.numericPickerFieldPlaceholder,
+                      ]}
+                    >
+                      {formatNumericFieldLabel(
+                        'Prezzo pieno opzionale sconto',
+                        agendaServiceOriginalPriceInput,
+                        agendaServiceOriginalPriceInput ? ' €' : ''
+                      )}
                     </Text>
                   </HapticTouchable>
-
-                  {agendaServiceRolePickerOpen ? (
-                    <View style={styles.agendaRolePickerPanel}>
-                      <Text style={styles.agendaRolePickerTitle}>Mestieri suggeriti</Text>
-                      <View style={styles.agendaRoleChipsWrap}>
-                        {PRESET_ROLE_OPTIONS.map((option) => {
-                          const selected = agendaServiceRoleInput === option;
-                          return (
-                            <HapticTouchable
-                              key={`agenda-role-picker-${option}`}
-                              style={[styles.agendaRoleChip, selected && styles.agendaRoleChipSelected]}
-                              onPress={() => {
-                                setAgendaServiceRoleInput(option);
-                                setAgendaServiceCustomRoleOpen(false);
-                              }}
-                              pressScale={0.98}
-                              pressOpacity={0.98}
-                            >
-                              <Text
-                                style={[
-                                  styles.agendaRoleChipText,
-                                  selected && styles.agendaRoleChipTextSelected,
-                                ]}
-                              >
-                                {option}
-                              </Text>
-                            </HapticTouchable>
-                          );
-                        })}
-                        <HapticTouchable
-                          style={[styles.agendaRoleChip, styles.agendaRoleChipCreate]}
-                          onPress={() => setAgendaServiceCustomRoleOpen((current) => !current)}
-                          pressScale={0.98}
-                          pressOpacity={0.98}
-                        >
-                          <Text style={styles.agendaRoleChipCreateText}>
-                            {agendaServiceCustomRoleOpen ? 'Chiudi +' : '+ Nuovo mestiere'}
-                          </Text>
-                        </HapticTouchable>
-                      </View>
-
-                      {agendaServiceCustomRoleOpen ? (
-                        <ClearableTextInput
-                          style={[styles.input, styles.compactTopInput]}
-                          placeholder="Nuovo mestiere"
-                          placeholderTextColor="#8f8f8f"
-                          value={agendaServiceRoleInput}
-                          onChangeText={setAgendaServiceRoleInput}
-                          onSubmitEditing={Keyboard.dismiss}
-                          returnKeyType="done"
-                        />
-                      ) : null}
-                    </View>
+                  {agendaServiceOriginalPriceInput ? (
+                    <HapticTouchable
+                      style={styles.discountFieldClearButton}
+                      onPress={() => setAgendaServiceOriginalPriceInput('')}
+                      activeOpacity={0.9}
+                      hapticType="error"
+                    >
+                      <Text style={styles.discountFieldClearButtonText}>X</Text>
+                    </HapticTouchable>
                   ) : null}
+                </View>
 
-                  <ClearableTextInput
-                    ref={agendaServiceOriginalPriceRef}
-                    style={styles.input}
-                    placeholder="Prezzo peino opzionale (Sconto)"
-                    placeholderTextColor="#8f8f8f"
-                    value={agendaServiceOriginalPriceInput}
-                    onChangeText={setAgendaServiceOriginalPriceInput}
-                    onFocus={() => scrollServicePickerField(agendaServiceOriginalPriceRef)}
-                    keyboardType="decimal-pad"
-                    returnKeyType="done"
-                    onSubmitEditing={Keyboard.dismiss}
-                    blurOnSubmit={false}
-                  />
+                <View style={styles.quickComposerActionsRow}>
+                  <HapticTouchable
+                    style={styles.quickComposerDangerButton}
+                    onPress={resetAgendaServiceComposer}
+                    hapticType="error"
+                    activeOpacity={0.9}
+                  >
+                    <Text style={styles.quickComposerDangerButtonText}>Svuota campi</Text>
+                  </HapticTouchable>
 
                   <HapticTouchable
-                    style={styles.secondaryButtonWide}
+                    style={styles.darkButton}
                     onPress={addServiceFromAgenda}
                     hapticType="medium"
                     activeOpacity={0.9}
                   >
-                    <Text style={styles.secondaryButtonWideText}>Salva servizio</Text>
+                    <Text style={styles.darkButtonText}>Aggiungi servizio</Text>
                   </HapticTouchable>
                 </View>
-              ) : null}
-            </ScrollView>
-          </View>
-          </View>
+              </ScrollView>
+            </View>
+          </KeyboardAvoidingView>
         </View>
       </Modal>
+
+      <Modal
+        visible={showAgendaCustomerComposer && !quickSlotDraft}
+        transparent
+        animationType="fade"
+        presentationStyle="overFullScreen"
+        statusBarTranslucent
+        onRequestClose={() => setShowAgendaCustomerComposer(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <KeyboardAvoidingView
+            style={styles.modalKeyboardAvoider}
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 28 : 0}
+          >
+            <View style={styles.quickCustomerSearchModalCard}>
+              <View style={styles.quickBookingHeaderRow}>
+                <View style={styles.quickBookingHeaderTextWrap}>
+                  <Text style={styles.calendarTitle}>Aggiungi nuovo cliente</Text>
+                  <Text style={styles.quickBookingNestedIntroText}>
+                    Apri il blocco solo quando ti serve inserire un nuovo cliente.
+                  </Text>
+                </View>
+                <HapticTouchable
+                  style={styles.timeConfigCloseButton}
+                  onPress={() => setShowAgendaCustomerComposer(false)}
+                  hapticType="error"
+                  activeOpacity={0.9}
+                >
+                  <Text style={styles.timeConfigCloseButtonText}>×</Text>
+                </HapticTouchable>
+              </View>
+
+              <ScrollView
+                ref={agendaCustomerComposerScrollRef}
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={styles.quickBookingNestedFormContent}
+                keyboardShouldPersistTaps="handled"
+                keyboardDismissMode="interactive"
+                onScrollBeginDrag={Keyboard.dismiss}
+              >
+                <ClearableTextInput
+                  ref={agendaCustomerNameRef}
+                  placeholder="Inserisci nome e cognome"
+                  placeholderTextColor="#9a9a9a"
+                  value={agendaCustomerNameInput}
+                  onChangeText={(value) => {
+                    setAgendaCustomerNameInput(value);
+                    if (agendaCustomerErrors.nome) {
+                      setAgendaCustomerErrors((current) => ({ ...current, nome: undefined }));
+                    }
+                  }}
+                  style={[styles.input, agendaCustomerErrors.nome && styles.inputError]}
+                  returnKeyType="next"
+                  onSubmitEditing={() => focusAgendaCustomerComposerNextField(agendaCustomerPhoneRef)}
+                  blurOnSubmit={false}
+                />
+                {agendaCustomerErrors.nome ? (
+                  <Text style={styles.fieldErrorText}>{agendaCustomerErrors.nome}</Text>
+                ) : null}
+
+                <ClearableTextInput
+                  ref={agendaCustomerPhoneRef}
+                  placeholder="Inserisci numero di telefono"
+                  placeholderTextColor="#9a9a9a"
+                  value={agendaCustomerPhoneInput}
+                  onChangeText={(value) => {
+                    const nextValue = limitPhoneToTenDigits(value);
+                    setAgendaCustomerPhoneInput(nextValue);
+                    setAgendaCustomerErrors((current) => ({
+                      ...current,
+                      telefono:
+                        nextValue.length === 0
+                          ? undefined
+                          : isValidPhone10(nextValue)
+                            ? undefined
+                            : 'Numero di telefono errato (deve avere 10 cifre)',
+                    }));
+                  }}
+                  keyboardType="phone-pad"
+                  style={[styles.input, agendaCustomerErrors.telefono && styles.inputError]}
+                  returnKeyType="next"
+                  onSubmitEditing={() => focusAgendaCustomerComposerNextField(agendaCustomerEmailRef)}
+                  blurOnSubmit={false}
+                />
+                {agendaCustomerErrors.telefono ? (
+                  <Text style={styles.fieldErrorText}>{agendaCustomerErrors.telefono}</Text>
+                ) : null}
+
+                <ClearableTextInput
+                  ref={agendaCustomerEmailRef}
+                  placeholder="Inserisci email"
+                  placeholderTextColor="#9a9a9a"
+                  value={agendaCustomerEmailInput}
+                  onChangeText={(value) => {
+                    setAgendaCustomerEmailInput(value);
+                    setAgendaCustomerErrors((current) => ({
+                      ...current,
+                      email:
+                        value.trim().length === 0
+                          ? undefined
+                          : isValidEmail(value)
+                            ? undefined
+                            : 'Email non valida',
+                    }));
+                  }}
+                  autoCapitalize="none"
+                  keyboardType="email-address"
+                  style={[styles.input, agendaCustomerErrors.email && styles.inputError]}
+                  returnKeyType="next"
+                  onSubmitEditing={() => focusAgendaCustomerComposerNextField(agendaCustomerInstagramRef)}
+                  blurOnSubmit={false}
+                />
+                {agendaCustomerErrors.email ? (
+                  <Text style={styles.fieldErrorText}>{agendaCustomerErrors.email}</Text>
+                ) : null}
+
+                <ClearableTextInput
+                  ref={agendaCustomerInstagramRef}
+                  placeholder="Instagram (Opzionale)"
+                  placeholderTextColor="#9a9a9a"
+                  value={agendaCustomerInstagramInput}
+                  onChangeText={setAgendaCustomerInstagramInput}
+                  onFocus={() => {
+                    suppressAgendaCustomerKeyboardAutoScrollRef.current = true;
+                    revealAgendaCustomerBirthdayField();
+                  }}
+                  onBlur={() => {
+                    suppressAgendaCustomerKeyboardAutoScrollRef.current = false;
+                  }}
+                  autoCapitalize="none"
+                  style={styles.input}
+                  returnKeyType="done"
+                  onSubmitEditing={() => {
+                    Keyboard.dismiss();
+                    requestAnimationFrame(() => {
+                      setCustomerBirthdayPickerTarget('agenda');
+                    });
+                  }}
+                  blurOnSubmit={false}
+                />
+
+                <HapticTouchable
+                  style={[styles.input, styles.quickCustomerDateButton]}
+                  onPress={() => {
+                    Keyboard.dismiss();
+                    setCustomerBirthdayPickerTarget('agenda');
+                  }}
+                  activeOpacity={0.9}
+                >
+                  <Text
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.78}
+                    style={[
+                      styles.quickCustomerDateButtonText,
+                      !agendaCustomerBirthdayInput && styles.quickCustomerDateButtonPlaceholder,
+                    ]}
+                  >
+                    {formatBirthdayLabel(agendaCustomerBirthdayInput) || 'Data di nascita (Opzionale)'}
+                  </Text>
+                </HapticTouchable>
+
+                {agendaCustomerBirthdayInput ? (
+                  <HapticTouchable
+                    style={styles.quickCustomerClearDateChip}
+                    onPress={() => setAgendaCustomerBirthdayInput('')}
+                    activeOpacity={0.9}
+                  >
+                    <Text style={styles.quickCustomerClearDateChipText}>Rimuovi data</Text>
+                  </HapticTouchable>
+                ) : null}
+
+                <Text style={styles.quickCustomerRequiredHint}>
+                  Obbligatori: nome e cognome, numero di telefono, email.
+                </Text>
+
+                <View style={styles.quickComposerActionsRow}>
+                  <HapticTouchable
+                    style={styles.quickComposerDangerButton}
+                    onPress={resetAgendaCustomerComposer}
+                    hapticType="error"
+                    activeOpacity={0.9}
+                  >
+                    <Text style={styles.quickComposerDangerButtonText}>Svuota campi</Text>
+                  </HapticTouchable>
+
+                  <HapticTouchable
+                    style={[
+                      styles.darkButton,
+                      !canSubmitAgendaCustomerRequired && styles.darkButtonDisabled,
+                    ]}
+                    onPress={addCustomerFromAgenda}
+                    hapticType="medium"
+                    activeOpacity={0.9}
+                    disabled={!canSubmitAgendaCustomerRequired}
+                  >
+                    <Text
+                      style={[
+                        styles.darkButtonText,
+                        !canSubmitAgendaCustomerRequired && styles.darkButtonTextDisabled,
+                      ]}
+                    >
+                      Aggiungi cliente
+                    </Text>
+                  </HapticTouchable>
+                </View>
+              </ScrollView>
+            </View>
+          </KeyboardAvoidingView>
+        </View>
+      </Modal>
+
+      <NumberPickerModal
+        visible={!quickSlotDraft && agendaServiceNumberPickerTarget === 'price'}
+        title="Prezzo servizio"
+        initialValue={agendaServicePriceInput ? Number(agendaServicePriceInput.replace(',', '.')) : 25}
+        onClose={() => setAgendaServiceNumberPickerTarget(null)}
+        onConfirm={(value) => {
+          setAgendaServicePriceInput(value);
+          setAgendaServiceNumberPickerTarget(null);
+        }}
+        min={0}
+        max={500}
+        step={1}
+        gridStep={1}
+        decimals={0}
+        suffix=" €"
+        presets={[15, 20, 25, 30, 35, 40, 50, 60, 80, 100]}
+      />
+
+      <NumberPickerModal
+        visible={!quickSlotDraft && agendaServiceNumberPickerTarget === 'originalPrice'}
+        title="Prezzo pieno"
+        initialValue={
+          agendaServiceOriginalPriceInput ? Number(agendaServiceOriginalPriceInput.replace(',', '.')) : 35
+        }
+        onClose={() => setAgendaServiceNumberPickerTarget(null)}
+        onConfirm={(value) => {
+          setAgendaServiceOriginalPriceInput(value);
+          setAgendaServiceNumberPickerTarget(null);
+        }}
+        min={0}
+        max={500}
+        step={1}
+        gridStep={1}
+        decimals={0}
+        suffix=" €"
+        presets={[20, 25, 30, 35, 40, 50, 60, 80, 100, 120]}
+      />
+
+      <NumberPickerModal
+        visible={!quickSlotDraft && agendaServiceNumberPickerTarget === 'duration'}
+        title="Durata servizio"
+        initialValue={
+          agendaServiceDurationInput ? Number(agendaServiceDurationInput) : agendaDefaultServiceDuration
+        }
+        onClose={() => setAgendaServiceNumberPickerTarget(null)}
+        onConfirm={(value) => {
+          setAgendaServiceDurationInput(value);
+          setAgendaServiceNumberPickerTarget(null);
+        }}
+        min={15}
+        max={360}
+        step={15}
+        gridStep={1}
+        decimals={0}
+        suffix=" min"
+        presets={[15, 30, 45, 60, 75, 90, 120, 150, 180]}
+      />
 
       <NativeTimePickerModal
         visible={!!timeConfigTarget}
@@ -11894,6 +13373,168 @@ const completeWeekDrag = useCallback(() => {
         }}
         minuteStep={15}
         gridMinuteStep={1}
+      />
+
+      {!IS_IOS && customerBirthdayPickerTarget === 'agenda' ? (
+        <Modal
+          visible
+          transparent
+          animationType="fade"
+          presentationStyle="overFullScreen"
+          statusBarTranslucent
+          onRequestClose={() => setCustomerBirthdayPickerTarget(null)}
+        >
+          <View style={styles.modalOverlay}>
+            <HapticTouchable
+              style={styles.quickInlinePickerBackdrop}
+              activeOpacity={1}
+              hapticType="none"
+              onPress={() => setCustomerBirthdayPickerTarget(null)}
+            />
+            <View style={styles.quickCustomerSearchModalCard}>
+              <View style={styles.quickBookingHeaderRow}>
+                <View style={styles.quickBookingHeaderTextWrap}>
+                  <Text style={styles.calendarTitle}>Data di nascita (Opzionale)</Text>
+                  <Text style={styles.quickBookingNestedIntroText}>
+                    Seleziona una data dal calendario.
+                  </Text>
+                </View>
+                <HapticTouchable
+                  style={styles.timeConfigCloseButton}
+                  onPress={() => setCustomerBirthdayPickerTarget(null)}
+                  hapticType="error"
+                  activeOpacity={0.9}
+                >
+                  <Text style={styles.timeConfigCloseButtonText}>×</Text>
+                </HapticTouchable>
+              </View>
+
+              <View style={styles.quickInlineCalendarWrap}>
+                <View style={styles.quickInlineCalendarHeader}>
+                  <HapticTouchable
+                    style={styles.quickInlineCalendarNavButton}
+                    onPress={() =>
+                      setQuickInlineBirthdayMonth(
+                        new Date(
+                          quickInlineBirthdayMonth.getFullYear(),
+                          quickInlineBirthdayMonth.getMonth() - 1,
+                          1
+                        )
+                      )
+                    }
+                    activeOpacity={0.9}
+                  >
+                    <Text style={styles.quickInlineCalendarNavButtonText}>‹</Text>
+                  </HapticTouchable>
+                  <Text style={styles.quickInlineCalendarHeaderText}>
+                    {formatInlineMonthYear(quickInlineBirthdayMonth)}
+                  </Text>
+                  <HapticTouchable
+                    style={styles.quickInlineCalendarNavButton}
+                    onPress={() =>
+                      setQuickInlineBirthdayMonth(
+                        new Date(
+                          quickInlineBirthdayMonth.getFullYear(),
+                          quickInlineBirthdayMonth.getMonth() + 1,
+                          1
+                        )
+                      )
+                    }
+                    activeOpacity={0.9}
+                  >
+                    <Text style={styles.quickInlineCalendarNavButtonText}>›</Text>
+                  </HapticTouchable>
+                </View>
+
+                <View style={styles.quickInlineWeekdayRow}>
+                  {INLINE_WEEKDAY_LABELS.map((label, index) => (
+                    <Text
+                      key={`agenda-inline-weekday-${label}-${index}`}
+                      style={styles.quickInlineWeekdayText}
+                    >
+                      {label}
+                    </Text>
+                  ))}
+                </View>
+
+                <View style={styles.quickInlineCalendarGrid}>
+                  {quickInlineBirthdayCells.map((cell) => {
+                    const selected =
+                      !!cell.value && sameInlineDay(cell.value, quickInlineBirthdayDraft);
+
+                    return (
+                      <HapticTouchable
+                        key={`agenda-inline-${cell.key}`}
+                        style={[
+                          styles.quickInlineCalendarDay,
+                          !cell.value && styles.quickInlineCalendarDayEmpty,
+                          selected && styles.quickInlineCalendarDayActive,
+                        ]}
+                        onPress={() => {
+                          if (!cell.value) return;
+                          setQuickInlineBirthdayDraft(cell.value);
+                          setQuickInlineBirthdayMonth(
+                            new Date(cell.value.getFullYear(), cell.value.getMonth(), 1)
+                          );
+                        }}
+                        activeOpacity={cell.value ? 0.9 : 1}
+                        disabled={!cell.value}
+                      >
+                        <Text
+                          style={[
+                            styles.quickInlineCalendarDayText,
+                            selected && styles.quickInlineCalendarDayTextActive,
+                          ]}
+                        >
+                          {cell.label}
+                        </Text>
+                      </HapticTouchable>
+                    );
+                  })}
+                </View>
+              </View>
+
+              <View style={styles.quickInlinePickerActions}>
+                <HapticTouchable
+                  style={styles.secondaryButton}
+                  onPress={() => setCustomerBirthdayPickerTarget(null)}
+                  activeOpacity={0.9}
+                >
+                  <Text style={styles.secondaryButtonText}>Annulla</Text>
+                </HapticTouchable>
+                <HapticTouchable
+                  style={styles.darkButton}
+                  onPress={() => {
+                    setAgendaCustomerBirthdayInput(toIsoDate(quickInlineBirthdayDraft));
+                    setCustomerBirthdayPickerTarget(null);
+                  }}
+                  activeOpacity={0.9}
+                >
+                  <Text style={styles.darkButtonText}>Conferma</Text>
+                </HapticTouchable>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      ) : null}
+
+      <NativeDatePickerModal
+        visible={IS_IOS && customerBirthdayPickerTarget === 'agenda'}
+        title="Data di nascita (Opzionale)"
+        initialValue={
+          customerBirthdayPickerTarget === 'quick'
+            ? quickCustomerBirthdayInput || todayDate
+            : agendaCustomerBirthdayInput || todayDate
+        }
+        onClose={() => setCustomerBirthdayPickerTarget(null)}
+        onConfirm={(value) => {
+          if (customerBirthdayPickerTarget === 'quick') {
+            setQuickCustomerBirthdayInput(value);
+          } else if (customerBirthdayPickerTarget === 'agenda') {
+            setAgendaCustomerBirthdayInput(value);
+          }
+          setCustomerBirthdayPickerTarget(null);
+        }}
       />
 
       <NativeDatePickerModal
@@ -11958,6 +13599,75 @@ const completeWeekDrag = useCallback(() => {
         suffix=" giorni"
         presets={WEEK_VISIBLE_DAYS_OPTIONS}
       />
+
+      <Modal
+        visible={agendaComposerDialog.visible}
+        transparent
+        animationType="fade"
+        presentationStyle="overFullScreen"
+        statusBarTranslucent
+        onRequestClose={() =>
+          setAgendaComposerDialog((current) => ({
+            ...current,
+            visible: false,
+          }))
+        }
+      >
+        <View style={styles.agendaComposerDialogOverlay}>
+          <View style={styles.agendaComposerDialogBackdrop} />
+          <Reanimated.View entering={FadeIn.duration(180)} exiting={FadeOut.duration(140)} style={styles.agendaComposerDialogShell}>
+            <View
+              style={[
+                styles.agendaComposerDialogCard,
+                agendaComposerDialog.tone === 'success' && styles.agendaComposerDialogCardSuccess,
+                agendaComposerDialog.tone === 'warning' && styles.agendaComposerDialogCardWarning,
+                agendaComposerDialog.tone === 'error' && styles.agendaComposerDialogCardError,
+              ]}
+            >
+              <View style={styles.agendaComposerDialogHandle} />
+              <View style={styles.agendaComposerDialogHeader}>
+                <View
+                  style={[
+                    styles.agendaComposerDialogIconWrap,
+                    agendaComposerDialog.tone === 'success' && styles.agendaComposerDialogIconWrapSuccess,
+                    agendaComposerDialog.tone === 'warning' && styles.agendaComposerDialogIconWrapWarning,
+                    agendaComposerDialog.tone === 'error' && styles.agendaComposerDialogIconWrapError,
+                  ]}
+                >
+                  <Ionicons
+                    name={
+                      agendaComposerDialog.tone === 'success'
+                        ? 'sparkles'
+                        : agendaComposerDialog.tone === 'warning'
+                          ? 'alert-circle'
+                          : 'close-circle'
+                    }
+                    size={20}
+                    color="#0F172A"
+                  />
+                </View>
+                <View style={styles.agendaComposerDialogTitleWrap}>
+                  <Text style={styles.agendaComposerDialogEyebrow}>Agenda</Text>
+                  <Text style={styles.agendaComposerDialogTitle}>{agendaComposerDialog.title}</Text>
+                </View>
+              </View>
+              <Text style={styles.agendaComposerDialogBody}>{agendaComposerDialog.message}</Text>
+              <HapticTouchable
+                style={styles.agendaComposerDialogButton}
+                onPress={() =>
+                  setAgendaComposerDialog((current) => ({
+                    ...current,
+                    visible: false,
+                  }))
+                }
+                activeOpacity={0.96}
+              >
+                <Text style={styles.agendaComposerDialogButtonText}>Continua</Text>
+              </HapticTouchable>
+            </View>
+          </Reanimated.View>
+        </View>
+      </Modal>
 
     </View>
   );
@@ -12391,6 +14101,17 @@ const styles = StyleSheet.create({
     marginTop: IS_ANDROID ? -61 : -62,
     zIndex: 42,
   },
+  dayPickerCenterLockedBadgeHotspot: {
+    position: 'absolute',
+    top: '50%',
+    left: '50%',
+    marginLeft: -34,
+    marginTop: IS_ANDROID ? -8 : -9,
+    width: 68,
+    height: IS_ANDROID ? 24 : 26,
+    alignItems: 'center',
+    zIndex: 46,
+  },
   dayCardWrap: {
     marginRight: DAY_CARD_GAP,
     marginTop: IS_ANDROID ? 1 : 4,
@@ -12419,6 +14140,59 @@ const styles = StyleSheet.create({
     shadowRadius: 18,
     shadowOffset: { width: 0, height: 8 },
     elevation: 7,
+  },
+  dayCardContent: {
+    flex: 1,
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    zIndex: 3,
+  },
+  dayCardGlassLayer: {
+    top: -10,
+    right: -10,
+    bottom: -10,
+    left: -10,
+    borderRadius: 28,
+    overflow: 'hidden',
+    zIndex: 1,
+  },
+  dayCardGlassBlur: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  dayCardGlassTint: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 28,
+    backgroundColor: 'rgba(113,137,196,0.14)',
+  },
+  dayCardGlassEdge: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 28,
+    borderWidth: 1.2,
+    borderColor: 'rgba(255,255,255,0.26)',
+    shadowColor: '#FFFFFF',
+    shadowOpacity: 0.16,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 1 },
+  },
+  dayCardGlassTopSheen: {
+    position: 'absolute',
+    top: 8,
+    left: 10,
+    right: 10,
+    height: '44%',
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.14)',
+    transform: [{ scaleX: 0.96 }],
+  },
+  dayCardGlassBottomGlow: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    bottom: 12,
+    height: 28,
+    borderRadius: 999,
+    backgroundColor: 'rgba(117,156,255,0.16)',
   },
   dayCardAvailable: {
     backgroundColor: '#DDF5E8',
@@ -12462,6 +14236,10 @@ const styles = StyleSheet.create({
     shadowRadius: 20,
     shadowOffset: { width: 0, height: 10 },
     elevation: 11,
+  },
+  dayCardCenterSelected: {
+    zIndex: 60,
+    transform: [{ scaleX: IS_ANDROID ? 1.1 : 1.08 }, { scaleY: IS_ANDROID ? 1.1 : 1.08 }],
   },
   dayCardClosed: {
     backgroundColor: '#F9E2E4',
@@ -12523,10 +14301,10 @@ const styles = StyleSheet.create({
     borderWidth: 1.1,
     borderColor: 'rgba(226,143,150,0.9)',
     minHeight: IS_ANDROID ? 19 : 20,
-    minWidth: IS_ANDROID ? 0 : 56,
+    minWidth: IS_ANDROID ? 0 : 48,
     width: IS_ANDROID ? '100%' : undefined,
-    maxWidth: IS_ANDROID ? '98%' : 66,
-    paddingHorizontal: IS_ANDROID ? 6 : 8,
+    maxWidth: IS_ANDROID ? '88%' : 58,
+    paddingHorizontal: IS_ANDROID ? 5 : 6,
     paddingVertical: IS_ANDROID ? 2 : 1,
     marginBottom: IS_ANDROID ? 2 : 2,
   },
@@ -12590,17 +14368,20 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     backgroundColor: '#F8FAFC',
     borderRadius: 999,
-    paddingHorizontal: IS_ANDROID ? 6 : 8,
+    paddingHorizontal: IS_ANDROID ? 5 : 7,
     paddingVertical: IS_ANDROID ? 4 : 4,
-    minWidth: IS_ANDROID ? 0 : 46,
-    width: IS_ANDROID ? '100%' : undefined,
-    maxWidth: IS_ANDROID ? '98%' : '100%',
+    minWidth: IS_ANDROID ? 0 : 50,
+    width: IS_ANDROID ? '80%' : '66%',
+    maxWidth: IS_ANDROID ? '80%' : 62,
     borderWidth: 0,
     borderColor: 'transparent',
   },
   dayCardFooterActive: {
     backgroundColor: '#243252',
     borderColor: 'transparent',
+    minWidth: IS_ANDROID ? 0 : 56,
+    width: IS_ANDROID ? '84%' : '72%',
+    maxWidth: IS_ANDROID ? '84%' : 68,
   },
   dayCardFooterClosed: {
     backgroundColor: '#F4D3D7',
@@ -12611,12 +14392,12 @@ const styles = StyleSheet.create({
     borderColor: 'transparent',
   },
   dayCardFooterText: {
-    fontSize: IS_ANDROID ? 6.7 : 8,
+    fontSize: IS_ANDROID ? 6.6 : 7.8,
     fontWeight: '800',
     color: '#475569',
     textAlign: 'center',
     paddingHorizontal: IS_ANDROID ? 0 : ANDROID_TEXT_BREATHING_ROOM,
-    lineHeight: IS_ANDROID ? 7 : undefined,
+    lineHeight: IS_ANDROID ? 8 : 9,
     width: IS_ANDROID ? '100%' : undefined,
   },
   dayCardFooterTextActive: {
@@ -13682,13 +15463,14 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   weekPlannerCornerCellWithLanes: {
-    height: WEEK_PLANNER_DAY_HEADER_TOTAL_HEIGHT + 34,
+    height: WEEK_PLANNER_DAY_HEADER_TOTAL_HEIGHT + 16,
   },
   weekPlannerTimeColumnSpacer: {
     flex: 1,
+    marginTop: 20,
   },
   weekPlannerTimeLaneHeaderSpacer: {
-    height: 34,
+    height: 16,
   },
   weekPlannerTimeCell: {
     height: WEEK_PLANNER_ROW_HEIGHT,
@@ -13725,19 +15507,19 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: -10,
     width: WEEK_PLANNER_TIME_COL_TOTAL + 6,
-    height: 20,
+    height: WEEK_PLANNER_TIME_BOUNDARY_ROW_HEIGHT,
     alignItems: 'center',
     overflow: 'visible',
     zIndex: 4,
   },
   weekPlannerTimeBoundaryRowFirst: {
-    top: -11,
+    top: WEEK_PLANNER_TIME_BOUNDARY_ROW_OFFSET,
   },
   weekPlannerTimeBoundaryRowMiddle: {
-    top: -10,
+    top: WEEK_PLANNER_TIME_BOUNDARY_ROW_OFFSET,
   },
   weekPlannerTimeBoundaryRowFooter: {
-    top: -10,
+    top: WEEK_PLANNER_TIME_BOUNDARY_ROW_OFFSET,
   },
   weekPlannerTimeBoundaryFooter: {
     position: 'relative',
@@ -13749,7 +15531,7 @@ const styles = StyleSheet.create({
     paddingLeft: 8,
     paddingRight: 8,
     width: '100%',
-    height: 20,
+    height: WEEK_PLANNER_TIME_BOUNDARY_ROW_HEIGHT,
     borderRadius: 6,
     backgroundColor: '#EEF3F8',
     justifyContent: 'center',
@@ -13853,12 +15635,12 @@ const styles = StyleSheet.create({
     borderColor: PALETTE.BORDER_LIGHT,
   },
   weekPlannerDayHeaderClosed: {
-    backgroundColor: '#F3F4F6',
-    borderColor: 'rgba(148, 163, 184, 0.24)',
-  },
-  weekPlannerDayHeaderHoliday: {
     backgroundColor: '#FFF7ED',
     borderColor: 'rgba(245, 158, 11, 0.22)',
+  },
+  weekPlannerDayHeaderHoliday: {
+    backgroundColor: '#FEF2F2',
+    borderColor: 'rgba(239, 68, 68, 0.18)',
   },
   weekPlannerLaneHeaderRow: {
     width: '100%',
@@ -13977,29 +15759,26 @@ const styles = StyleSheet.create({
   },
   weekPlannerDayPendingBadge: {
     position: 'absolute',
-    top: -10,
-    right: -9,
-    minWidth: 28,
-    height: 28,
+    top: -8,
+    right: -6,
+    minWidth: 30,
+    height: 30,
     borderRadius: 999,
-    paddingHorizontal: 7,
-    backgroundColor: '#dc2626',
+    paddingHorizontal: 8,
+    backgroundColor: '#E92D2D',
     borderWidth: 2,
-    borderColor: '#ffffff',
+    borderColor: 'rgba(255,255,255,0.98)',
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 40,
-    shadowColor: '#991b1b',
-    shadowOpacity: 0.22,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 3 },
-    elevation: 8,
+    overflow: 'hidden',
   },
   weekPlannerDayPendingBadgeText: {
-    fontSize: 13,
+    fontSize: 14,
     lineHeight: 15,
     fontWeight: '900',
     color: '#ffffff',
+    includeFontPadding: false,
   },
   weekPlannerDayMeta: {
     display: 'none',
@@ -14045,8 +15824,13 @@ const styles = StyleSheet.create({
     marginBottom: -WEEK_PLANNER_ROW_GAP,
   },
   weekPlannerCellAvailable: {
-    backgroundColor: PALETTE.SUCCESS_BG,
-    borderColor: PALETTE.BORDER_SOFT,
+    backgroundColor: '#EAF9F1',
+    borderColor: 'rgba(78, 185, 128, 0.24)',
+    shadowColor: '#7FD0A4',
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 5 },
+    elevation: 3,
   },
   weekPlannerCellBlocked: {
     backgroundColor: PALETTE.WARNING_BG,
@@ -14089,10 +15873,10 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   weekPlannerCellTextAvailable: {
-    fontSize: 24,
-    lineHeight: 24,
-    fontWeight: '400',
-    color: '#17834b',
+    fontSize: 22,
+    lineHeight: 22,
+    fontWeight: '800',
+    color: '#156E42',
   },
   weekPlannerCellTextMuted: {
     color: '#94a3b8',
@@ -14137,6 +15921,42 @@ const styles = StyleSheet.create({
   weekPlannerOperatorLaneText: {
     fontSize: 18,
     lineHeight: 18,
+  },
+  weekPlannerCellPremiumBadge: {
+    width: IS_ANDROID ? 36 : 38,
+    height: IS_ANDROID ? 36 : 38,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.68)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.88)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+    shadowColor: '#56B880',
+    shadowOpacity: 0.16,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 2,
+  },
+  weekPlannerCellPremiumBadgeInner: {
+    width: IS_ANDROID ? 28 : 30,
+    height: IS_ANDROID ? 28 : 30,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.82)',
+    borderWidth: 1,
+    borderColor: 'rgba(131, 226, 170, 0.22)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  weekPlannerCellPremiumGlowDot: {
+    position: 'absolute',
+    top: IS_ANDROID ? 5 : 5,
+    right: IS_ANDROID ? 6 : 6,
+    width: 6,
+    height: 6,
+    borderRadius: 999,
+    backgroundColor: '#82E6AD',
+    opacity: 0.95,
   },
   weekAppointmentBlock: {
     width: '100%',
@@ -14307,23 +16127,19 @@ const styles = StyleSheet.create({
   },
   weekPendingRequestBadge: {
     position: 'absolute',
-    top: -10,
-    right: -9,
-    minWidth: 24,
-    height: 24,
+    top: -8,
+    right: -6,
+    minWidth: 26,
+    height: 26,
     borderRadius: 999,
-    paddingHorizontal: 6,
-    backgroundColor: '#dc2626',
+    paddingHorizontal: 7,
+    backgroundColor: '#E92D2D',
     borderWidth: 2,
-    borderColor: '#ffffff',
+    borderColor: 'rgba(255,255,255,0.98)',
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 18,
-    shadowColor: '#991b1b',
-    shadowOpacity: 0.18,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 6,
+    overflow: 'hidden',
   },
   weekAppointmentSourceBadge: {
     position: 'relative',
@@ -14375,9 +16191,10 @@ const styles = StyleSheet.create({
   },
   weekPendingRequestBadgeText: {
     fontSize: 12,
-    lineHeight: 14,
+    lineHeight: 13,
     fontWeight: '900',
     color: '#ffffff',
+    includeFontPadding: false,
   },
   weekAppointmentBlockDragging: {
     zIndex: 50,
@@ -14958,6 +16775,110 @@ const styles = StyleSheet.create({
     shadowRadius: 24,
     shadowOffset: { width: 0, height: 10 },
     elevation: 6,
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  quickBookingNestedOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 40,
+    elevation: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 18,
+  },
+  quickBookingNestedOverlayService: {
+    justifyContent: 'flex-end',
+    paddingTop: 72,
+    paddingBottom: 10,
+  },
+  quickBookingNestedOverlayCustomer: {
+    justifyContent: 'flex-end',
+    paddingTop: 72,
+    paddingBottom: 10,
+  },
+  quickBookingNestedBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(15, 23, 42, 0.22)',
+  },
+  quickBookingNestedKeyboardShell: {
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  quickBookingNestedKeyboardShellService: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  quickBookingNestedKeyboardShellCustomer: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  quickBookingNestedCard: {
+    width: '100%',
+    maxWidth: 560,
+    maxHeight: '88%',
+    backgroundColor: '#ffffff',
+    borderRadius: 32,
+    paddingHorizontal: 18,
+    paddingTop: 18,
+    paddingBottom: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(15,23,42,0.05)',
+    shadowColor: '#000000',
+    shadowOpacity: 0.16,
+    shadowRadius: 28,
+    shadowOffset: { width: 0, height: 14 },
+    elevation: 10,
+    alignSelf: 'center',
+  },
+  quickBookingNestedCardCustomer: {
+    width: '100%',
+    maxWidth: 560,
+    height: '84%',
+    maxHeight: '84%',
+    minHeight: 560,
+    backgroundColor: '#fcfdff',
+    borderColor: 'rgba(148,163,184,0.18)',
+    shadowColor: '#0f172a',
+    shadowOpacity: 0.18,
+    shadowRadius: 30,
+    shadowOffset: { width: 0, height: 18 },
+    borderRadius: 36,
+    paddingHorizontal: 22,
+    paddingTop: 20,
+    paddingBottom: 16,
+  },
+  quickBookingNestedCardService: {
+    width: '100%',
+    maxWidth: 560,
+    height: '84%',
+    maxHeight: '84%',
+    minHeight: 560,
+    paddingTop: 20,
+    paddingBottom: 16,
+  },
+  quickBookingNestedScroll: {
+    flex: 1,
+  },
+  quickBookingNestedScrollService: {
+    marginTop: 0,
+  },
+  quickBookingNestedScrollCustomer: {
+    marginTop: 4,
+  },
+  quickBookingNestedPane: {
+    flex: 1,
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  quickBookingNestedHeaderRow: {
+    alignItems: 'flex-start',
+  },
+  quickBookingNestedHeaderRowCustomer: {
+    marginBottom: 18,
+    paddingBottom: 16,
+    borderBottomColor: 'rgba(148,163,184,0.14)',
   },
   modalKeyboardAvoider: {
     flex: 1,
@@ -14984,6 +16905,30 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
   },
+  quickBookingHeaderTextWrapCustomer: {
+    paddingRight: 10,
+  },
+  quickBookingNestedHeaderTextWrap: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingLeft: 36,
+  },
+  quickBookingNestedHelperText: {
+    textAlign: 'center',
+  },
+  quickBookingNestedIntroText: {
+    marginTop: 4,
+    fontSize: 14,
+    lineHeight: 20,
+    fontWeight: '700',
+    color: '#64748b',
+  },
+  quickBookingNestedIntroTextCustomer: {
+    marginTop: 8,
+    fontSize: 13,
+    lineHeight: 20,
+    color: '#64748b',
+  },
   quickBookingDateTitle: {
     fontSize: IS_ANDROID ? 14 : 15,
     lineHeight: 20,
@@ -14996,6 +16941,12 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     paddingTop: 8,
     paddingBottom: 20,
+  },
+  quickBookingNestedFormContent: {
+    flexGrow: 1,
+    paddingTop: 8,
+    paddingBottom: 220,
+    gap: 16,
   },
   quickBookingLaneContextCard: {
     marginBottom: 12,
@@ -15116,6 +17067,16 @@ const styles = StyleSheet.create({
     paddingRight: 8,
     paddingLeft: 2,
     alignItems: 'flex-start',
+  },
+  quickServiceScrollHint: {
+    marginTop: 6,
+    marginBottom: 2,
+    paddingHorizontal: 4,
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '700',
+    color: '#64748B',
+    textAlign: 'left',
   },
   quickServiceColumn: {
     gap: 6,
@@ -15434,13 +17395,358 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(15,23,42,0.05)',
   },
+  quickCustomerDateButton: {
+    alignItems: 'stretch',
+    justifyContent: 'center',
+    minHeight: 56,
+    paddingHorizontal: 18,
+    backgroundColor: '#f8fafc',
+    borderColor: 'rgba(148,163,184,0.18)',
+  },
+  quickCustomerDateButtonText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#111827',
+    textAlign: 'left',
+    width: '100%',
+  },
+  quickCustomerDateButtonPlaceholder: {
+    color: '#9a9a9a',
+    fontWeight: '500',
+  },
+  quickCustomerClearDateChip: {
+    alignSelf: 'center',
+    marginTop: 2,
+    marginBottom: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 999,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: 'rgba(15, 23, 42, 0.06)',
+  },
+  quickCustomerClearDateChipText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#475569',
+    textAlign: 'center',
+  },
+  quickCustomerRequiredHint: {
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: '800',
+    color: '#475569',
+    textAlign: 'center',
+    marginTop: 2,
+    marginBottom: 12,
+  },
+  quickComposerActionsRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 10,
+  },
+  quickComposerDangerButton: {
+    flex: 1,
+    backgroundColor: '#fee2e2',
+    borderRadius: 18,
+    paddingVertical: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#fca5a5',
+  },
+  quickComposerDangerButtonText: {
+    fontSize: 15,
+    fontWeight: '900',
+    color: '#b91c1c',
+  },
+  quickInlinePickerOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 80,
+    elevation: 80,
+    justifyContent: 'flex-end',
+    padding: 12,
+  },
+  quickInlinePickerBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(15, 23, 42, 0.24)',
+  },
+  quickInlinePickerSheet: {
+    backgroundColor: '#f8fafc',
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: '#dbe4ec',
+    width: '100%',
+    maxWidth: 520,
+    alignSelf: 'center',
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 18,
+    gap: 12,
+  },
+  quickInlinePickerTitle: {
+    fontSize: 16,
+    fontWeight: '900',
+    color: '#0f172a',
+    textAlign: 'center',
+  },
+  quickInlinePickerValue: {
+    fontSize: 30,
+    fontWeight: '900',
+    color: '#111111',
+    textAlign: 'center',
+  },
+  quickInlinePickerDateValue: {
+    fontSize: 20,
+    fontWeight: '900',
+    color: '#0f172a',
+    textAlign: 'center',
+    marginTop: -2,
+    marginBottom: 2,
+  },
+  quickInlinePickerStepperRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  quickInlinePickerStepperButton: {
+    flex: 1,
+    backgroundColor: '#eef2f7',
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: '#dbe4ec',
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  quickInlinePickerStepperButtonText: {
+    color: '#334155',
+    fontSize: 24,
+    fontWeight: '800',
+    lineHeight: 24,
+  },
+  quickInlinePickerPresetsWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  quickInlinePickerPresetChip: {
+    backgroundColor: '#ffffff',
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#dbe4ec',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  quickInlinePickerPresetChipActive: {
+    backgroundColor: '#161616',
+    borderColor: '#161616',
+  },
+  quickInlinePickerPresetChipText: {
+    color: '#334155',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  quickInlinePickerPresetChipTextActive: {
+    color: '#ffffff',
+  },
+  quickInlineIntegratedPane: {
+    flex: 1,
+    backgroundColor: '#fbfdff',
+    borderRadius: 30,
+    borderWidth: 1,
+    borderColor: 'rgba(226,232,240,0.92)',
+    marginHorizontal: -10,
+    paddingTop: 14,
+    paddingBottom: 12,
+    overflow: 'hidden',
+  },
+  quickInlineIntegratedSheet: {
+    flex: 1,
+    backgroundColor: 'transparent',
+    borderRadius: 30,
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+    gap: 14,
+  },
+  quickInlinePickerHandle: {
+    alignSelf: 'center',
+    width: 54,
+    height: 6,
+    borderRadius: 999,
+    backgroundColor: '#d9e2ec',
+    marginBottom: 2,
+  },
+  quickInlineDatePickerWrap: {
+    backgroundColor: '#ffffff',
+    borderRadius: 28,
+    borderWidth: 1,
+    borderColor: '#dbe4ec',
+    width: '100%',
+    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingTop: 8,
+    paddingBottom: 8,
+    minHeight: 0,
+    height: 286,
+    maxHeight: 286,
+    shadowColor: '#0f172a',
+    shadowOpacity: 0.04,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 2,
+  },
+  quickInlineDatePicker: {
+    width: '100%',
+    height: 252,
+    transform: [{ scaleX: 1.01 }, { scaleY: 0.97 }],
+  },
+  quickInlineCalendarWrap: {
+    backgroundColor: '#ffffff',
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: '#dbe4ec',
+    paddingHorizontal: 12,
+    paddingTop: 12,
+    paddingBottom: 14,
+    shadowColor: '#0f172a',
+    shadowOpacity: 0.04,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 2,
+  },
+  quickInlineCalendarHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  quickInlineCalendarNavButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: '#f8fafc',
+    borderWidth: 1,
+    borderColor: '#dbe4ec',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  quickInlineCalendarNavButtonText: {
+    fontSize: 22,
+    lineHeight: 22,
+    fontWeight: '800',
+    color: '#334155',
+  },
+  quickInlineCalendarHeaderText: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: '900',
+    color: '#0f172a',
+    textAlign: 'center',
+    textTransform: 'capitalize',
+  },
+  quickInlineWeekdayRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+    paddingHorizontal: 2,
+  },
+  quickInlineWeekdayText: {
+    width: `${100 / 7}%`,
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#64748b',
+    textAlign: 'center',
+  },
+  quickInlineCalendarGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    rowGap: 8,
+  },
+  quickInlineCalendarDay: {
+    width: `${100 / 7}%`,
+    aspectRatio: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 14,
+  },
+  quickInlineCalendarDayEmpty: {
+    opacity: 0,
+  },
+  quickInlineCalendarDayActive: {
+    backgroundColor: '#0f172a',
+    shadowColor: '#0f172a',
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 3,
+  },
+  quickInlineCalendarDayText: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#0f172a',
+    textAlign: 'center',
+  },
+  quickInlineCalendarDayTextActive: {
+    color: '#ffffff',
+  },
+  quickInlinePickerActions: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 12,
+    paddingTop: 2,
+    paddingBottom: 4,
+    flexShrink: 0,
+  },
+  numericPickerField: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  numericPickerFieldText: {
+    fontSize: 15,
+    color: '#0F172A',
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  numericPickerFieldPlaceholder: {
+    color: '#9a9a9a',
+    fontWeight: '500',
+  },
+  discountFieldRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  discountFieldMain: {
+    flex: 1,
+  },
+  discountFieldClearButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: 'rgba(15, 23, 42, 0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  discountFieldClearButtonText: {
+    fontSize: 16,
+    fontWeight: '900',
+    color: '#991B1B',
+  },
   quickCustomerSearchModalCard: {
     width: '94%',
     maxWidth: 560,
-    maxHeight: '82%',
+    height: '84%',
+    maxHeight: '84%',
+    minHeight: 560,
     backgroundColor: '#ffffff',
-    borderRadius: 28,
-    padding: 16,
+    borderRadius: 32,
+    paddingHorizontal: 18,
+    paddingTop: 20,
+    paddingBottom: 16,
   },
   quickCustomerSearchResults: {
     marginTop: 12,
@@ -17032,6 +19338,111 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     fontWeight: '600',
     color: '#64748b',
+  },
+  agendaComposerDialogOverlay: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 22,
+  },
+  agendaComposerDialogBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(15, 23, 42, 0.48)',
+  },
+  agendaComposerDialogShell: {
+    width: '100%',
+    maxWidth: 430,
+  },
+  agendaComposerDialogCard: {
+    backgroundColor: 'rgba(19, 24, 38, 0.96)',
+    borderRadius: 28,
+    paddingHorizontal: 22,
+    paddingTop: 16,
+    paddingBottom: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    shadowColor: '#020617',
+    shadowOpacity: 0.34,
+    shadowRadius: 30,
+    shadowOffset: { width: 0, height: 14 },
+    elevation: 12,
+  },
+  agendaComposerDialogCardSuccess: {
+    backgroundColor: 'rgba(15, 23, 42, 0.97)',
+  },
+  agendaComposerDialogCardWarning: {
+    backgroundColor: 'rgba(38, 29, 17, 0.97)',
+  },
+  agendaComposerDialogCardError: {
+    backgroundColor: 'rgba(48, 20, 20, 0.97)',
+  },
+  agendaComposerDialogHandle: {
+    alignSelf: 'center',
+    width: 74,
+    height: 6,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    marginBottom: 18,
+  },
+  agendaComposerDialogHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 14,
+  },
+  agendaComposerDialogIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#E2E8F0',
+  },
+  agendaComposerDialogIconWrapSuccess: {
+    backgroundColor: '#D9FBE8',
+  },
+  agendaComposerDialogIconWrapWarning: {
+    backgroundColor: '#FDE7C7',
+  },
+  agendaComposerDialogIconWrapError: {
+    backgroundColor: '#FECACA',
+  },
+  agendaComposerDialogTitleWrap: {
+    flex: 1,
+  },
+  agendaComposerDialogEyebrow: {
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    color: 'rgba(255,255,255,0.58)',
+    marginBottom: 3,
+  },
+  agendaComposerDialogTitle: {
+    fontSize: 17,
+    fontWeight: '900',
+    color: '#FFFFFF',
+  },
+  agendaComposerDialogBody: {
+    fontSize: 15,
+    lineHeight: 28,
+    fontWeight: '500',
+    color: 'rgba(255,255,255,0.86)',
+    marginBottom: 18,
+  },
+  agendaComposerDialogButton: {
+    minHeight: 56,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  agendaComposerDialogButtonText: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#FFFFFF',
   },
   modalOverlay: {
     flex: 1,

@@ -1,7 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import * as ExpoLinking from 'expo-linking';
-import React, { createContext, ReactNode, useContext, useEffect, useState } from 'react';
+import type { PostgrestError } from '@supabase/supabase-js';
+import React, { createContext, ReactNode, useContext, useEffect, useRef, useState } from 'react';
 import { AppState, Platform } from 'react-native';
 import {
   assignFallbackOperatorsToAppointments,
@@ -17,12 +18,7 @@ import {
   OperatorAvailabilityRange,
   timeToMinutes,
 } from '../lib/booking';
-import {
-  fetchClientPortalAvailabilitySettings,
-  fetchClientPortalSnapshot,
-  publishClientPortalSnapshot,
-  updateClientPortalAvailabilitySettings,
-} from '../lib/client-portal';
+import { fetchClientPortalSnapshot, publishClientPortalSnapshot } from '../lib/client-portal';
 import { formatCustomerFullNameValue, formatCustomerNamePart } from '../lib/customer-name';
 import { AppLanguage, resolveStoredAppLanguage } from '../lib/i18n';
 import {
@@ -51,6 +47,13 @@ const STORAGE_KEYS = {
   biometric_login_password: 'salon_manager_biometric_login_password',
   app_language: 'salon_manager_app_language',
   workspace: 'salon_manager_workspace',
+  workspace_cash_section_disabled: 'salon_manager_workspace_cash_section_disabled',
+  workspace_auto_accept_booking_requests: 'salon_manager_workspace_auto_accept_booking_requests',
+  workspace_auto_accept_booking_requests_updated_at:
+    'salon_manager_workspace_auto_accept_booking_requests_updated_at',
+  workspace_customer_reminder_hours_before:
+    'salon_manager_workspace_customer_reminder_hours_before',
+  onboarding_first_access_pending: 'salon_manager_onboarding_first_access_pending',
   clienti: 'salon_manager_clienti',
   appuntamenti: 'salon_manager_appuntamenti',
   movimenti: 'salon_manager_movimenti',
@@ -60,7 +63,6 @@ const STORAGE_KEYS = {
   eventi_template: 'salon_manager_eventi_template',
   richieste_prenotazione: 'salon_manager_richieste_prenotazione',
   recently_deleted_appointments: 'salon_manager_recently_deleted_appointments',
-  recently_deleted_customers: 'salon_manager_recently_deleted_customers',
   availability_settings: 'salon_manager_availability_settings',
   operatori: 'salon_manager_operatori',
   macchinari: 'salon_manager_macchinari',
@@ -70,31 +72,172 @@ const STORAGE_KEYS = {
   role_card_color_overrides: 'salon_manager_role_card_color_overrides',
 };
 
+const ONE_OFF_OWNER_ACCOUNT_CLEANUP_EMAIL = 'marziomus@gmail.com';
+const ONE_OFF_OWNER_ACCOUNT_CLEANUP_DONE_KEY =
+  'salon_manager_owner_cleanup_done__marziomus_gmail_20260429_v1';
+
 let devFallbackClientiAfterRefreshCount = 0;
 const RECENTLY_DELETED_APPOINTMENT_GUARD_MS = 600000;
 const RECENTLY_CREATED_APPOINTMENT_GUARD_MS = 30000;
 const RECENTLY_DELETED_CUSTOMER_GUARD_MS = 600000;
-const EXPO_GO_OWNER_LIVE_REFRESH_INTERVAL_MS = 3000;
-const PORTAL_REMOTE_OVERRIDE_GUARD_MS = 5000;
 const DEADLOCK_ERROR_CODE = '40P01';
 const DEADLOCK_RETRY_DELAYS_MS = [120, 300, 700];
 const DEFAULT_PUBLIC_CLIENT_BASE_URL = 'https://salon-manager-puce.vercel.app';
 
 const normalizeAccountEmail = (value?: string | null) => value?.trim().toLowerCase() ?? '';
 const normalizeIdentityText = (value?: string | null) => value?.trim().toLowerCase() ?? '';
+const pickNonEmptyWorkspaceValue = (preferred?: string | null, fallback?: string | null) =>
+  preferred?.trim() ? preferred : fallback?.trim() ?? '';
+const parseWorkspaceTimestamp = (value?: string | null) => {
+  if (typeof value !== 'string' || !value.trim()) return Number.NaN;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : Number.NaN;
+};
+const preferLocalWorkspaceValue = ({
+  localHasExplicitValue,
+  remoteHasExplicitValue,
+  localTimestamp,
+  remoteTimestamp,
+}: {
+  localHasExplicitValue: boolean;
+  remoteHasExplicitValue: boolean;
+  localTimestamp: number;
+  remoteTimestamp: number;
+}) => {
+  if (localHasExplicitValue && !remoteHasExplicitValue) return true;
+  if (!localHasExplicitValue && remoteHasExplicitValue) return false;
+  if (!localHasExplicitValue && !remoteHasExplicitValue) return true;
+
+  if (Number.isFinite(localTimestamp) && Number.isFinite(remoteTimestamp)) {
+    return localTimestamp >= remoteTimestamp;
+  }
+
+  if (Number.isFinite(localTimestamp)) return true;
+  if (Number.isFinite(remoteTimestamp)) return false;
+
+  return true;
+};
+
+const mergeWorkspacePreservingLocalProfile = ({
+  localWorkspace,
+  remoteWorkspace,
+  email,
+}: {
+  localWorkspace: Partial<SalonWorkspace> | null | undefined;
+  remoteWorkspace: Partial<SalonWorkspace> | null | undefined;
+  email: string;
+}) => {
+  const normalizedEmail = normalizeAccountEmail(email);
+  const local = normalizeWorkspace(localWorkspace, normalizedEmail);
+  const remote = normalizeWorkspace(
+    remoteWorkspace,
+    normalizeAccountEmail(remoteWorkspace?.ownerEmail ?? normalizedEmail) || normalizedEmail
+  );
+  const localWorkspaceUpdatedAt = parseWorkspaceTimestamp(localWorkspace?.updatedAt ?? local.updatedAt);
+  const remoteWorkspaceUpdatedAt = parseWorkspaceTimestamp(
+    remoteWorkspace?.updatedAt ?? remote.updatedAt
+  );
+  const localAutoAcceptUpdatedAt = parseWorkspaceTimestamp(
+    localWorkspace?.autoAcceptBookingRequestsUpdatedAt ?? local.autoAcceptBookingRequestsUpdatedAt
+  );
+  const remoteAutoAcceptUpdatedAt = parseWorkspaceTimestamp(
+    remoteWorkspace?.autoAcceptBookingRequestsUpdatedAt ?? remote.autoAcceptBookingRequestsUpdatedAt
+  );
+  const preferLocalCashSectionDisabled = preferLocalWorkspaceValue({
+    localHasExplicitValue: typeof localWorkspace?.cashSectionDisabled === 'boolean',
+    remoteHasExplicitValue: typeof remoteWorkspace?.cashSectionDisabled === 'boolean',
+    localTimestamp: localWorkspaceUpdatedAt,
+    remoteTimestamp: remoteWorkspaceUpdatedAt,
+  });
+  const shouldForceLocalCashSectionDisabled =
+    typeof localWorkspace?.cashSectionDisabled === 'boolean';
+  const preferLocalAutoAccept = preferLocalWorkspaceValue({
+    localHasExplicitValue: typeof localWorkspace?.autoAcceptBookingRequests === 'boolean',
+    remoteHasExplicitValue: typeof remoteWorkspace?.autoAcceptBookingRequests === 'boolean',
+    localTimestamp: Number.isFinite(localAutoAcceptUpdatedAt)
+      ? localAutoAcceptUpdatedAt
+      : localWorkspaceUpdatedAt,
+    remoteTimestamp: Number.isFinite(remoteAutoAcceptUpdatedAt)
+      ? remoteAutoAcceptUpdatedAt
+      : remoteWorkspaceUpdatedAt,
+  });
+  const preferLocalCustomerReminder = preferLocalWorkspaceValue({
+    localHasExplicitValue:
+      typeof localWorkspace?.customerReminderHoursBefore === 'number' ||
+      (typeof localWorkspace?.customerReminderHoursBefore === 'string' &&
+        String(localWorkspace.customerReminderHoursBefore).trim() !== ''),
+    remoteHasExplicitValue:
+      typeof remoteWorkspace?.customerReminderHoursBefore === 'number' ||
+      (typeof remoteWorkspace?.customerReminderHoursBefore === 'string' &&
+        String(remoteWorkspace.customerReminderHoursBefore).trim() !== ''),
+    localTimestamp: localWorkspaceUpdatedAt,
+    remoteTimestamp: remoteWorkspaceUpdatedAt,
+  });
+
+  return normalizeWorkspace(
+    {
+      ...local,
+      id: remote.id || local.id,
+      ownerEmail: normalizeAccountEmail(remote.ownerEmail || local.ownerEmail || normalizedEmail),
+      salonCode: normalizeSalonCode(remote.salonCode || local.salonCode),
+      salonName: pickNonEmptyWorkspaceValue(remote.salonName, local.salonName),
+      salonNameDisplayStyle:
+        local.salonNameDisplayStyle !== 'corsivo' && remote.salonNameDisplayStyle === 'corsivo'
+          ? local.salonNameDisplayStyle
+          : remote.salonNameDisplayStyle,
+      salonNameFontVariant:
+        local.salonNameFontVariant !== 'neon' && remote.salonNameFontVariant === 'neon'
+          ? local.salonNameFontVariant
+          : remote.salonNameFontVariant,
+      businessPhone: pickNonEmptyWorkspaceValue(remote.businessPhone, local.businessPhone),
+      activityCategory: pickNonEmptyWorkspaceValue(
+        remote.activityCategory,
+        local.activityCategory
+      ),
+      streetType: pickNonEmptyWorkspaceValue(remote.streetType, local.streetType),
+      streetName: pickNonEmptyWorkspaceValue(remote.streetName, local.streetName),
+      streetNumber: pickNonEmptyWorkspaceValue(remote.streetNumber, local.streetNumber),
+      city: pickNonEmptyWorkspaceValue(remote.city, local.city),
+      postalCode: pickNonEmptyWorkspaceValue(remote.postalCode, local.postalCode),
+      salonAddress: pickNonEmptyWorkspaceValue(remote.salonAddress, local.salonAddress),
+      subscriptionPlan: remote.subscriptionPlan ?? local.subscriptionPlan,
+      subscriptionStatus: remote.subscriptionStatus ?? local.subscriptionStatus,
+      createdAt: remote.createdAt || local.createdAt,
+      updatedAt: remote.updatedAt || local.updatedAt,
+      cashSectionDisabled: shouldForceLocalCashSectionDisabled
+        ? local.cashSectionDisabled
+        : preferLocalCashSectionDisabled
+        ? local.cashSectionDisabled
+        : remote.cashSectionDisabled,
+      autoAcceptBookingRequests: preferLocalAutoAccept
+        ? local.autoAcceptBookingRequests
+        : remote.autoAcceptBookingRequests,
+      autoAcceptBookingRequestsUpdatedAt: preferLocalAutoAccept
+        ? pickNonEmptyWorkspaceValue(
+            local.autoAcceptBookingRequestsUpdatedAt,
+            remote.autoAcceptBookingRequestsUpdatedAt
+          )
+        : pickNonEmptyWorkspaceValue(
+            remote.autoAcceptBookingRequestsUpdatedAt,
+            local.autoAcceptBookingRequestsUpdatedAt
+          ),
+      customerReminderHoursBefore: preferLocalCustomerReminder
+        ? local.customerReminderHoursBefore
+        : remote.customerReminderHoursBefore,
+      trialEndsAt: pickNonEmptyWorkspaceValue(remote.trialEndsAt, local.trialEndsAt) || undefined,
+      subscriptionEndsAt:
+        pickNonEmptyWorkspaceValue(remote.subscriptionEndsAt, local.subscriptionEndsAt) ||
+        undefined,
+      lastBackupAt:
+        pickNonEmptyWorkspaceValue(remote.lastBackupAt, local.lastBackupAt) || undefined,
+    },
+    normalizedEmail
+  );
+};
+
 const isUuidValue = (value?: string | null) =>
   !!value &&
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
-const isLikelyNetworkRequestFailure = (error: unknown) => {
-  const message =
-    typeof error === 'string'
-      ? error
-      : error && typeof error === 'object' && 'message' in error
-        ? String((error as { message?: unknown }).message ?? '')
-        : '';
-
-  return message.trim().toLowerCase().includes('network request failed');
-};
 const normalizeTimeIdentity = (value?: string | null) => {
   const normalized = normalizeIdentityText(value);
   if (!normalized) return '';
@@ -105,124 +248,6 @@ const normalizeTimeIdentity = (value?: string | null) => {
     return normalized;
   }
 };
-const parseIsoTimestampToMs = (value?: string | null) => {
-  const parsed = Date.parse(value ?? '');
-  return Number.isFinite(parsed) ? parsed : 0;
-};
-const buildNextMonotonicIsoTimestamp = (
-  previousValue?: string | null,
-  requestedValue?: string | null
-) => {
-  const previousMs = parseIsoTimestampToMs(previousValue);
-  const requestedMs = parseIsoTimestampToMs(requestedValue);
-  const nextMs = Math.max(Date.now(), requestedMs, previousMs + 1);
-  return new Date(nextMs).toISOString();
-};
-const resolveLatestBooleanByTimestamp = ({
-  localValue,
-  localUpdatedAt,
-  remoteValue,
-  remoteUpdatedAt,
-}: {
-  localValue: boolean | undefined;
-  localUpdatedAt?: string | null;
-  remoteValue: boolean | undefined;
-  remoteUpdatedAt?: string | null;
-}) => {
-  const localTs = parseIsoTimestampToMs(localUpdatedAt);
-  const remoteTs = parseIsoTimestampToMs(remoteUpdatedAt);
-
-  if (remoteTs > localTs) {
-    return {
-      value: remoteValue ?? localValue,
-      updatedAt: remoteUpdatedAt ?? localUpdatedAt ?? undefined,
-      remoteWins: true,
-    };
-  }
-
-  return {
-    value: localValue ?? remoteValue,
-    updatedAt: localUpdatedAt ?? remoteUpdatedAt ?? undefined,
-    remoteWins: false,
-  };
-};
-const resolveLatestGuidedSettingsByTimestamp = ({
-  localSettings,
-  remoteSettings,
-}: {
-  localSettings: AvailabilitySettings;
-  remoteSettings: AvailabilitySettings;
-}) => {
-  const localTs = parseIsoTimestampToMs(localSettings.guidedSlotsUpdatedAt);
-  const remoteTs = parseIsoTimestampToMs(remoteSettings.guidedSlotsUpdatedAt);
-  const remoteWins = remoteTs > localTs;
-
-  return {
-    guidedSlotsEnabled: remoteWins
-      ? remoteSettings.guidedSlotsEnabled
-      : localSettings.guidedSlotsEnabled,
-    guidedSlotsStrategy: remoteWins
-      ? remoteSettings.guidedSlotsStrategy
-      : localSettings.guidedSlotsStrategy,
-    guidedSlotsVisibility: remoteWins
-      ? remoteSettings.guidedSlotsVisibility
-      : localSettings.guidedSlotsVisibility,
-    guidedSlotsUpdatedAt: remoteWins
-      ? remoteSettings.guidedSlotsUpdatedAt ?? localSettings.guidedSlotsUpdatedAt
-      : localSettings.guidedSlotsUpdatedAt ?? remoteSettings.guidedSlotsUpdatedAt,
-  };
-};
-const mergeAvailabilitySettingsWithCriticalTimestamps = (
-  localSettings: AvailabilitySettings,
-  incomingSettings: Partial<AvailabilitySettings> | null | undefined
-) => {
-  const normalizedIncoming = normalizeAvailabilitySettings(incomingSettings);
-  const guidedMerge = resolveLatestGuidedSettingsByTimestamp({
-    localSettings,
-    remoteSettings: normalizedIncoming,
-  });
-
-  return normalizeAvailabilitySettings({
-    ...normalizedIncoming,
-    guidedSlotsEnabled: guidedMerge.guidedSlotsEnabled,
-    guidedSlotsStrategy: guidedMerge.guidedSlotsStrategy,
-    guidedSlotsVisibility: guidedMerge.guidedSlotsVisibility,
-    guidedSlotsUpdatedAt: guidedMerge.guidedSlotsUpdatedAt,
-  });
-};
-const mergeWorkspaceWithCriticalTimestamps = (
-  localWorkspace: SalonWorkspace,
-  incomingWorkspace: Partial<SalonWorkspace> | null | undefined,
-  ownerEmail: string
-) => {
-  const normalizedIncoming = normalizeWorkspace(incomingWorkspace, ownerEmail);
-  const autoAcceptMerge = resolveLatestBooleanByTimestamp({
-    localValue: localWorkspace.autoAcceptBookingRequests,
-    localUpdatedAt: localWorkspace.autoAcceptBookingRequestsUpdatedAt,
-    remoteValue: normalizedIncoming.autoAcceptBookingRequests,
-    remoteUpdatedAt: normalizedIncoming.autoAcceptBookingRequestsUpdatedAt,
-  });
-
-  return normalizeWorkspace(
-    {
-      ...normalizedIncoming,
-      autoAcceptBookingRequests:
-        autoAcceptMerge.value ?? normalizedIncoming.autoAcceptBookingRequests,
-      autoAcceptBookingRequestsUpdatedAt: autoAcceptMerge.updatedAt,
-    },
-    ownerEmail
-  );
-};
-const areAvailabilitySettingsEquivalent = (
-  first: AvailabilitySettings,
-  second: AvailabilitySettings
-) => JSON.stringify(first) === JSON.stringify(second);
-const buildAvailabilitySettingsSyncSignature = (settings: AvailabilitySettings) =>
-  JSON.stringify(normalizeAvailabilitySettings(settings));
-const buildWorkspaceSyncSignature = (workspace: SalonWorkspace) =>
-  JSON.stringify(normalizeWorkspace(workspace, workspace.ownerEmail));
-const PORTAL_CRITICAL_OWNER_TOGGLE_GUARD_MS = PORTAL_REMOTE_OVERRIDE_GUARD_MS * 3;
-const PORTAL_REMOTE_REHYDRATION_SUPPRESS_PUBLISH_MS = 2000;
 const buildAppointmentIdentityKey = ({
   date,
   time,
@@ -247,28 +272,8 @@ const buildAppointmentIdentityKey = ({
     normalizeIdentityText(operatorName),
   ].join('::');
 
-const normalizePhoneForIdentity = (value?: string | null) => {
-  const digitsOnly = (value ?? '').replace(/\D+/g, '');
-  return digitsOnly.length > 10 ? digitsOnly.slice(-10) : digitsOnly;
-};
-const normalizeOptionalBoolean = (value: unknown): boolean | undefined => {
-  if (typeof value === 'boolean') {
-    return value;
-  }
-
-  if (typeof value === 'number') {
-    if (value === 1) return true;
-    if (value === 0) return false;
-  }
-
-  if (typeof value === 'string') {
-    const normalized = value.trim().toLowerCase();
-    if (['true', 't', '1', 'yes'].includes(normalized)) return true;
-    if (['false', 'f', '0', 'no'].includes(normalized)) return false;
-  }
-
-  return undefined;
-};
+const normalizePhoneForIdentity = (value?: string | null) =>
+  (value ?? '').replace(/\D+/g, '');
 const formatPushCustomerName = (value?: string | null) =>
   (value ?? '').trim().toLocaleUpperCase('it-IT');
 const scheduleDelayedPushFlush = (delayMs = 1200) => {
@@ -389,6 +394,43 @@ const buildCustomerIdentityKey = (item: {
 const buildScopedStorageKey = (baseKey: string, accountEmail: string) =>
   `${baseKey}__${normalizeAccountEmail(accountEmail)}`;
 
+const mergeWorkspacePreferenceOverrides = ({
+  workspace,
+  cashSectionDisabled,
+  autoAcceptBookingRequests,
+  autoAcceptBookingRequestsUpdatedAt,
+  customerReminderHoursBefore,
+  email,
+}: {
+  workspace: Partial<SalonWorkspace> | null | undefined;
+  cashSectionDisabled?: boolean;
+  autoAcceptBookingRequests?: boolean;
+  autoAcceptBookingRequestsUpdatedAt?: string;
+  customerReminderHoursBefore?: number;
+  email: string;
+}) =>
+  normalizeWorkspace(
+    {
+      ...workspace,
+      cashSectionDisabled:
+        typeof cashSectionDisabled === 'boolean'
+          ? cashSectionDisabled
+          : workspace?.cashSectionDisabled,
+      autoAcceptBookingRequests:
+        typeof autoAcceptBookingRequests === 'boolean'
+          ? autoAcceptBookingRequests
+          : workspace?.autoAcceptBookingRequests,
+      autoAcceptBookingRequestsUpdatedAt:
+        autoAcceptBookingRequestsUpdatedAt?.trim() ||
+        workspace?.autoAcceptBookingRequestsUpdatedAt,
+      customerReminderHoursBefore:
+        typeof customerReminderHoursBefore === 'number'
+          ? customerReminderHoursBefore
+          : workspace?.customerReminderHoursBefore,
+    },
+    email
+  );
+
 const isSupabaseAuthRateLimitError = (message?: string | null) => {
   const normalized = message?.trim().toLowerCase() ?? '';
   return (
@@ -438,6 +480,284 @@ const formatOwnerAuthError = (message?: string | null, fallback = 'Operazione no
 
   return normalized;
 };
+
+const formatOwnerBootstrapError = (
+  error: unknown,
+  fallback = 'Account collegato ma workspace backend non allineato.'
+) => {
+  if (isDeadlockError(error)) {
+    return 'Sto riallineando il salone. Riprova subito tra un attimo.';
+  }
+
+  if (isWorkspaceSlugConflictError(error)) {
+    return 'Sto riallineando automaticamente il codice salone. Riprova subito tra un attimo.';
+  }
+
+  const maybeError =
+    error && typeof error === 'object'
+      ? (error as { message?: string | null })
+      : null;
+
+  return maybeError?.message?.trim() || fallback;
+};
+
+const getOwnerBootstrapErrorMessage = (error: unknown) => {
+  if (!error || typeof error !== 'object') {
+    return '';
+  }
+
+  const maybeError = error as { message?: string | null };
+  return maybeError.message?.trim() ?? '';
+};
+
+const isOwnerBootstrapProfileRequirementError = (error: unknown) => {
+  const message = getOwnerBootstrapErrorMessage(error);
+
+  return (
+    message === 'activity_category_required' ||
+    message === 'street_line_required' ||
+    message === 'city_required' ||
+    message === 'postal_code_required'
+  );
+};
+
+const isMissingOwnerOnboardingColumnError = (error: unknown) => {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+
+  const maybeError = error as { code?: unknown; message?: unknown };
+  const normalizedCode = String(maybeError.code ?? '').trim();
+  const normalizedMessage = String(maybeError.message ?? '').trim().toLowerCase();
+
+  return (
+    normalizedCode === '42703' &&
+    normalizedMessage.includes('owner_profiles.onboarding_completed_at') &&
+    normalizedMessage.includes('does not exist')
+  );
+};
+
+const isWorkspaceSlugConflictError = (error: unknown) => {
+  const message = getOwnerBootstrapErrorMessage(error).toLowerCase();
+
+  return (
+    message.includes('workspaces_slug_key') ||
+    (message.includes('duplicate key value') && message.includes('slug'))
+  );
+};
+
+const isStatementTimeoutError = (error: unknown) => {
+  const message = getOwnerBootstrapErrorMessage(error).toLowerCase();
+
+  return (
+    message.includes('statement timeout') ||
+    message.includes('cancelling statement due to statement timeout')
+  );
+};
+
+const isSupabaseSchemaCacheLookupError = (error: unknown) => {
+  const message = getOwnerBootstrapErrorMessage(error).toLowerCase();
+
+  return (
+    message.includes('schema cache') ||
+    message.includes('could not query the database for the schema cache')
+  );
+};
+
+const shouldSilenceTransientSyncError = (error: unknown) =>
+  isSupabaseSchemaCacheLookupError(error) || isStatementTimeoutError(error);
+
+const wait = (ms: number) =>
+  new Promise<void>((resolve) => {
+    setTimeout(resolve, ms);
+  });
+
+const invokeBookingRequestStatusRpcWithSchemaRetry = async (
+  rpcName: 'accept_owner_booking_request_atomic_v2' | 'update_owner_booking_request_status_v2',
+  payload: Record<string, unknown>
+) => {
+  const firstResponse = await supabase.rpc(rpcName, payload);
+
+  if (!firstResponse.error || !isSupabaseSchemaCacheLookupError(firstResponse.error)) {
+    return firstResponse;
+  }
+
+  console.log(`Retry RPC ${rpcName} dopo schema cache Supabase:`, firstResponse.error);
+  await wait(450);
+
+  const secondResponse = await supabase.rpc(rpcName, payload);
+  if (!secondResponse.error || !isSupabaseSchemaCacheLookupError(secondResponse.error)) {
+    return secondResponse;
+  }
+
+  console.log(`Secondo retry RPC ${rpcName} dopo schema cache Supabase:`, secondResponse.error);
+  await wait(900);
+
+  return supabase.rpc(rpcName, payload);
+};
+
+const invokeRpcWithSchemaRetry = async <TResponse = unknown>(
+  rpcName: string,
+  payload: Record<string, unknown>
+) => {
+  const invokeRpc = () =>
+    Promise.resolve(
+      supabase.rpc(rpcName, payload)
+    ) as Promise<{ data: TResponse; error: PostgrestError | null }>;
+
+  const firstResponse = await invokeRpc();
+
+  if (!firstResponse.error || !isSupabaseSchemaCacheLookupError(firstResponse.error)) {
+    return firstResponse;
+  }
+
+  await wait(450);
+  const secondResponse = await invokeRpc();
+  if (!secondResponse.error || !isSupabaseSchemaCacheLookupError(secondResponse.error)) {
+    return secondResponse;
+  }
+
+  await wait(900);
+  return invokeRpc();
+};
+
+const isPublicBookingRequestRpcSignatureMismatch = (error: unknown) => {
+  const message = getOwnerBootstrapErrorMessage(error).toLowerCase();
+
+  return (
+    message.includes('public.create_public_booking_request') &&
+    (message.includes('could not find the function') ||
+      (message.includes('function') && message.includes('does not exist')) ||
+      message.includes('schema cache') ||
+      message.includes('p_required_role') ||
+      message.includes('p_operator_id') ||
+      message.includes('p_operator_name'))
+  );
+};
+
+const invokeCreatePublicBookingRequestRpcCompat = async (payload: {
+  p_salon_code: string;
+  p_requested_service_name: string;
+  p_requested_price: number;
+  p_requested_duration_minutes: number;
+  p_appointment_date: string;
+  p_appointment_time: string;
+  p_customer_name: string;
+  p_customer_surname: string;
+  p_customer_email: string;
+  p_customer_phone: string;
+  p_customer_instagram: string | null;
+  p_notes: string | null;
+  p_required_role: string | null;
+  p_operator_id: string | null;
+  p_operator_name: string | null;
+}) => {
+  const attemptPrimary = async () =>
+    supabase.rpc('create_public_booking_request', payload);
+
+  const firstResponse = await attemptPrimary();
+  if (!firstResponse.error) {
+    return firstResponse;
+  }
+
+  if (isSupabaseSchemaCacheLookupError(firstResponse.error)) {
+    await wait(450);
+    const secondResponse = await attemptPrimary();
+    if (!secondResponse.error) {
+      return secondResponse;
+    }
+
+    if (isSupabaseSchemaCacheLookupError(secondResponse.error)) {
+      await wait(900);
+      const thirdResponse = await attemptPrimary();
+      if (!thirdResponse.error) {
+        return thirdResponse;
+      }
+
+      if (!isPublicBookingRequestRpcSignatureMismatch(thirdResponse.error)) {
+        return thirdResponse;
+      }
+    } else if (!isPublicBookingRequestRpcSignatureMismatch(secondResponse.error)) {
+      return secondResponse;
+    }
+  } else if (!isPublicBookingRequestRpcSignatureMismatch(firstResponse.error)) {
+    return firstResponse;
+  }
+
+  const legacyWithoutRequiredRole = await supabase.rpc('create_public_booking_request', {
+    p_salon_code: payload.p_salon_code,
+    p_requested_service_name: payload.p_requested_service_name,
+    p_requested_price: payload.p_requested_price,
+    p_requested_duration_minutes: payload.p_requested_duration_minutes,
+    p_appointment_date: payload.p_appointment_date,
+    p_appointment_time: payload.p_appointment_time,
+    p_customer_name: payload.p_customer_name,
+    p_customer_surname: payload.p_customer_surname,
+    p_customer_email: payload.p_customer_email,
+    p_customer_phone: payload.p_customer_phone,
+    p_customer_instagram: payload.p_customer_instagram,
+    p_notes: payload.p_notes,
+    p_operator_id: payload.p_operator_id,
+    p_operator_name: payload.p_operator_name,
+  });
+
+  if (
+    !legacyWithoutRequiredRole.error ||
+    !isPublicBookingRequestRpcSignatureMismatch(legacyWithoutRequiredRole.error)
+  ) {
+    return legacyWithoutRequiredRole;
+  }
+
+  return supabase.rpc('create_public_booking_request', {
+    p_salon_code: payload.p_salon_code,
+    p_requested_service_name: payload.p_requested_service_name,
+    p_requested_price: payload.p_requested_price,
+    p_requested_duration_minutes: payload.p_requested_duration_minutes,
+    p_appointment_date: payload.p_appointment_date,
+    p_appointment_time: payload.p_appointment_time,
+    p_customer_name: payload.p_customer_name,
+    p_customer_surname: payload.p_customer_surname,
+    p_customer_email: payload.p_customer_email,
+    p_customer_phone: payload.p_customer_phone,
+    p_customer_instagram: payload.p_customer_instagram,
+    p_notes: payload.p_notes,
+  });
+};
+
+const buildOwnerBootstrapSlugCandidates = (salonName: string, email: string) => {
+  const normalizedEmail = normalizeAccountEmail(email);
+  const emailBase = normalizedEmail.split('@')[0] || 'salone';
+  const compactEmailBase = emailBase.replace(/[^a-z0-9]/gi, '').toLowerCase() || 'owner';
+  const nameBase = normalizeSalonCode(salonName) || normalizeSalonCode(emailBase) || 'salone';
+  const defaultCode = buildSalonCode(salonName, normalizedEmail);
+
+  return Array.from(
+    new Set(
+      [
+        defaultCode,
+        normalizeSalonCode(`${nameBase}-${compactEmailBase.slice(0, 10)}`),
+        normalizeSalonCode(`${nameBase}-${compactEmailBase.slice(-10)}`),
+        normalizeSalonCode(`${nameBase}-${compactEmailBase}`),
+      ].filter(Boolean)
+    )
+  );
+};
+
+const hasCompleteOwnerBootstrapProfile = ({
+  activityCategory,
+  streetLine,
+  city,
+  postalCode,
+}: {
+  activityCategory?: string | null;
+  streetLine?: string | null;
+  city?: string | null;
+  postalCode?: string | null;
+}) =>
+  !!activityCategory?.trim() &&
+  !!streetLine?.trim() &&
+  !!city?.trim() &&
+  !!postalCode?.trim();
 
 const isDeadlockError = (error: unknown) => {
   if (!error || typeof error !== 'object') return false;
@@ -504,53 +824,18 @@ const getBookingRequestPushStatusLabel = (
       ? 'Rifiutata'
       : 'Annullata';
 
-const normalizeBookingRequestDbStatus = (
-  status:
-    | 'Accettata'
-    | 'Rifiutata'
-    | 'Annullata'
-    | 'accepted'
-    | 'rejected'
-    | 'cancelled'
-    | string
-    | null
-    | undefined
-): 'accepted' | 'rejected' | 'cancelled' | null => {
-  const normalized = String(status ?? '')
-    .trim()
-    .toLowerCase();
-
-  switch (normalized) {
-    case 'accettata':
-    case 'accepted':
-      return 'accepted';
-    case 'rifiutata':
-    case 'rejected':
-      return 'rejected';
-    case 'annullata':
-    case 'cancelled':
-      return 'cancelled';
-    default:
-      return null;
-  }
-};
-
 const buildBookingRequestStatusPushCopy = ({
   status,
   serviceName,
-  roleName,
   appointmentDate,
   appointmentTime,
   operatorName,
-  customerName,
 }: {
   status: 'Accettata' | 'Rifiutata' | 'Annullata' | 'accepted' | 'rejected' | 'cancelled';
   serviceName?: string | null;
-  roleName?: string | null;
   appointmentDate?: string | null;
   appointmentTime?: string | null;
   operatorName?: string | null;
-  customerName?: string | null;
 }) => {
   const statusLabel = getBookingRequestPushStatusLabel(status);
   const title =
@@ -560,9 +845,7 @@ const buildBookingRequestStatusPushCopy = ({
         ? 'Prenotazione Rifiutata'
         : 'Prenotazione Annullata';
   const details = [
-    customerName?.trim() ? `Cliente: ${formatPushCustomerName(customerName)}` : null,
     serviceName?.trim() ? `Servizio: ${serviceName.trim()}` : null,
-    roleName?.trim() ? `Mestiere: ${roleName.trim()}` : null,
     formatPushDateTimeLabel(appointmentDate, appointmentTime)
       ? `Appuntamento: ${formatPushDateTimeLabel(appointmentDate, appointmentTime)}`
       : null,
@@ -626,33 +909,35 @@ type OwnerAccount = {
   createdAt: string;
 };
 
-const buildWorkspaceProfileFromOwnerAccount = (
-  account?: OwnerAccount | null
-): Partial<SalonWorkspace> => {
+const buildWorkspaceSeedFromOwnerAccount = (account?: OwnerAccount | null) => {
   if (!account) {
-    return {};
+    return null;
   }
 
-  const formattedAddress = formatSalonAddress({
-    streetType: '',
-    streetName: account.streetLine.trim().toUpperCase(),
-    streetNumber: '',
-    city: account.city.trim().toUpperCase(),
-    postalCode: account.postalCode.trim(),
-    salonAddress: '',
-  });
+  const streetLine = account.streetLine.trim().toUpperCase();
+  const city = account.city.trim().toUpperCase();
+  const postalCode = account.postalCode.trim();
+  const activityCategory = account.activityCategory.trim().toUpperCase();
 
   return {
+    ownerEmail: normalizeAccountEmail(account.email),
     salonName: account.salonName.trim(),
     businessPhone: account.businessPhone.trim(),
-    activityCategory: account.activityCategory.trim().toUpperCase(),
+    activityCategory,
     streetType: '',
-    streetName: account.streetLine.trim().toUpperCase(),
+    streetName: streetLine,
     streetNumber: '',
-    city: account.city.trim().toUpperCase(),
-    postalCode: account.postalCode.trim(),
-    salonAddress: formattedAddress,
-  };
+    city,
+    postalCode,
+    salonAddress: formatSalonAddress({
+      streetType: '',
+      streetName: streetLine,
+      streetNumber: '',
+      city,
+      postalCode,
+      salonAddress: '',
+    }),
+  } satisfies Partial<SalonWorkspace>;
 };
 
 type RemoteWorkspaceRow = {
@@ -660,6 +945,12 @@ type RemoteWorkspaceRow = {
   slug: string;
   salon_name: string;
   owner_email: string;
+  owner_phone: string | null;
+  activity_category: string | null;
+  street_name: string | null;
+  city: string | null;
+  postal_code: string | null;
+  cash_section_disabled: boolean | null;
   customer_reminder_hours_before: number | null;
   subscription_plan: SalonWorkspace['subscriptionPlan'];
   subscription_status: SalonWorkspace['subscriptionStatus'];
@@ -699,7 +990,8 @@ const normalizeClienti = (items: Cliente[]) =>
         ? item.maxFutureAppointments
         : null,
     maxFutureAppointmentsMode:
-      item.maxFutureAppointmentsMode === 'monthly' || item.maxFutureAppointmentsMode === 'total_future'
+      item.maxFutureAppointmentsMode === 'monthly' ||
+      item.maxFutureAppointmentsMode === 'total_future'
         ? item.maxFutureAppointmentsMode
         : null,
     maxDailyAppointments:
@@ -891,62 +1183,6 @@ const mergeClientiCollections = (localItems: Cliente[], remoteItems: Cliente[]) 
   return Array.from(merged.values());
 };
 
-const doesFrontendRequestMatchCliente = (
-  richiesta: Pick<RichiestaPrenotazione, 'nome' | 'cognome' | 'email' | 'telefono'>,
-  cliente: Pick<Cliente, 'nome' | 'email' | 'telefono'>
-) => {
-  const requestEmail = normalizeAccountEmail(richiesta.email);
-  const customerEmail = normalizeAccountEmail(cliente.email);
-  if (requestEmail && customerEmail && requestEmail === customerEmail) {
-    return true;
-  }
-
-  const requestPhone = normalizePhoneForIdentity(richiesta.telefono);
-  const customerPhone = normalizePhoneForIdentity(cliente.telefono);
-  if (requestPhone && customerPhone && requestPhone === customerPhone) {
-    return true;
-  }
-
-  const requestFullName = `${richiesta.nome} ${richiesta.cognome}`.trim();
-  return matchesCustomerDisplayName(cliente.nome, requestFullName);
-};
-
-const enrichClientiWithFrontendRequestSignals = (
-  clientiItems: Cliente[],
-  richiesteItems: RichiestaPrenotazione[]
-) => {
-  const normalizedRichieste = normalizeRichiestePrenotazione(richiesteItems).filter(
-    (item) => (item.origine ?? 'frontend') === 'frontend'
-  );
-
-  return normalizeClienti(clientiItems).map((cliente) => {
-    const matchedRequests = normalizedRichieste.filter((item) =>
-      doesFrontendRequestMatchCliente(item, cliente)
-    );
-
-    if (matchedRequests.length === 0) {
-      return cliente;
-    }
-
-    const cancelledByClienteCount = matchedRequests.filter(
-      (item) => item.stato === 'Annullata' && item.cancellationSource === 'cliente'
-    ).length;
-    const hasUnreadFrontendSignal = matchedRequests.some(
-      (item) =>
-        item.viewedBySalon !== true &&
-        (item.stato === 'In attesa' ||
-          (item.stato === 'Annullata' && item.cancellationSource === 'cliente'))
-    );
-
-    return {
-      ...cliente,
-      fonte: 'frontend' as const,
-      viewedBySalon: hasUnreadFrontendSignal ? false : cliente.viewedBySalon,
-      annullamentiCount: Math.max(cliente.annullamentiCount ?? 0, cancelledByClienteCount),
-    };
-  });
-};
-
 type Appuntamento = {
   id: string;
   data?: string;
@@ -955,7 +1191,6 @@ type Appuntamento = {
   servizio: string;
   prezzo: number;
   durataMinuti?: number;
-  mestiereRichiesto?: string;
   operatoreId?: string;
   operatoreNome?: string;
   macchinarioIds?: string[];
@@ -982,7 +1217,6 @@ const normalizeAppuntamenti = (items: Appuntamento[]) =>
   items.map((item) => ({
     ...item,
     data: item.data ?? getTodayDateString(),
-    mestiereRichiesto: item.mestiereRichiesto?.trim() ?? '',
     operatoreId: item.operatoreId ?? '',
     operatoreNome: item.operatoreNome ?? '',
     macchinarioIds: normalizeStringIdArray(item.macchinarioIds),
@@ -1100,6 +1334,15 @@ type Evento = {
   note?: string;
 };
 
+const normalizeEventi = (items: Evento[]) =>
+  items.map((item, index) => ({
+    id: item.id?.trim() || `evento-${index}`,
+    titolo: item.titolo?.trim() ?? '',
+    data: item.data?.trim() ?? '',
+    ora: item.ora?.trim() ?? '',
+    note: item.note?.trim() ?? '',
+  }));
+
 type RichiestaPrenotazione = {
   id: string;
   data: string;
@@ -1135,14 +1378,13 @@ const normalizeRichiestePrenotazione = (items: RichiestaPrenotazione[]) =>
     macchinarioIds: normalizeStringIdArray(item.macchinarioIds),
     macchinarioNomi: normalizeStringIdArray(item.macchinarioNomi),
     origine: item.origine ?? 'frontend',
-    viewedByCliente: normalizeOptionalBoolean(item.viewedByCliente) ?? item.stato === 'In attesa',
+    viewedByCliente: item.viewedByCliente ?? item.stato === 'In attesa',
     viewedBySalon:
-      normalizeOptionalBoolean(item.viewedBySalon) ??
+      item.viewedBySalon ??
       !(item.stato === 'In attesa' || item.stato === 'Annullata'),
     cancellationSource:
       item.stato === 'Annullata'
-        ? item.cancellationSource ??
-          (item.origine === 'backoffice' ? 'salone' : item.viewedBySalon === false ? 'cliente' : 'salone')
+        ? item.cancellationSource ?? (item.viewedByCliente === true ? 'cliente' : 'salone')
         : undefined,
   }));
 
@@ -1153,6 +1395,21 @@ const buildRichiestaMergeKey = (item: RichiestaPrenotazione) => {
   const fullName = `${item.nome} ${item.cognome}`.trim().toLowerCase();
   return `${date}|${time}|${service}|${fullName}`;
 };
+
+const buildRichiestaMergeKeyFromValues = ({
+  data,
+  ora,
+  servizio,
+  fullName,
+}: {
+  data?: string | null;
+  ora?: string | null;
+  servizio?: string | null;
+  fullName?: string | null;
+}) =>
+  `${(data ?? '').trim()}|${normalizeIdentityText(ora)}|${normalizeIdentityText(
+    servizio
+  )}|${normalizeIdentityText(fullName)}`;
 
 const mergeRichiesteCollections = (
   localItems: RichiestaPrenotazione[],
@@ -1188,72 +1445,25 @@ type Servizio = {
   macchinarioIds?: string[];
 };
 
-const buildSafeEntityId = (prefix: string) =>
-  `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-
-const normalizeServiceIdFragment = (value?: string | null) =>
-  (value ?? '')
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, '-')
-    .replace(/[^a-z0-9-]+/g, '')
-    .replace(/-{2,}/g, '-')
-    .replace(/^-+|-+$/g, '');
-
-const buildUniqueServiceId = (
-  item: Servizio,
-  seenIds: Set<string>,
-  duplicateIndex: number
-) => {
-  const rawId = item.id?.trim() || buildSafeEntityId('servizio');
-
-  if (!seenIds.has(rawId)) {
-    seenIds.add(rawId);
-    return rawId;
-  }
-
-  const nameFragment = normalizeServiceIdFragment(item.nome) || 'dup';
-  let candidate = `${rawId}-${nameFragment}`;
-
-  if (duplicateIndex > 0) {
-    candidate = `${candidate}-${duplicateIndex + 1}`;
-  }
-
-  let attempt = 1;
-  while (seenIds.has(candidate)) {
-    attempt += 1;
-    candidate = `${rawId}-${nameFragment}-${duplicateIndex + attempt}`;
-  }
-
-  seenIds.add(candidate);
-  return candidate;
-};
-
-const normalizeServizi = (items: Servizio[]) => {
-  const seenIds = new Set<string>();
-
-  return items
-    .filter((item) => item.nome.trim() !== '' && (item.mestiereRichiesto?.trim() ?? '') !== '')
-    .map((item, index) => ({
-      ...item,
-      id: buildUniqueServiceId(item, seenIds, index),
-      prezzoOriginale:
-        typeof item.prezzoOriginale === 'number' && item.prezzoOriginale > item.prezzo
-          ? item.prezzoOriginale
-          : undefined,
-      durataMinuti: item.durataMinuti ?? 60,
-      scontoValidoDal:
-        typeof item.scontoValidoDal === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(item.scontoValidoDal)
-          ? item.scontoValidoDal
-          : undefined,
-      scontoValidoAl:
-        typeof item.scontoValidoAl === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(item.scontoValidoAl)
-          ? item.scontoValidoAl
-          : undefined,
-      mestiereRichiesto: item.mestiereRichiesto?.trim() ?? '',
-      macchinarioIds: normalizeStringIdArray(item.macchinarioIds),
-    }));
-};
+const normalizeServizi = (items: Servizio[]) =>
+  items.map((item) => ({
+    ...item,
+    prezzoOriginale:
+      typeof item.prezzoOriginale === 'number' && item.prezzoOriginale > item.prezzo
+        ? item.prezzoOriginale
+        : undefined,
+    durataMinuti: item.durataMinuti ?? 60,
+    scontoValidoDal:
+      typeof item.scontoValidoDal === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(item.scontoValidoDal)
+        ? item.scontoValidoDal
+        : undefined,
+    scontoValidoAl:
+      typeof item.scontoValidoAl === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(item.scontoValidoAl)
+        ? item.scontoValidoAl
+        : undefined,
+    mestiereRichiesto: item.mestiereRichiesto?.trim() ?? '',
+    macchinarioIds: normalizeStringIdArray(item.macchinarioIds),
+  }));
 
 const mergeServiziCollections = (localItems: Servizio[], remoteItems: Servizio[]) => {
   const merged = new Map<string, Servizio>();
@@ -1399,23 +1609,6 @@ const normalizeOperatori = (items: Operatore[]) =>
     availability: normalizeOperatorAvailability(item.availability),
   }));
 
-const preferNonEmptyOperatoriSnapshot = (
-  localItems: Operatore[],
-  remoteItems: Operatore[]
-) => {
-  const normalizedLocal = normalizeOperatori(localItems);
-  const normalizedRemote = normalizeOperatori(remoteItems);
-
-  // Surgical guard: when the owner has just edited operators, the portal snapshot
-  // can briefly lag behind and return an empty array. In that case we keep the
-  // local operator list instead of wiping it from memory.
-  if (normalizedRemote.length === 0 && normalizedLocal.length > 0) {
-    return normalizedLocal;
-  }
-
-  return normalizedRemote;
-};
-
 type Macchinario = {
   id: string;
   nome: string;
@@ -1435,6 +1628,107 @@ const normalizeMacchinari = (items: Macchinario[]) =>
     attivo: item.attivo ?? true,
   }));
 
+type OwnerAppSnapshotPayload = {
+  workspace?: Partial<SalonWorkspace>;
+  clienti?: Cliente[];
+  appuntamenti?: Appuntamento[];
+  movimenti?: Movimento[];
+  servizi?: Servizio[];
+  operatori?: Operatore[];
+  macchinari?: Macchinario[];
+  carteCollegate?: CartaCollegata[];
+  eventi?: Evento[];
+  richiestePrenotazione?: RichiestaPrenotazione[];
+  availabilitySettings?: AvailabilitySettings;
+  messaggioEventoTemplate?: string;
+  serviceCardColorOverrides?: Record<string, string>;
+  roleCardColorOverrides?: Record<string, string>;
+};
+
+const normalizeOwnerAppSnapshotPayload = (
+  payload: Record<string, unknown> | null | undefined
+): OwnerAppSnapshotPayload | null => {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return null;
+  }
+
+  return {
+    workspace:
+      payload.workspace && typeof payload.workspace === 'object' && !Array.isArray(payload.workspace)
+        ? (payload.workspace as Partial<SalonWorkspace>)
+        : undefined,
+    clienti: Array.isArray(payload.clienti) ? normalizeClienti(payload.clienti as Cliente[]) : undefined,
+    appuntamenti: Array.isArray(payload.appuntamenti)
+      ? normalizeAppuntamenti(payload.appuntamenti as Appuntamento[])
+      : undefined,
+    movimenti: Array.isArray(payload.movimenti)
+      ? normalizeMovimenti(payload.movimenti as Movimento[])
+      : undefined,
+    servizi: Array.isArray(payload.servizi) ? normalizeServizi(payload.servizi as Servizio[]) : undefined,
+    operatori: Array.isArray(payload.operatori)
+      ? normalizeOperatori(payload.operatori as Operatore[])
+      : undefined,
+    macchinari: Array.isArray(payload.macchinari)
+      ? normalizeMacchinari(payload.macchinari as Macchinario[])
+      : undefined,
+    carteCollegate: Array.isArray(payload.carteCollegate)
+      ? normalizeCarte(payload.carteCollegate as CartaCollegata[])
+      : undefined,
+    eventi: Array.isArray(payload.eventi) ? normalizeEventi(payload.eventi as Evento[]) : undefined,
+    richiestePrenotazione: Array.isArray(payload.richiestePrenotazione)
+      ? normalizeRichiestePrenotazione(payload.richiestePrenotazione as RichiestaPrenotazione[])
+      : undefined,
+    availabilitySettings:
+      payload.availabilitySettings && typeof payload.availabilitySettings === 'object'
+        ? normalizeAvailabilitySettings(payload.availabilitySettings as AvailabilitySettings)
+        : undefined,
+    messaggioEventoTemplate:
+      typeof payload.messaggioEventoTemplate === 'string'
+        ? payload.messaggioEventoTemplate
+        : undefined,
+    serviceCardColorOverrides:
+      payload.serviceCardColorOverrides && typeof payload.serviceCardColorOverrides === 'object'
+        ? normalizeServiceColorOverrideMap(
+            payload.serviceCardColorOverrides as Record<string, string>,
+            Array.isArray(payload.servizi) ? normalizeServizi(payload.servizi as Servizio[]) : []
+          )
+        : undefined,
+    roleCardColorOverrides:
+      payload.roleCardColorOverrides && typeof payload.roleCardColorOverrides === 'object'
+        ? normalizeRoleColorOverrideMap(payload.roleCardColorOverrides as Record<string, string>)
+        : undefined,
+  };
+};
+
+const movementMethodToRemote = (
+  value?: Movimento['metodo']
+): 'cash' | 'card' | 'bank_transfer' | null => {
+  if (value === 'Contanti') return 'cash';
+  if (value === 'Carta') return 'card';
+  if (value === 'Bonifico') return 'bank_transfer';
+  return null;
+};
+
+const movementMethodFromRemote = (value?: string | null): Movimento['metodo'] | undefined => {
+  if (value === 'cash') return 'Contanti';
+  if (value === 'card') return 'Carta';
+  if (value === 'bank_transfer') return 'Bonifico';
+  return undefined;
+};
+
+const buildMovementSemanticKey = (item: Pick<Movimento, 'descrizione' | 'importo' | 'createdAt'>) =>
+  [
+    item.descrizione.trim().toLowerCase(),
+    item.importo.toFixed(2),
+    deriveMovementCreatedAt(item as Movimento),
+  ].join('|');
+
+const buildCardSemanticKey = (item: Pick<CartaCollegata, 'nome' | 'circuito' | 'ultime4'>) =>
+  [item.nome.trim().toLowerCase(), item.circuito.trim().toLowerCase(), item.ultime4.trim()].join('|');
+
+const buildEventSemanticKey = (item: Pick<Evento, 'titolo' | 'data' | 'ora'>) =>
+  [item.titolo.trim().toLowerCase(), item.data.trim(), item.ora.trim()].join('|');
+
 type AppContextType = {
   appLanguage: AppLanguage;
   setAppLanguage: React.Dispatch<React.SetStateAction<AppLanguage>>;
@@ -1447,9 +1741,13 @@ type AppContextType = {
   toggleBiometricEnabled: (enabled: boolean) => Promise<void>;
   authenticateBiometricIdentity: () => Promise<{ ok: boolean; error?: string }>;
   hasCompletedOnboarding: boolean;
+  onboardingPending: boolean;
   showOnboarding: boolean;
-  completeOnboarding: () => void;
+  setOnboardingReady: (ready: boolean) => void;
+  completeOnboarding: () => Promise<void>;
   reopenOnboarding: () => void;
+  ownerProfileNeedsCompletion: boolean;
+  consumeOwnerProfileNeedsCompletion: () => boolean;
   unlockOwnerAccountWithBiometric: () => Promise<{ ok: boolean; error?: string }>;
   loginOwnerAccount: (
     email: string,
@@ -1498,6 +1796,16 @@ type AppContextType = {
   workspaceAccessAllowed: boolean;
   clienti: Cliente[];
   setClienti: React.Dispatch<React.SetStateAction<Cliente[]>>;
+  createClientePersisted: (customer: {
+    nome: string;
+    telefono: string;
+    email?: string;
+    instagram?: string;
+    birthday?: string;
+    maxFutureAppointments?: number | null;
+    maxFutureAppointmentsMode?: 'total_future' | 'monthly' | null;
+    maxDailyAppointments?: number | null;
+  }) => Promise<{ ok: boolean; error?: string }>;
   updateClientePersisted: (
     currentCustomer: {
       id: string;
@@ -1519,6 +1827,20 @@ type AppContextType = {
     telefono?: string;
     email?: string;
   }) => Promise<{ ok: boolean; error?: string }>;
+  createMovimentoPersisted: (movement: {
+    descrizione: string;
+    importo: number;
+    metodo?: Movimento['metodo'];
+    cartaLabel?: string;
+    createdAt?: string;
+  }) => Promise<{ ok: boolean; error?: string }>;
+  updateMovimentoPersisted: (
+    movementId: string,
+    updates: {
+      metodo?: Movimento['metodo'];
+      cartaLabel?: string;
+    }
+  ) => Promise<{ ok: boolean; error?: string }>;
   appuntamenti: Appuntamento[];
   setAppuntamenti: React.Dispatch<React.SetStateAction<Appuntamento[]>>;
   movimenti: Movimento[];
@@ -1531,6 +1853,14 @@ type AppContextType = {
   setMacchinari: React.Dispatch<React.SetStateAction<Macchinario[]>>;
   carteCollegate: CartaCollegata[];
   setCarteCollegate: React.Dispatch<React.SetStateAction<CartaCollegata[]>>;
+  createCartaPersisted: (card: {
+    nome: string;
+    circuito: string;
+    ultime4: string;
+    predefinita?: boolean;
+  }) => Promise<{ ok: boolean; cardId?: string; error?: string }>;
+  setDefaultCartaPersisted: (cardId: string) => Promise<{ ok: boolean; error?: string }>;
+  deleteCartaPersisted: (cardId: string) => Promise<{ ok: boolean; error?: string }>;
   eventi: Evento[];
   setEventi: React.Dispatch<React.SetStateAction<Evento[]>>;
   richiestePrenotazione: RichiestaPrenotazione[];
@@ -1568,6 +1898,7 @@ type AppContextType = {
     | {
         ok: false;
         reason: 'duplicate_email' | 'duplicate_phone' | 'duplicate_email_phone' | 'save_failed';
+        detail?: string;
       }
   >;
   addBookingRequestForSalon: (
@@ -1640,7 +1971,6 @@ type AppContextType = {
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  const isExpoGoRuntime = Constants.executionEnvironment === 'storeClient';
   const [appLanguage, setAppLanguage] = useState<AppLanguage>('it');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [ownerPasswordRecoveryActive, setOwnerPasswordRecoveryActive] = useState(false);
@@ -1654,11 +1984,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [biometricAvailable, setBiometricAvailable] = useState(false);
   const [biometricType, setBiometricType] = useState<'faceid' | 'fingerprint' | 'none'>('none');
   const [hasCompletedOnboarding, setHasCompletedOnboarding] = useState(false);
-  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [onboardingPending, setOnboardingPending] = useState(false);
+  const [manualOnboardingVisible, setManualOnboardingVisible] = useState(false);
+  const [onboardingReady, setOnboardingReady] = useState(false);
+  const onboardingSessionLockedEmailRef = useRef('');
+  const [ownerProfileNeedsCompletion, setOwnerProfileNeedsCompletion] = useState(false);
   const [salonAccountEmail, setSalonAccountEmail] = useState('');
   const [salonWorkspace, setSalonWorkspace] = useState<SalonWorkspace>(
     createDefaultWorkspace('')
   );
+  const salonWorkspaceRef = useRef<SalonWorkspace>(createDefaultWorkspace(''));
   const [clienti, setClienti] = useState<Cliente[]>(normalizeClienti([]));
   const [appuntamenti, setAppuntamenti] = useState<Appuntamento[]>(normalizeAppuntamenti([]));
   const [movimenti, setMovimenti] = useState<Movimento[]>(normalizeMovimenti([]));
@@ -1682,7 +2017,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [hasInitializedAuth, setHasInitializedAuth] = useState(false);
   const [pendingBiometricUnlock, setPendingBiometricUnlock] = useState(false);
   const pendingBiometricUnlockRef = React.useRef(false);
-  const pendingRegistrationOnboardingRef = React.useRef(false);
+  const onboardingServerSyncInFlightRef = React.useRef<Promise<boolean> | null>(null);
   const recentlyDeletedAppointmentKeysRef = React.useRef<Map<string, number>>(new Map());
   const recentlyCreatedAppointmentKeysRef = React.useRef<Map<string, number>>(new Map());
   const recentlyMovedAppointmentIdsRef = React.useRef<Map<string, number>>(new Map());
@@ -1690,29 +2025,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const previousCustomerIdentityKeysRef = React.useRef<Set<string>>(new Set());
   const portalPublishQueueRef = React.useRef<Promise<void>>(Promise.resolve());
   const portalPublishDebounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-  const suppressAutoPortalPublishUntilRef = React.useRef(0);
-  const ownerPortalBootstrapReadyRef = React.useRef(false);
+  const servicesBackendSyncDebounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastServicesBackendSyncSignatureRef = React.useRef('');
+  const cashBackendSyncDebounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const eventsBackendSyncDebounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const ownerSnapshotSyncDebounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onboardingSyncRequestSeqRef = React.useRef(0);
+  const lastCashBackendSyncSignatureRef = React.useRef('');
+  const lastCardsBackendSyncSignatureRef = React.useRef('');
+  const lastEventsBackendSyncSignatureRef = React.useRef('');
+  const lastTemplateBackendSyncValueRef = React.useRef('');
+  const lastOwnerSnapshotSyncSignatureRef = React.useRef('');
   const legacyOperatorBackfillSignatureRef = React.useRef('');
   const salonCapacityBackfillSignatureRef = React.useRef('');
-  const latestSalonWorkspaceRef = React.useRef<SalonWorkspace>(createDefaultWorkspace(''));
-  const latestAvailabilitySettingsRef = React.useRef<AvailabilitySettings>(
-    normalizeAvailabilitySettings()
-  );
-  const latestGuidedSlotsUpdatedAtRef = React.useRef<string | undefined>(undefined);
-  const lastLocalWorkspaceMutationAtRef = React.useRef(0);
-  const lastLocalAvailabilityMutationAtRef = React.useRef(0);
-  const pendingWorkspaceSyncRef = React.useRef<{ signature: string; at: number } | null>(null);
-  const pendingAvailabilitySyncRef = React.useRef<{ signature: string; at: number } | null>(null);
-  const guidedSettingsPersistQueueRef = React.useRef<Promise<void>>(Promise.resolve());
 
   useEffect(() => {
-    latestSalonWorkspaceRef.current = salonWorkspace;
+    salonWorkspaceRef.current = salonWorkspace;
   }, [salonWorkspace]);
-
-  useEffect(() => {
-    latestAvailabilitySettingsRef.current = availabilitySettings;
-    latestGuidedSlotsUpdatedAtRef.current = availabilitySettings.guidedSlotsUpdatedAt;
-  }, [availabilitySettings]);
 
   // Ripristina il guard delle cancellazioni dal disco (sopravvive al Fast Refresh di Expo Go)
   useEffect(() => {
@@ -1723,21 +2052,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const now = Date.now();
         const threshold = now - RECENTLY_DELETED_APPOINTMENT_GUARD_MS;
         const map = recentlyDeletedAppointmentKeysRef.current;
-        parsed.forEach(([key, ts]) => {
-          if (ts > threshold) map.set(key, ts);
-        });
-      })
-      .catch(() => null);
-  }, []);
-
-  useEffect(() => {
-    AsyncStorage.getItem(STORAGE_KEYS.recently_deleted_customers)
-      .then((raw) => {
-        if (!raw) return;
-        const parsed = JSON.parse(raw) as [string, number][];
-        const now = Date.now();
-        const threshold = now - RECENTLY_DELETED_CUSTOMER_GUARD_MS;
-        const map = recentlyDeletedCustomerKeysRef.current;
         parsed.forEach(([key, ts]) => {
           if (ts > threshold) map.set(key, ts);
         });
@@ -1771,141 +2085,742 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const fetchPortalSnapshotWithRetry = React.useCallback(
-    async (salonCode: string) => {
-      try {
-        return await runWithDeadlockRetry(
-          () => fetchClientPortalSnapshot(salonCode),
-          'Caricamento snapshot portale cliente'
-        );
-      } catch (error) {
-        const errorMessage =
-          error instanceof Error ? error.message.trim().toLowerCase() : String(error).trim().toLowerCase();
-
-        if (errorMessage.includes('client_portal_snapshot_timeout')) {
-          console.log('Snapshot portale cliente in timeout, continuo con fallback locale.');
-          return null;
-        }
-
-        throw error;
-      }
-    },
+    (salonCode: string) =>
+      runWithDeadlockRetry(
+        () => fetchClientPortalSnapshot(salonCode),
+        'Caricamento snapshot portale cliente'
+      ),
     [runWithDeadlockRetry]
   );
 
-  const fetchPortalAvailabilitySettingsWithRetry = React.useCallback(
-    async (salonCode: string) => {
-      try {
-        return await runWithDeadlockRetry(
-          () => fetchClientPortalAvailabilitySettings(salonCode),
-          'Caricamento availability portale cliente'
-        );
-      } catch (error) {
-        const errorMessage =
-          error instanceof Error ? error.message.trim().toLowerCase() : String(error).trim().toLowerCase();
-
-        if (errorMessage.includes('client_portal_availability_timeout')) {
-          console.log('Availability portale cliente in timeout, continuo con fallback locale.');
-          return null;
-        }
-
-        throw error;
-      }
-    },
-    [runWithDeadlockRetry]
-  );
-
-  const applyRemoteAvailabilitySettings = React.useCallback(
-    (incomingSettings: Partial<AvailabilitySettings> | null | undefined) => {
-      const normalizedRemoteAvailabilitySettings =
-        mergeAvailabilitySettingsWithCriticalTimestamps(
-          latestAvailabilitySettingsRef.current,
-          incomingSettings
-        );
-
+  const syncServicesTableForWorkspace = React.useCallback(
+    async (workspaceId: string, serviceItems: Servizio[]) => {
       if (
-        areAvailabilitySettingsEquivalent(
-          latestAvailabilitySettingsRef.current,
-          normalizedRemoteAvailabilitySettings
-        )
+        !isAuthenticated ||
+        !hasInitializedAuth ||
+        !salonAccountEmail ||
+        !isWorkspaceAccessible(salonWorkspace) ||
+        !isUuidValue(workspaceId)
       ) {
-        pendingAvailabilitySyncRef.current = null;
-        return normalizedRemoteAvailabilitySettings;
+        return;
       }
 
-      suppressAutoPortalPublishUntilRef.current =
-        Date.now() + PORTAL_REMOTE_REHYDRATION_SUPPRESS_PUBLISH_MS;
-      pendingAvailabilitySyncRef.current = null;
-      latestAvailabilitySettingsRef.current = normalizedRemoteAvailabilitySettings;
-      setAvailabilitySettings(normalizedRemoteAvailabilitySettings);
-      return normalizedRemoteAvailabilitySettings;
+      const normalizedServices = normalizeServizi(serviceItems);
+      const syncSignature = JSON.stringify({
+        workspaceId,
+        services: normalizedServices
+          .map((item) => ({
+            id: isUuidValue(item.id) ? item.id : '',
+            nome: item.nome.trim(),
+            prezzo: Number(item.prezzo ?? 0),
+            durataMinuti: item.durataMinuti ?? 60,
+          }))
+          .sort((first, second) => first.nome.localeCompare(second.nome, 'it')),
+      });
+
+      if (lastServicesBackendSyncSignatureRef.current === syncSignature) {
+        return;
+      }
+
+      type BackendServiceRow = {
+        id: string;
+        workspace_id: string;
+        name: string;
+        price: number;
+        duration_minutes: number;
+      };
+
+      const { data: existingRows, error: existingRowsError } = await supabase
+        .from('services')
+        .select('id, workspace_id, name, price, duration_minutes')
+        .eq('workspace_id', workspaceId);
+
+      if (existingRowsError) {
+        throw existingRowsError;
+      }
+
+      const currentRows = (existingRows ?? []) as BackendServiceRow[];
+      const existingById = new Map(currentRows.map((item) => [item.id, item]));
+      const existingByName = new Map(
+        currentRows.map((item) => [normalizeIdentityText(item.name), item])
+      );
+      const matchedExistingIds = new Set<string>();
+      const rowsToUpsert = normalizedServices.map((item) => {
+        const trimmedName = item.nome.trim();
+        const matchedRow =
+          (isUuidValue(item.id) ? existingById.get(item.id) : null) ??
+          existingByName.get(normalizeIdentityText(trimmedName)) ??
+          null;
+
+        if (matchedRow?.id) {
+          matchedExistingIds.add(matchedRow.id);
+        }
+
+        return {
+          id: matchedRow?.id,
+          workspace_id: workspaceId,
+          name: trimmedName,
+          price: Number(item.prezzo ?? 0),
+          duration_minutes: item.durataMinuti ?? 60,
+        };
+      });
+
+      const rowsToInsert = rowsToUpsert.filter((item) => !item.id).map(({ id: _id, ...item }) => item);
+      const rowsToUpdate = rowsToUpsert.filter(
+        (item): item is BackendServiceRow => typeof item.id === 'string' && item.id.trim().length > 0
+      );
+      const rowsToDelete = currentRows
+        .filter((item) => !matchedExistingIds.has(item.id))
+        .map((item) => item.id);
+
+      if (rowsToUpdate.length > 0) {
+        const { error } = await supabase.from('services').upsert(rowsToUpdate, {
+          onConflict: 'id',
+        });
+
+        if (error) {
+          throw error;
+        }
+      }
+
+      if (rowsToInsert.length > 0) {
+        const { error } = await supabase.from('services').insert(rowsToInsert);
+
+        if (error) {
+          throw error;
+        }
+      }
+
+      if (rowsToDelete.length > 0) {
+        const { error } = await supabase.from('services').delete().in('id', rowsToDelete);
+
+        if (error) {
+          throw error;
+        }
+      }
+
+      lastServicesBackendSyncSignatureRef.current = syncSignature;
+    },
+    [hasInitializedAuth, isAuthenticated, salonAccountEmail, salonWorkspace]
+  );
+
+  const loadOwnerPrivateServerState = React.useCallback(
+    async (workspaceId: string) => {
+      if (!isUuidValue(workspaceId)) {
+        return null;
+      }
+
+      type CashMovementRow = {
+        id: string;
+        description: string;
+        amount: number | string;
+        payment_method: string | null;
+        card_label: string | null;
+        created_at: string;
+      };
+
+      type ConnectedCardRow = {
+        id: string;
+        label: string;
+        circuit: string;
+        last4: string;
+        is_default: boolean;
+      };
+
+      type EventRow = {
+        id: string;
+        title: string;
+        event_date: string;
+        event_time: string;
+        notes: string | null;
+      };
+
+      type MessageTemplateRow = {
+        event_template: string | null;
+      };
+
+      type OwnerSnapshotRow = {
+        payload: Record<string, unknown> | null;
+      };
+
+      const [cashResult, cardsResult, eventsResult, templateResult, snapshotResult] =
+        await Promise.allSettled([
+          supabase
+            .from('cash_movements')
+            .select('id, description, amount, payment_method, card_label, created_at')
+            .eq('workspace_id', workspaceId),
+          supabase
+            .from('connected_cards')
+            .select('id, label, circuit, last4, is_default')
+            .eq('workspace_id', workspaceId),
+          supabase
+            .from('events')
+            .select('id, title, event_date, event_time, notes')
+            .eq('workspace_id', workspaceId),
+          supabase
+            .from('message_templates')
+            .select('event_template')
+            .eq('workspace_id', workspaceId)
+            .maybeSingle(),
+          supabase
+            .from('owner_app_snapshots')
+            .select('payload')
+            .eq('workspace_id', workspaceId)
+            .maybeSingle(),
+        ]);
+
+      const ownerSnapshot =
+        snapshotResult.status === 'fulfilled' && !snapshotResult.value.error
+          ? normalizeOwnerAppSnapshotPayload(
+              (snapshotResult.value.data as OwnerSnapshotRow | null)?.payload ?? null
+            )
+          : null;
+
+      const remoteMovimenti =
+        cashResult.status === 'fulfilled' && !cashResult.value.error
+          ? normalizeMovimenti(
+              ((cashResult.value.data ?? []) as CashMovementRow[]).map((item) => ({
+                id: item.id,
+                descrizione: item.description,
+                importo: Number(item.amount ?? 0),
+                metodo: movementMethodFromRemote(item.payment_method),
+                cartaLabel: item.card_label ?? undefined,
+                createdAt: item.created_at,
+              }))
+            )
+          : [];
+
+      const remoteCarte =
+        cardsResult.status === 'fulfilled' && !cardsResult.value.error
+          ? normalizeCarte(
+              ((cardsResult.value.data ?? []) as ConnectedCardRow[]).map((item) => ({
+                id: item.id,
+                nome: item.label,
+                circuito: item.circuit,
+                ultime4: item.last4,
+                predefinita: item.is_default,
+              }))
+            )
+          : [];
+
+      const remoteEventi =
+        eventsResult.status === 'fulfilled' && !eventsResult.value.error
+          ? normalizeEventi(
+              ((eventsResult.value.data ?? []) as EventRow[]).map((item) => ({
+                id: item.id,
+                titolo: item.title,
+                data: item.event_date,
+                ora: item.event_time,
+                note: item.notes ?? '',
+              }))
+            )
+          : [];
+
+      const remoteTemplate =
+        templateResult.status === 'fulfilled' && !templateResult.value.error
+          ? ((templateResult.value.data as MessageTemplateRow | null)?.event_template ?? '').trim()
+          : '';
+
+      return {
+        ownerSnapshot,
+        movimenti:
+          remoteMovimenti.length > 0
+            ? remoteMovimenti
+            : ownerSnapshot?.movimenti ?? normalizeMovimenti([]),
+        carteCollegate:
+          remoteCarte.length > 0 ? remoteCarte : ownerSnapshot?.carteCollegate ?? normalizeCarte([]),
+        eventi: remoteEventi.length > 0 ? remoteEventi : ownerSnapshot?.eventi ?? normalizeEventi([]),
+        messaggioEventoTemplate:
+          remoteTemplate || ownerSnapshot?.messaggioEventoTemplate || '',
+      };
     },
     []
   );
 
-  const enqueuePortalPublish = React.useCallback(
-    async (snapshot: Parameters<typeof publishClientPortalSnapshot>[0]) => {
-      const runTask = async () => {
-        let effectiveSnapshot = snapshot;
-        const normalizedSalonCode = normalizeSalonCode(snapshot.workspace.salonCode);
-        const shouldPreserveRemoteWorkspaceToggles =
-          Date.now() - lastLocalWorkspaceMutationAtRef.current >=
-          PORTAL_CRITICAL_OWNER_TOGGLE_GUARD_MS;
-        const shouldPreserveRemoteGuidedSettings =
-          Date.now() - lastLocalAvailabilityMutationAtRef.current >=
-          PORTAL_CRITICAL_OWNER_TOGGLE_GUARD_MS;
+  const syncCashTablesForWorkspace = React.useCallback(
+    async (workspaceId: string, movementItems: Movimento[], connectedCardItems: CartaCollegata[]) => {
+      if (
+        !isAuthenticated ||
+        !hasInitializedAuth ||
+        !salonAccountEmail ||
+        !isWorkspaceAccessible(salonWorkspace) ||
+        !isUuidValue(workspaceId)
+      ) {
+        return;
+      }
 
-        if (
-          normalizedSalonCode &&
-          (shouldPreserveRemoteWorkspaceToggles || shouldPreserveRemoteGuidedSettings)
-        ) {
-          try {
-            const [remoteSnapshot, remoteAvailabilitySnapshot] = await Promise.all([
-              fetchClientPortalSnapshot(normalizedSalonCode).catch(() => null),
-              fetchClientPortalAvailabilitySettings(normalizedSalonCode).catch(() => null),
-            ]);
+      type CashMovementRow = {
+        id: string;
+        workspace_id: string;
+        description: string;
+        amount: number;
+        payment_method: 'cash' | 'card' | 'bank_transfer' | null;
+        card_label: string | null;
+        created_at: string;
+      };
 
-            if (
-              remoteSnapshot &&
-              normalizeAccountEmail(remoteSnapshot.workspace.ownerEmail) ===
-                normalizeAccountEmail(snapshot.workspace.ownerEmail)
-            ) {
-              const remoteWorkspaceNewer =
-                parseIsoTimestampToMs(remoteSnapshot.workspace.autoAcceptBookingRequestsUpdatedAt) >
-                parseIsoTimestampToMs(snapshot.workspace.autoAcceptBookingRequestsUpdatedAt);
+      type ConnectedCardRow = {
+        id: string;
+        workspace_id: string;
+        label: string;
+        circuit: string;
+        last4: string;
+        is_default: boolean;
+      };
 
-              effectiveSnapshot = {
-                ...snapshot,
-                workspace: shouldPreserveRemoteWorkspaceToggles || remoteWorkspaceNewer
-                  ? normalizeWorkspace(
-                      remoteSnapshot.workspace,
-                      snapshot.workspace.ownerEmail
-                    )
-                  : snapshot.workspace,
-                availabilitySettings: mergeAvailabilitySettingsWithCriticalTimestamps(
-                  snapshot.availabilitySettings,
-                  remoteAvailabilitySnapshot?.availabilitySettings ??
-                    remoteSnapshot.availabilitySettings
-                ),
-              };
-            } else if (remoteAvailabilitySnapshot) {
-              effectiveSnapshot = {
-                ...snapshot,
-                availabilitySettings: mergeAvailabilitySettingsWithCriticalTimestamps(
-                  snapshot.availabilitySettings,
-                  remoteAvailabilitySnapshot.availabilitySettings
-                ),
-              };
-            }
-          } catch (error) {
-            console.log('Errore merge toggle critici prima della pubblicazione portale:', error);
-          }
+      const normalizedMovements = normalizeMovimenti(movementItems);
+      const normalizedCards = normalizeCarte(connectedCardItems);
+      const movementSignature = JSON.stringify(
+        normalizedMovements
+          .map((item) => ({
+            key: buildMovementSemanticKey(item),
+            metodo: item.metodo ?? '',
+            cartaLabel: item.cartaLabel ?? '',
+          }))
+          .sort((first, second) => first.key.localeCompare(second.key, 'it'))
+      );
+      const cardSignature = JSON.stringify(
+        normalizedCards
+          .map((item) => ({
+            key: buildCardSemanticKey(item),
+            predefinita: !!item.predefinita,
+          }))
+          .sort((first, second) => first.key.localeCompare(second.key, 'it'))
+      );
+
+      if (
+        lastCashBackendSyncSignatureRef.current === movementSignature &&
+        lastCardsBackendSyncSignatureRef.current === cardSignature
+      ) {
+        return;
+      }
+
+      const [{ data: existingMovements, error: movementsError }, { data: existingCards, error: cardsError }] =
+        await Promise.all([
+          supabase
+            .from('cash_movements')
+            .select('id, workspace_id, description, amount, payment_method, card_label, created_at')
+            .eq('workspace_id', workspaceId),
+          supabase
+            .from('connected_cards')
+            .select('id, workspace_id, label, circuit, last4, is_default')
+            .eq('workspace_id', workspaceId),
+        ]);
+
+      if (movementsError) {
+        throw movementsError;
+      }
+      if (cardsError) {
+        throw cardsError;
+      }
+
+      const currentMovements = (existingMovements ?? []) as CashMovementRow[];
+      const currentCards = (existingCards ?? []) as ConnectedCardRow[];
+      const movementsById = new Map(currentMovements.map((item) => [item.id, item]));
+      const movementCandidatesByKey = new Map<string, CashMovementRow[]>();
+      currentMovements.forEach((item) => {
+        const key = buildMovementSemanticKey({
+          descrizione: item.description,
+          importo: Number(item.amount ?? 0),
+          createdAt: item.created_at,
+        });
+        const current = movementCandidatesByKey.get(key) ?? [];
+        current.push(item);
+        movementCandidatesByKey.set(key, current);
+      });
+
+      const matchedMovementIds = new Set<string>();
+      const movementRowsToUpsert = normalizedMovements.map((item) => {
+        const key = buildMovementSemanticKey(item);
+        const matchedById = isUuidValue(item.id) ? movementsById.get(item.id) ?? null : null;
+        const matchedByKey = (movementCandidatesByKey.get(key) ?? []).find(
+          (entry) => !matchedMovementIds.has(entry.id)
+        ) ?? null;
+        const matchedRow = matchedById ?? matchedByKey;
+
+        if (matchedRow?.id) {
+          matchedMovementIds.add(matchedRow.id);
         }
 
-        return runWithDeadlockRetry(
-          () => publishClientPortalSnapshot(effectiveSnapshot),
+        return {
+          id: matchedRow?.id,
+          workspace_id: workspaceId,
+          description: item.descrizione.trim(),
+          amount: Number(item.importo ?? 0),
+          payment_method: movementMethodToRemote(item.metodo),
+          card_label: item.cartaLabel?.trim() || null,
+          created_at: deriveMovementCreatedAt(item),
+        };
+      });
+
+      const movementRowsToInsert = movementRowsToUpsert
+        .filter((item) => !item.id)
+        .map(({ id: _id, ...item }) => item);
+      const movementRowsToUpdate = movementRowsToUpsert.filter(
+        (item): item is CashMovementRow => typeof item.id === 'string' && item.id.trim().length > 0
+      );
+      const movementRowsToDelete = currentMovements
+        .filter((item) => !matchedMovementIds.has(item.id))
+        .map((item) => item.id);
+
+      if (movementRowsToUpdate.length > 0) {
+        const { error } = await supabase.from('cash_movements').upsert(movementRowsToUpdate, {
+          onConflict: 'id',
+        });
+        if (error) {
+          throw error;
+        }
+      }
+
+      if (movementRowsToInsert.length > 0) {
+        const { error } = await supabase.from('cash_movements').insert(movementRowsToInsert);
+        if (error) {
+          throw error;
+        }
+      }
+
+      if (movementRowsToDelete.length > 0) {
+        const { error } = await supabase.from('cash_movements').delete().in('id', movementRowsToDelete);
+        if (error) {
+          throw error;
+        }
+      }
+
+      const cardsById = new Map(currentCards.map((item) => [item.id, item]));
+      const cardCandidatesByKey = new Map<string, ConnectedCardRow[]>();
+      currentCards.forEach((item) => {
+        const key = buildCardSemanticKey({
+          nome: item.label,
+          circuito: item.circuit,
+          ultime4: item.last4,
+        });
+        const current = cardCandidatesByKey.get(key) ?? [];
+        current.push(item);
+        cardCandidatesByKey.set(key, current);
+      });
+
+      const matchedCardIds = new Set<string>();
+      const cardRowsToUpsert = normalizedCards.map((item, index) => {
+        const key = buildCardSemanticKey(item);
+        const matchedById = isUuidValue(item.id) ? cardsById.get(item.id) ?? null : null;
+        const matchedByKey = (cardCandidatesByKey.get(key) ?? []).find(
+          (entry) => !matchedCardIds.has(entry.id)
+        ) ?? null;
+        const matchedRow = matchedById ?? matchedByKey;
+
+        if (matchedRow?.id) {
+          matchedCardIds.add(matchedRow.id);
+        }
+
+        return {
+          id: matchedRow?.id,
+          workspace_id: workspaceId,
+          label: item.nome.trim(),
+          circuit: item.circuito.trim(),
+          last4: item.ultime4.trim(),
+          is_default: item.predefinita ?? index === 0,
+        };
+      });
+
+      const cardRowsToInsert = cardRowsToUpsert
+        .filter((item) => !item.id)
+        .map(({ id: _id, ...item }) => item);
+      const cardRowsToUpdate = cardRowsToUpsert.filter(
+        (item): item is ConnectedCardRow => typeof item.id === 'string' && item.id.trim().length > 0
+      );
+      const cardRowsToDelete = currentCards
+        .filter((item) => !matchedCardIds.has(item.id))
+        .map((item) => item.id);
+
+      if (cardRowsToUpdate.length > 0) {
+        const { error } = await supabase.from('connected_cards').upsert(cardRowsToUpdate, {
+          onConflict: 'id',
+        });
+        if (error) {
+          throw error;
+        }
+      }
+
+      if (cardRowsToInsert.length > 0) {
+        const { error } = await supabase.from('connected_cards').insert(cardRowsToInsert);
+        if (error) {
+          throw error;
+        }
+      }
+
+      if (cardRowsToDelete.length > 0) {
+        const { error } = await supabase.from('connected_cards').delete().in('id', cardRowsToDelete);
+        if (error) {
+          throw error;
+        }
+      }
+
+      const [{ data: refreshedMovements }, { data: refreshedCards }] = await Promise.all([
+        supabase
+          .from('cash_movements')
+          .select('id, description, amount, payment_method, card_label, created_at')
+          .eq('workspace_id', workspaceId),
+        supabase
+          .from('connected_cards')
+          .select('id, label, circuit, last4, is_default')
+          .eq('workspace_id', workspaceId),
+      ]);
+
+      setMovimenti(
+        normalizeMovimenti(
+          ((refreshedMovements ?? []) as CashMovementRow[]).map((item) => ({
+            id: item.id,
+            descrizione: item.description,
+            importo: Number(item.amount ?? 0),
+            metodo: movementMethodFromRemote(item.payment_method),
+            cartaLabel: item.card_label ?? undefined,
+            createdAt: item.created_at,
+          }))
+        )
+      );
+      setCarteCollegate(
+        normalizeCarte(
+          ((refreshedCards ?? []) as ConnectedCardRow[]).map((item) => ({
+            id: item.id,
+            nome: item.label,
+            circuito: item.circuit,
+            ultime4: item.last4,
+            predefinita: item.is_default,
+          }))
+        )
+      );
+
+      lastCashBackendSyncSignatureRef.current = movementSignature;
+      lastCardsBackendSyncSignatureRef.current = cardSignature;
+    },
+    [hasInitializedAuth, isAuthenticated, salonAccountEmail, salonWorkspace]
+  );
+
+  const syncEventsAndTemplateForWorkspace = React.useCallback(
+    async (workspaceId: string, eventItems: Evento[], eventTemplate: string) => {
+      if (
+        !isAuthenticated ||
+        !hasInitializedAuth ||
+        !salonAccountEmail ||
+        !isWorkspaceAccessible(salonWorkspace) ||
+        !isUuidValue(workspaceId)
+      ) {
+        return;
+      }
+
+      type EventRow = {
+        id: string;
+        workspace_id: string;
+        title: string;
+        event_date: string;
+        event_time: string;
+        notes: string | null;
+      };
+
+      const normalizedEvents = normalizeEventi(eventItems);
+      const eventSignature = JSON.stringify(
+        normalizedEvents
+          .map((item) => ({
+            key: buildEventSemanticKey(item),
+            note: item.note ?? '',
+          }))
+          .sort((first, second) => first.key.localeCompare(second.key, 'it'))
+      );
+      const normalizedTemplate = eventTemplate.trim();
+
+      if (
+        lastEventsBackendSyncSignatureRef.current === eventSignature &&
+        lastTemplateBackendSyncValueRef.current === normalizedTemplate
+      ) {
+        return;
+      }
+
+      const { data: existingEvents, error: existingEventsError } = await supabase
+        .from('events')
+        .select('id, workspace_id, title, event_date, event_time, notes')
+        .eq('workspace_id', workspaceId);
+
+      if (existingEventsError) {
+        throw existingEventsError;
+      }
+
+      const currentEvents = (existingEvents ?? []) as EventRow[];
+      const eventsById = new Map(currentEvents.map((item) => [item.id, item]));
+      const eventCandidatesByKey = new Map<string, EventRow[]>();
+      currentEvents.forEach((item) => {
+        const key = buildEventSemanticKey({
+          titolo: item.title,
+          data: item.event_date,
+          ora: item.event_time,
+        });
+        const current = eventCandidatesByKey.get(key) ?? [];
+        current.push(item);
+        eventCandidatesByKey.set(key, current);
+      });
+
+      const matchedEventIds = new Set<string>();
+      const eventRowsToUpsert = normalizedEvents.map((item) => {
+        const key = buildEventSemanticKey(item);
+        const matchedById = isUuidValue(item.id) ? eventsById.get(item.id) ?? null : null;
+        const matchedByKey = (eventCandidatesByKey.get(key) ?? []).find(
+          (entry) => !matchedEventIds.has(entry.id)
+        ) ?? null;
+        const matchedRow = matchedById ?? matchedByKey;
+
+        if (matchedRow?.id) {
+          matchedEventIds.add(matchedRow.id);
+        }
+
+        return {
+          id: matchedRow?.id,
+          workspace_id: workspaceId,
+          title: item.titolo.trim(),
+          event_date: item.data.trim(),
+          event_time: item.ora.trim(),
+          notes: item.note?.trim() || null,
+        };
+      });
+
+      const eventRowsToInsert = eventRowsToUpsert
+        .filter((item) => !item.id)
+        .map(({ id: _id, ...item }) => item);
+      const eventRowsToUpdate = eventRowsToUpsert.filter(
+        (item): item is EventRow => typeof item.id === 'string' && item.id.trim().length > 0
+      );
+      const eventRowsToDelete = currentEvents
+        .filter((item) => !matchedEventIds.has(item.id))
+        .map((item) => item.id);
+
+      if (eventRowsToUpdate.length > 0) {
+        const { error } = await supabase.from('events').upsert(eventRowsToUpdate, {
+          onConflict: 'id',
+        });
+        if (error) {
+          throw error;
+        }
+      }
+
+      if (eventRowsToInsert.length > 0) {
+        const { error } = await supabase.from('events').insert(eventRowsToInsert);
+        if (error) {
+          throw error;
+        }
+      }
+
+      if (eventRowsToDelete.length > 0) {
+        const { error } = await supabase.from('events').delete().in('id', eventRowsToDelete);
+        if (error) {
+          throw error;
+        }
+      }
+
+      const { error: templateError } = await supabase.from('message_templates').upsert(
+        {
+          workspace_id: workspaceId,
+          event_template: normalizedTemplate || 'Ciao! Ti aspetto a {evento} il {data} alle {ora}. Scrivimi per conferma.',
+        },
+        { onConflict: 'workspace_id' }
+      );
+
+      if (templateError) {
+        throw templateError;
+      }
+
+      const { data: refreshedEvents } = await supabase
+        .from('events')
+        .select('id, title, event_date, event_time, notes')
+        .eq('workspace_id', workspaceId);
+
+      setEventi(
+        normalizeEventi(
+          ((refreshedEvents ?? []) as EventRow[]).map((item) => ({
+            id: item.id,
+            titolo: item.title,
+            data: item.event_date,
+            ora: item.event_time,
+            note: item.notes ?? '',
+          }))
+        )
+      );
+      if (normalizedTemplate) {
+        setMessaggioEventoTemplate(normalizedTemplate);
+      }
+
+      lastEventsBackendSyncSignatureRef.current = eventSignature;
+      lastTemplateBackendSyncValueRef.current = normalizedTemplate;
+    },
+    [hasInitializedAuth, isAuthenticated, salonAccountEmail, salonWorkspace]
+  );
+
+  const syncOwnerSnapshotForWorkspace = React.useCallback(
+    async (workspaceId: string, payload: OwnerAppSnapshotPayload) => {
+      if (
+        !isAuthenticated ||
+        !hasInitializedAuth ||
+        !salonAccountEmail ||
+        !isWorkspaceAccessible(salonWorkspace) ||
+        !isUuidValue(workspaceId)
+      ) {
+        return;
+      }
+
+      const normalizedPayload: OwnerAppSnapshotPayload = {
+        workspace: payload.workspace,
+        clienti: normalizeClienti(payload.clienti ?? []),
+        appuntamenti: normalizeAppuntamenti(payload.appuntamenti ?? []),
+        movimenti: normalizeMovimenti(payload.movimenti ?? []),
+        servizi: normalizeServizi(payload.servizi ?? []),
+        operatori: normalizeOperatori(payload.operatori ?? []),
+        macchinari: normalizeMacchinari(payload.macchinari ?? []),
+        carteCollegate: normalizeCarte(payload.carteCollegate ?? []),
+        eventi: normalizeEventi(payload.eventi ?? []),
+        richiestePrenotazione: normalizeRichiestePrenotazione(payload.richiestePrenotazione ?? []),
+        availabilitySettings: normalizeAvailabilitySettings(payload.availabilitySettings ?? {}),
+        messaggioEventoTemplate:
+          payload.messaggioEventoTemplate?.trim() ||
+          'Ciao! Ti aspetto a {evento} il {data} alle {ora}. Scrivimi per conferma.',
+        serviceCardColorOverrides: normalizeServiceColorOverrideMap(
+          payload.serviceCardColorOverrides ?? {},
+          normalizeServizi(payload.servizi ?? [])
+        ),
+        roleCardColorOverrides: normalizeRoleColorOverrideMap(payload.roleCardColorOverrides ?? {}),
+      };
+
+      const syncSignature = JSON.stringify(normalizedPayload);
+      if (lastOwnerSnapshotSyncSignatureRef.current === syncSignature) {
+        return;
+      }
+
+      const { error } = await supabase.from('owner_app_snapshots').upsert(
+        {
+          workspace_id: workspaceId,
+          payload: normalizedPayload,
+        },
+        { onConflict: 'workspace_id' }
+      );
+
+      if (error) {
+        const errorCode = typeof error === 'object' && error && 'code' in error ? String(error.code ?? '') : '';
+        const errorMessage =
+          typeof error === 'object' && error && 'message' in error ? String(error.message ?? '') : '';
+        if (errorCode === '42P01' || errorMessage.toLowerCase().includes('owner_app_snapshots')) {
+          return;
+        }
+        throw error;
+      }
+
+      lastOwnerSnapshotSyncSignatureRef.current = syncSignature;
+    },
+    [hasInitializedAuth, isAuthenticated, salonAccountEmail, salonWorkspace]
+  );
+
+  const enqueuePortalPublish = React.useCallback(
+    async (snapshot: Parameters<typeof publishClientPortalSnapshot>[0]) => {
+      const runTask = () =>
+        runWithDeadlockRetry(
+          () => publishClientPortalSnapshot(snapshot),
           'Pubblicazione portale cliente'
         );
-      };
 
       const queuedTask = portalPublishQueueRef.current.then(runTask, runTask);
       portalPublishQueueRef.current = queuedTask.then(
@@ -2025,47 +2940,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
       void AsyncStorage.setItem(
         STORAGE_KEYS.recently_deleted_appointments,
-        JSON.stringify(Array.from(current.entries()))
-      ).catch(() => null);
-    },
-    []
-  );
-
-  const markRecentlyDeletedCustomer = React.useCallback(
-    (customer: { id?: string | null; nome?: string | null; telefono?: string | null; email?: string | null }) => {
-      const current = recentlyDeletedCustomerKeysRef.current;
-      current.set(
-        buildCustomerIdentityKey({
-          id: customer.id?.trim() ?? '',
-          nome: customer.nome?.trim() ?? '',
-          telefono: customer.telefono?.trim() ?? '',
-          email: customer.email?.trim().toLowerCase() ?? '',
-        }),
-        Date.now()
-      );
-
-      void AsyncStorage.setItem(
-        STORAGE_KEYS.recently_deleted_customers,
-        JSON.stringify(Array.from(current.entries()))
-      ).catch(() => null);
-    },
-    []
-  );
-
-  const unmarkRecentlyDeletedCustomer = React.useCallback(
-    (customer: { id?: string | null; nome?: string | null; telefono?: string | null; email?: string | null }) => {
-      const current = recentlyDeletedCustomerKeysRef.current;
-      current.delete(
-        buildCustomerIdentityKey({
-          id: customer.id?.trim() ?? '',
-          nome: customer.nome?.trim() ?? '',
-          telefono: customer.telefono?.trim() ?? '',
-          email: customer.email?.trim().toLowerCase() ?? '',
-        })
-      );
-
-      void AsyncStorage.setItem(
-        STORAGE_KEYS.recently_deleted_customers,
         JSON.stringify(Array.from(current.entries()))
       ).catch(() => null);
     },
@@ -2216,11 +3090,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
     });
 
-    void AsyncStorage.setItem(
-      STORAGE_KEYS.recently_deleted_customers,
-      JSON.stringify(Array.from(deletedKeys.entries()))
-    ).catch(() => null);
-
     previousCustomerIdentityKeysRef.current = currentKeys;
   }, [clienti]);
 
@@ -2231,7 +3100,522 @@ export function AppProvider({ children }: { children: ReactNode }) {
     []
   );
 
+  const applyOnboardingCompletionState = React.useCallback(
+    (completed: boolean) => {
+      setHasCompletedOnboarding(completed);
+      setOnboardingPending(!completed);
+      if (completed) {
+        onboardingSessionLockedEmailRef.current = '';
+        setManualOnboardingVisible(false);
+        setOnboardingReady(false);
+      }
+    },
+    []
+  );
+
+  const resetOnboardingState = React.useCallback(() => {
+    onboardingSessionLockedEmailRef.current = '';
+    setHasCompletedOnboarding(false);
+    setOnboardingPending(false);
+    setManualOnboardingVisible(false);
+    setOnboardingReady(false);
+  }, []);
+
+  const runOneOffOwnerAccountCleanup = React.useCallback(async () => {
+    try {
+      const cleanupAlreadyDone = await AsyncStorage.getItem(ONE_OFF_OWNER_ACCOUNT_CLEANUP_DONE_KEY);
+      if (cleanupAlreadyDone === 'true') {
+        return;
+      }
+
+      const targetEmail = normalizeAccountEmail(ONE_OFF_OWNER_ACCOUNT_CLEANUP_EMAIL);
+      if (!targetEmail) {
+        await AsyncStorage.setItem(ONE_OFF_OWNER_ACCOUNT_CLEANUP_DONE_KEY, 'true');
+        return;
+      }
+
+      const scopedKeysToRemove = [
+        STORAGE_KEYS.workspace,
+        STORAGE_KEYS.workspace_cash_section_disabled,
+        STORAGE_KEYS.workspace_auto_accept_booking_requests,
+        STORAGE_KEYS.workspace_auto_accept_booking_requests_updated_at,
+        STORAGE_KEYS.workspace_customer_reminder_hours_before,
+        STORAGE_KEYS.clienti,
+        STORAGE_KEYS.appuntamenti,
+        STORAGE_KEYS.movimenti,
+        STORAGE_KEYS.servizi,
+        STORAGE_KEYS.operatori,
+        STORAGE_KEYS.macchinari,
+        STORAGE_KEYS.carte,
+        STORAGE_KEYS.eventi,
+        STORAGE_KEYS.richieste_prenotazione,
+        STORAGE_KEYS.availability_settings,
+        STORAGE_KEYS.eventi_template,
+        STORAGE_KEYS.biometric_enabled,
+        STORAGE_KEYS.onboarding_completed,
+        STORAGE_KEYS.onboarding_first_access_pending,
+        STORAGE_KEYS.service_card_color_overrides,
+        STORAGE_KEYS.role_card_color_overrides,
+      ].map((key) => buildScopedStorageKey(key, targetEmail));
+
+      const extraKeysToRemove = [
+        `salon_manager_viewed_client_ids__${targetEmail}`,
+        `salon_manager_viewed_client_keys__${targetEmail}`,
+        `salon_manager_viewed_request_ids__${targetEmail}`,
+      ];
+
+      const [rawOwnerAccounts, activeAccountEmail, ownerSessionEmail, biometricLoginEmail] =
+        await Promise.all([
+          AsyncStorage.getItem(STORAGE_KEYS.owner_accounts),
+          AsyncStorage.getItem(STORAGE_KEYS.account_attivo),
+          AsyncStorage.getItem(STORAGE_KEYS.owner_session),
+          AsyncStorage.getItem(STORAGE_KEYS.biometric_login_email),
+        ]);
+
+      const parsedOwnerAccounts = rawOwnerAccounts
+        ? ((JSON.parse(rawOwnerAccounts) as OwnerAccount[]) ?? [])
+        : [];
+      const nextOwnerAccounts = parsedOwnerAccounts
+        .map(({ password: _password, ...account }) => ({
+          ...account,
+          email: normalizeAccountEmail(account.email),
+        }))
+        .filter((item) => normalizeAccountEmail(item.email) !== targetEmail);
+
+      if (nextOwnerAccounts.length !== parsedOwnerAccounts.length) {
+        await AsyncStorage.setItem(STORAGE_KEYS.owner_accounts, JSON.stringify(nextOwnerAccounts));
+      }
+
+      if (normalizeAccountEmail(activeAccountEmail) === targetEmail) {
+        await AsyncStorage.removeItem(STORAGE_KEYS.account_attivo);
+      }
+
+      if (normalizeAccountEmail(ownerSessionEmail) === targetEmail) {
+        await AsyncStorage.removeItem(STORAGE_KEYS.owner_session);
+      }
+
+      if (normalizeAccountEmail(biometricLoginEmail) === targetEmail) {
+        await AsyncStorage.removeItem(STORAGE_KEYS.biometric_login_email);
+      }
+
+      await AsyncStorage.multiRemove([...scopedKeysToRemove, ...extraKeysToRemove]).catch(
+        () => undefined
+      );
+      await deleteSensitiveValue(
+        secureOwnerPasswordKey(targetEmail),
+        legacyOwnerPasswordKey(targetEmail)
+      ).catch(() => undefined);
+      await deleteSensitiveValue(
+        secureBiometricPasswordKey(targetEmail),
+        buildScopedStorageKey(STORAGE_KEYS.biometric_login_password, targetEmail)
+      ).catch(() => undefined);
+
+      const { data: sessionResult } = await supabase.auth.getSession();
+      const sessionEmail = normalizeAccountEmail(sessionResult.session?.user?.email);
+      if (sessionEmail === targetEmail) {
+        await supabase.auth.signOut().catch(() => undefined);
+        resetOnboardingState();
+      }
+
+      await AsyncStorage.setItem(ONE_OFF_OWNER_ACCOUNT_CLEANUP_DONE_KEY, 'true');
+    } catch (error) {
+      console.log('Errore pulizia one-shot account owner:', error);
+    }
+  }, [resetOnboardingState]);
+
+  const beginOnboardingResolution = React.useCallback(() => {
+    setOnboardingPending(true);
+    setManualOnboardingVisible(false);
+    setOnboardingReady(false);
+  }, []);
+
+  const readCachedOnboardingCompletion = React.useCallback(async (email: string) => {
+    const normalizedEmail = normalizeAccountEmail(email);
+    if (!normalizedEmail) {
+      return null;
+    }
+
+    const cachedValue = await AsyncStorage.getItem(
+      buildScopedStorageKey(STORAGE_KEYS.onboarding_completed, normalizedEmail)
+    ).catch(() => null);
+
+    if (cachedValue === 'true') return true;
+    if (cachedValue === 'false') return false;
+    return null;
+  }, []);
+
+  const persistCachedOnboardingCompletion = React.useCallback(
+    async (email: string, completed: boolean) => {
+      const normalizedEmail = normalizeAccountEmail(email);
+      if (!normalizedEmail) {
+        return;
+      }
+
+      await AsyncStorage.setItem(
+        buildScopedStorageKey(STORAGE_KEYS.onboarding_completed, normalizedEmail),
+        completed ? 'true' : 'false'
+      ).catch(() => undefined);
+    },
+    []
+  );
+
+  const readPendingFirstOnboardingFlag = React.useCallback(async (email: string) => {
+    const normalizedEmail = normalizeAccountEmail(email);
+    if (!normalizedEmail) {
+      return false;
+    }
+
+    const rawValue = await AsyncStorage.getItem(
+      buildScopedStorageKey(STORAGE_KEYS.onboarding_first_access_pending, normalizedEmail)
+    ).catch(() => null);
+
+    return rawValue === 'true';
+  }, []);
+
+  const persistPendingFirstOnboardingFlag = React.useCallback(
+    async (email: string, pending: boolean) => {
+      const normalizedEmail = normalizeAccountEmail(email);
+      if (!normalizedEmail) {
+        return;
+      }
+
+      const storageKey = buildScopedStorageKey(
+        STORAGE_KEYS.onboarding_first_access_pending,
+        normalizedEmail
+      );
+
+      if (pending) {
+        await AsyncStorage.setItem(storageKey, 'true').catch(() => undefined);
+        return;
+      }
+
+      await AsyncStorage.removeItem(storageKey).catch(() => undefined);
+    },
+    []
+  );
+
+  const prepareOnboardingStateForAuthenticatedAccount = React.useCallback(
+    async (email: string, options?: { forceFirstAccess?: boolean }) => {
+      const normalizedEmail = normalizeAccountEmail(email);
+      if (!normalizedEmail) {
+        resetOnboardingState();
+        return false;
+      }
+
+      const shouldStartFirstAccessFlow =
+        options?.forceFirstAccess === true ||
+        (await readPendingFirstOnboardingFlag(normalizedEmail));
+
+      if (shouldStartFirstAccessFlow) {
+        onboardingSessionLockedEmailRef.current = normalizedEmail;
+        beginOnboardingResolution();
+        return true;
+      }
+
+      applyOnboardingCompletionState(true);
+      await persistCachedOnboardingCompletion(normalizedEmail, true);
+      await persistPendingFirstOnboardingFlag(normalizedEmail, false);
+      return false;
+    },
+    [
+      applyOnboardingCompletionState,
+      beginOnboardingResolution,
+      persistCachedOnboardingCompletion,
+      persistPendingFirstOnboardingFlag,
+      readPendingFirstOnboardingFlag,
+      resetOnboardingState,
+    ]
+  );
+
+  const persistOwnerOnboardingCompletionToServer = React.useCallback(
+    async ({
+      email,
+      userId,
+      completedAt,
+    }: {
+      email: string;
+      userId?: string | null;
+      completedAt?: string;
+    }) => {
+      const normalizedEmail = normalizeAccountEmail(email);
+      if (!normalizedEmail) {
+        return false;
+      }
+
+      const targetCompletedAt = completedAt ?? new Date().toISOString();
+      const normalizedUserId = userId?.trim() ?? '';
+
+      if (onboardingServerSyncInFlightRef.current) {
+        return onboardingServerSyncInFlightRef.current;
+      }
+
+      const task = (async () => {
+        try {
+          if (normalizedUserId) {
+            const { data, error } = await supabase
+              .from('owner_profiles')
+              .update({ onboarding_completed_at: targetCompletedAt })
+              .eq('user_id', normalizedUserId)
+              .select('id')
+              .maybeSingle();
+
+            if (!error && data?.id) {
+              return true;
+            }
+
+          if (error) {
+            if (!isMissingOwnerOnboardingColumnError(error)) {
+              console.log('Errore update onboarding owner profile per user_id:', error);
+            }
+          }
+          }
+
+          const { data, error } = await supabase
+            .from('owner_profiles')
+            .update({ onboarding_completed_at: targetCompletedAt })
+            .eq('email', normalizedEmail)
+            .select('id')
+            .maybeSingle();
+
+          if (!error && data?.id) {
+            return true;
+          }
+
+          if (error) {
+            if (!isMissingOwnerOnboardingColumnError(error)) {
+              console.log('Errore update onboarding owner profile per email:', error);
+            }
+          }
+        } catch (error) {
+          console.log('Errore persistenza onboarding owner profile:', error);
+        }
+
+        return false;
+      })();
+
+      onboardingServerSyncInFlightRef.current = task;
+
+      try {
+        return await task;
+      } finally {
+        if (onboardingServerSyncInFlightRef.current === task) {
+          onboardingServerSyncInFlightRef.current = null;
+        }
+      }
+    },
+    []
+  );
+
+  const syncLegacyCompletedOnboardingToServer = React.useCallback(
+    async (email: string, userId?: string | null) => {
+      const normalizedEmail = normalizeAccountEmail(email);
+      if (!normalizedEmail) {
+        return false;
+      }
+
+      const cachedCompleted = await readCachedOnboardingCompletion(normalizedEmail);
+      if (cachedCompleted !== true) {
+        return false;
+      }
+
+      const persisted = await persistOwnerOnboardingCompletionToServer({
+        email: normalizedEmail,
+        userId,
+      });
+
+      if (persisted) {
+        await persistCachedOnboardingCompletion(normalizedEmail, true);
+      }
+
+      return cachedCompleted === true;
+    },
+    [
+      persistCachedOnboardingCompletion,
+      persistOwnerOnboardingCompletionToServer,
+      readCachedOnboardingCompletion,
+    ]
+  );
+
+  const syncOwnerOnboardingState = React.useCallback(
+    async (email: string, applyToState = true) => {
+      const normalizedEmail = normalizeAccountEmail(email);
+      if (!normalizedEmail) {
+        if (applyToState) {
+          resetOnboardingState();
+        }
+        return false;
+      }
+
+      const requestSeq = onboardingSyncRequestSeqRef.current + 1;
+      onboardingSyncRequestSeqRef.current = requestSeq;
+
+      let resolvedCompleted: boolean | null = null;
+      let resolvedUserId: string | null = null;
+      let hasReadableServerRow = false;
+      const cachedCompleted = await readCachedOnboardingCompletion(normalizedEmail);
+      const pendingFirstOnboarding = await readPendingFirstOnboardingFlag(normalizedEmail);
+
+      if (
+        onboardingSessionLockedEmailRef.current === normalizedEmail &&
+        (pendingFirstOnboarding || cachedCompleted === false)
+      ) {
+        if (applyToState && onboardingSyncRequestSeqRef.current === requestSeq) {
+          beginOnboardingResolution();
+        }
+        return false;
+      }
+
+      try {
+        const { data: sessionResult } = await supabase.auth.getSession();
+        const sessionUserId = sessionResult.session?.user?.id ?? null;
+        resolvedUserId = sessionUserId;
+
+        if (sessionUserId) {
+          const { data, error } = await supabase
+            .from('owner_profiles')
+            .select('id, onboarding_completed_at')
+            .eq('user_id', sessionUserId)
+            .maybeSingle();
+
+          if (!error && data?.id) {
+            hasReadableServerRow = true;
+            resolvedCompleted = !!data?.onboarding_completed_at;
+          } else {
+            if (error) {
+              if (isMissingOwnerOnboardingColumnError(error)) {
+                resolvedCompleted = cachedCompleted ?? true;
+              } else {
+                console.log('Errore lettura onboarding owner profile per user_id:', error);
+              }
+            }
+          }
+        }
+
+        if (resolvedCompleted === null) {
+          const { data, error } = await supabase
+            .from('owner_profiles')
+            .select('id, onboarding_completed_at')
+            .eq('email', normalizedEmail)
+            .maybeSingle();
+
+          if (!error && data?.id) {
+            hasReadableServerRow = true;
+            resolvedCompleted = !!data?.onboarding_completed_at;
+          } else {
+            if (error) {
+              if (isMissingOwnerOnboardingColumnError(error)) {
+                resolvedCompleted = cachedCompleted ?? true;
+              } else {
+                if (!shouldSilenceTransientSyncError(error)) {
+                  console.log('Errore lettura onboarding owner profile per email:', error);
+                }
+              }
+            }
+          }
+        }
+      } catch (error) {
+        if (!shouldSilenceTransientSyncError(error)) {
+          console.log('Errore sincronizzazione stato onboarding owner:', error);
+        }
+      }
+
+      if (resolvedCompleted === true) {
+        await persistCachedOnboardingCompletion(normalizedEmail, true);
+        await persistPendingFirstOnboardingFlag(normalizedEmail, false);
+      } else if (cachedCompleted === true) {
+        const migrated = await syncLegacyCompletedOnboardingToServer(
+          normalizedEmail,
+          resolvedUserId
+        );
+        if (migrated) {
+          resolvedCompleted = true;
+          await persistPendingFirstOnboardingFlag(normalizedEmail, false);
+        }
+      } else if (resolvedCompleted === false) {
+        if (pendingFirstOnboarding) {
+          await persistCachedOnboardingCompletion(normalizedEmail, false);
+        } else {
+          resolvedCompleted = true;
+          await persistCachedOnboardingCompletion(normalizedEmail, true);
+          await persistPendingFirstOnboardingFlag(normalizedEmail, false);
+        }
+      } else if (resolvedCompleted === null && pendingFirstOnboarding) {
+        resolvedCompleted = false;
+        await persistCachedOnboardingCompletion(normalizedEmail, false);
+      } else if (!hasReadableServerRow) {
+        // If no readable backend row exists yet, avoid forcing onboarding again on a returning account.
+        resolvedCompleted = true;
+        await persistCachedOnboardingCompletion(normalizedEmail, true);
+        await persistPendingFirstOnboardingFlag(normalizedEmail, false);
+      }
+
+      if (applyToState && onboardingSyncRequestSeqRef.current === requestSeq) {
+        applyOnboardingCompletionState(resolvedCompleted ?? true);
+      }
+
+      return resolvedCompleted ?? true;
+    },
+    [
+      applyOnboardingCompletionState,
+      persistCachedOnboardingCompletion,
+      persistPendingFirstOnboardingFlag,
+      readPendingFirstOnboardingFlag,
+      readCachedOnboardingCompletion,
+      resetOnboardingState,
+      syncLegacyCompletedOnboardingToServer,
+    ]
+  );
+
+  const loadExistingOwnerWorkspaceRecord = React.useCallback(async (email: string) => {
+    const normalizedEmail = normalizeAccountEmail(email);
+    if (!normalizedEmail) {
+      return null;
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from('workspaces')
+        .select(
+          'id, slug, salon_name, owner_email, owner_phone, cash_section_disabled, customer_reminder_hours_before, subscription_plan, subscription_status, created_at, updated_at'
+        )
+        .eq('owner_email', normalizedEmail)
+        .limit(1)
+        .maybeSingle();
+
+      if (error) {
+        throw error;
+      }
+
+      return (data ?? null) as RemoteWorkspaceRow | null;
+    } catch (error) {
+      console.log('Errore lettura workspace owner esistente:', error);
+      return null;
+    }
+  }, []);
+
   const clearRuntimeDataForAccount = React.useCallback((email: string) => {
+    lastServicesBackendSyncSignatureRef.current = '';
+    lastCashBackendSyncSignatureRef.current = '';
+    lastCardsBackendSyncSignatureRef.current = '';
+    lastEventsBackendSyncSignatureRef.current = '';
+    lastTemplateBackendSyncValueRef.current = '';
+    lastOwnerSnapshotSyncSignatureRef.current = '';
+    if (servicesBackendSyncDebounceRef.current) {
+      clearTimeout(servicesBackendSyncDebounceRef.current);
+      servicesBackendSyncDebounceRef.current = null;
+    }
+    if (cashBackendSyncDebounceRef.current) {
+      clearTimeout(cashBackendSyncDebounceRef.current);
+      cashBackendSyncDebounceRef.current = null;
+    }
+    if (eventsBackendSyncDebounceRef.current) {
+      clearTimeout(eventsBackendSyncDebounceRef.current);
+      eventsBackendSyncDebounceRef.current = null;
+    }
+    if (ownerSnapshotSyncDebounceRef.current) {
+      clearTimeout(ownerSnapshotSyncDebounceRef.current);
+      ownerSnapshotSyncDebounceRef.current = null;
+    }
     setSalonWorkspace(createDefaultWorkspace(email));
     setClienti(normalizeClienti([]));
     setAppuntamenti(normalizeAppuntamenti([]));
@@ -2239,19 +3623,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setServizi(normalizeServizi([]));
     setOperatori(normalizeOperatori([]));
     setMacchinari(normalizeMacchinari([]));
-    setCarteCollegate([]);
-    setEventi([]);
+    setCarteCollegate(normalizeCarte([]));
+    setEventi(normalizeEventi([]));
     setRichiestePrenotazione([]);
     setAvailabilitySettings(normalizeAvailabilitySettings());
     setBiometricEnabled(false);
-    setHasCompletedOnboarding(false);
-    setShowOnboarding(false);
+    resetOnboardingState();
     setMessaggioEventoTemplate(
       'Ciao! Ti aspetto a {evento} il {data} alle {ora}. Scrivimi per conferma.'
     );
     setServiceCardColorOverrides({});
     setRoleCardColorOverrides({});
-  }, []);
+  }, [resetOnboardingState]);
 
   const syncAuthenticatedWorkspace = React.useCallback(
     async (email: string, applyToState = true) => {
@@ -2263,38 +3646,103 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
       const workspaceStorageKey = buildScopedStorageKey(STORAGE_KEYS.workspace, normalizedEmail);
       let storedWorkspace: Partial<SalonWorkspace> | null = null;
+      let storedCashSectionDisabled: boolean | undefined;
+      let storedAutoAcceptBookingRequests: boolean | undefined;
+      let storedAutoAcceptBookingRequestsUpdatedAt: string | undefined;
+      let storedCustomerReminderHoursBefore: number | undefined;
 
       try {
-        const rawStoredWorkspace = await AsyncStorage.getItem(workspaceStorageKey);
+        const [
+          rawStoredWorkspace,
+          rawStoredCashSectionDisabled,
+          rawStoredAutoAcceptBookingRequests,
+          rawStoredAutoAcceptBookingRequestsUpdatedAt,
+          rawStoredCustomerReminderHoursBefore,
+        ] = await Promise.all([
+          AsyncStorage.getItem(workspaceStorageKey),
+          AsyncStorage.getItem(
+            buildScopedStorageKey(STORAGE_KEYS.workspace_cash_section_disabled, normalizedEmail)
+          ),
+          AsyncStorage.getItem(
+            buildScopedStorageKey(
+              STORAGE_KEYS.workspace_auto_accept_booking_requests,
+              normalizedEmail
+            )
+          ),
+          AsyncStorage.getItem(
+            buildScopedStorageKey(
+              STORAGE_KEYS.workspace_auto_accept_booking_requests_updated_at,
+              normalizedEmail
+            )
+          ),
+          AsyncStorage.getItem(
+            buildScopedStorageKey(
+              STORAGE_KEYS.workspace_customer_reminder_hours_before,
+              normalizedEmail
+            )
+          ),
+        ]);
         storedWorkspace = rawStoredWorkspace
           ? (JSON.parse(rawStoredWorkspace) as Partial<SalonWorkspace>)
           : null;
+        storedCashSectionDisabled =
+          rawStoredCashSectionDisabled === 'true'
+            ? true
+            : rawStoredCashSectionDisabled === 'false'
+              ? false
+              : undefined;
+        storedAutoAcceptBookingRequests =
+          rawStoredAutoAcceptBookingRequests === 'true'
+            ? true
+            : rawStoredAutoAcceptBookingRequests === 'false'
+              ? false
+              : undefined;
+        storedAutoAcceptBookingRequestsUpdatedAt =
+          rawStoredAutoAcceptBookingRequestsUpdatedAt?.trim() || undefined;
+        if (rawStoredCustomerReminderHoursBefore?.trim()) {
+          const parsedReminder = Number(rawStoredCustomerReminderHoursBefore);
+          if (Number.isFinite(parsedReminder)) {
+            storedCustomerReminderHoursBefore = Math.max(
+              0,
+              Math.min(168, Math.round(parsedReminder))
+            );
+          }
+        }
       } catch (error) {
         console.log('Errore lettura workspace salvato:', error);
       }
 
-      const ownerAccounts = await loadOwnerAccounts();
-      const matchingOwnerAccount =
-        ownerAccounts.find((item) => normalizeAccountEmail(item.email) === normalizedEmail) ?? null;
-      const ownerAccountWorkspaceFallback = buildWorkspaceProfileFromOwnerAccount(
-        matchingOwnerAccount
+      storedWorkspace = mergeWorkspacePreferenceOverrides({
+        workspace: storedWorkspace,
+        cashSectionDisabled: storedCashSectionDisabled,
+        autoAcceptBookingRequests: storedAutoAcceptBookingRequests,
+        autoAcceptBookingRequestsUpdatedAt: storedAutoAcceptBookingRequestsUpdatedAt,
+        customerReminderHoursBefore: storedCustomerReminderHoursBefore,
+        email: normalizedEmail,
+      });
+
+      const matchingOwnerAccount = (await loadOwnerAccounts()).find(
+        (item) => normalizeAccountEmail(item.email) === normalizedEmail
       );
-      const fallbackWorkspace = normalizeWorkspace(
-        {
-          ...ownerAccountWorkspaceFallback,
-          ...storedWorkspace,
-        },
-        normalizedEmail
-      );
+      const ownerAccountWorkspaceSeed = buildWorkspaceSeedFromOwnerAccount(matchingOwnerAccount);
+
+      if (ownerAccountWorkspaceSeed) {
+        storedWorkspace = mergeWorkspacePreservingLocalProfile({
+          localWorkspace: ownerAccountWorkspaceSeed,
+          remoteWorkspace: storedWorkspace,
+          email: normalizedEmail,
+        });
+      }
+
+      const fallbackWorkspace = normalizeWorkspace(storedWorkspace, normalizedEmail);
 
       try {
         const { data, error } = await supabase
           .from('workspaces')
           .select(
-            'id, slug, salon_name, owner_email, customer_reminder_hours_before, subscription_plan, subscription_status, created_at, updated_at'
+            'id, slug, salon_name, owner_email, owner_phone, cash_section_disabled, customer_reminder_hours_before, subscription_plan, subscription_status, created_at, updated_at'
           )
           .eq('owner_email', normalizedEmail)
-          .order('updated_at', { ascending: false })
           .limit(1)
           .maybeSingle();
 
@@ -2304,15 +3752,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
         const remoteWorkspace = (data ?? null) as RemoteWorkspaceRow | null;
 
-        const nextWorkspace = remoteWorkspace
-          ? normalizeWorkspace(
-              {
-                ...ownerAccountWorkspaceFallback,
+        let nextWorkspace = remoteWorkspace
+          ? mergeWorkspacePreservingLocalProfile({
+              localWorkspace: storedWorkspace,
+              remoteWorkspace: {
                 ...storedWorkspace,
                 id: remoteWorkspace.id,
                 salonCode: remoteWorkspace.slug,
                 salonName: remoteWorkspace.salon_name,
                 ownerEmail: remoteWorkspace.owner_email,
+                businessPhone: remoteWorkspace.owner_phone ?? undefined,
+                cashSectionDisabled:
+                  typeof storedCashSectionDisabled === 'boolean'
+                    ? storedCashSectionDisabled
+                    : remoteWorkspace.cash_section_disabled ?? undefined,
                 customerReminderHoursBefore:
                   remoteWorkspace.customer_reminder_hours_before ?? undefined,
                 subscriptionPlan: remoteWorkspace.subscription_plan,
@@ -2320,11 +3773,202 @@ export function AppProvider({ children }: { children: ReactNode }) {
                 createdAt: remoteWorkspace.created_at,
                 updatedAt: remoteWorkspace.updated_at,
               },
-              normalizedEmail
-            )
+              email: normalizedEmail,
+            })
           : fallbackWorkspace;
 
+        if (remoteWorkspace?.id) {
+          setOwnerProfileNeedsCompletion(false);
+        }
+
         await AsyncStorage.setItem(workspaceStorageKey, JSON.stringify(nextWorkspace));
+        const privateServerState = isUuidValue(nextWorkspace.id)
+          ? await loadOwnerPrivateServerState(nextWorkspace.id)
+          : null;
+
+        if (privateServerState) {
+          await Promise.all([
+            AsyncStorage.setItem(
+              buildScopedStorageKey(STORAGE_KEYS.movimenti, normalizedEmail),
+              JSON.stringify(privateServerState.movimenti ?? normalizeMovimenti([]))
+            ),
+            AsyncStorage.setItem(
+              buildScopedStorageKey(STORAGE_KEYS.carte, normalizedEmail),
+              JSON.stringify(privateServerState.carteCollegate ?? normalizeCarte([]))
+            ),
+            AsyncStorage.setItem(
+              buildScopedStorageKey(STORAGE_KEYS.eventi, normalizedEmail),
+              JSON.stringify(privateServerState.eventi ?? normalizeEventi([]))
+            ),
+            AsyncStorage.setItem(
+              buildScopedStorageKey(STORAGE_KEYS.eventi_template, normalizedEmail),
+              privateServerState.messaggioEventoTemplate ||
+                'Ciao! Ti aspetto a {evento} il {data} alle {ora}. Scrivimi per conferma.'
+            ),
+          ]);
+
+          if (applyToState) {
+            setMovimenti(privateServerState.movimenti ?? normalizeMovimenti([]));
+            setCarteCollegate(privateServerState.carteCollegate ?? normalizeCarte([]));
+            setEventi(privateServerState.eventi ?? normalizeEventi([]));
+            setMessaggioEventoTemplate(
+              privateServerState.messaggioEventoTemplate ||
+                'Ciao! Ti aspetto a {evento} il {data} alle {ora}. Scrivimi per conferma.'
+            );
+          }
+        }
+
+        if (nextWorkspace.salonCode) {
+          try {
+            const remotePortalSnapshot = await fetchPortalSnapshotWithRetry(nextWorkspace.salonCode);
+
+            if (
+              remotePortalSnapshot &&
+              normalizeAccountEmail(remotePortalSnapshot.workspace.ownerEmail) === normalizedEmail
+            ) {
+              nextWorkspace = mergeWorkspacePreservingLocalProfile({
+                localWorkspace: nextWorkspace,
+                remoteWorkspace: {
+                  ...remotePortalSnapshot.workspace,
+                  // Keep these workspace-only preferences sourced from the authenticated workspace,
+                  // not from the public portal snapshot refresh path.
+                  cashSectionDisabled: nextWorkspace.cashSectionDisabled,
+                  autoAcceptBookingRequests: nextWorkspace.autoAcceptBookingRequests,
+                  autoAcceptBookingRequestsUpdatedAt:
+                    nextWorkspace.autoAcceptBookingRequestsUpdatedAt,
+                  customerReminderHoursBefore: nextWorkspace.customerReminderHoursBefore,
+                  updatedAt: nextWorkspace.updatedAt,
+                },
+                email: normalizedEmail,
+              });
+              const nextClienti = normalizeClienti(remotePortalSnapshot.clienti as Cliente[]);
+              const nextAppuntamenti = normalizeAppuntamenti(
+                remotePortalSnapshot.appuntamenti as Appuntamento[]
+              );
+              const nextServizi = normalizeServizi(remotePortalSnapshot.servizi as Servizio[]);
+              const nextOperatori = normalizeOperatori(remotePortalSnapshot.operatori as Operatore[]);
+              const nextRichieste = normalizeRichiestePrenotazione(
+                remotePortalSnapshot.richiestePrenotazione as RichiestaPrenotazione[]
+              );
+              const nextAvailability = normalizeAvailabilitySettings(
+                remotePortalSnapshot.availabilitySettings
+              );
+              const privateServerState = isUuidValue(nextWorkspace.id)
+                ? await loadOwnerPrivateServerState(nextWorkspace.id)
+                : null;
+              const snapshotServices = privateServerState?.ownerSnapshot?.servizi ?? [];
+              const snapshotOperatori = privateServerState?.ownerSnapshot?.operatori ?? [];
+              const snapshotMacchinari = privateServerState?.ownerSnapshot?.macchinari ?? [];
+              const snapshotRichieste = privateServerState?.ownerSnapshot?.richiestePrenotazione ?? [];
+              const snapshotAvailability = privateServerState?.ownerSnapshot?.availabilitySettings;
+              const snapshotServiceOverrides =
+                privateServerState?.ownerSnapshot?.serviceCardColorOverrides ?? {};
+              const snapshotRoleOverrides =
+                privateServerState?.ownerSnapshot?.roleCardColorOverrides ?? {};
+              const mergedServizi = normalizeServizi(
+                mergeServiziCollections(nextServizi, snapshotServices)
+              );
+              const mergedOperatori =
+                snapshotOperatori.length > 0 ? normalizeOperatori(snapshotOperatori) : nextOperatori;
+              const mergedMacchinari =
+                snapshotMacchinari.length > 0 ? normalizeMacchinari(snapshotMacchinari) : normalizeMacchinari([]);
+              const mergedRichieste = normalizeRichiestePrenotazione(
+                mergeRichiesteCollections(nextRichieste, snapshotRichieste)
+              );
+              const mergedAvailability = snapshotAvailability
+                ? normalizeAvailabilitySettings(snapshotAvailability)
+                : nextAvailability;
+              const mergedServiceOverrides = mergeServiceColorOverrideMaps({
+                remoteOverrides: remotePortalSnapshot.serviceCardColorOverrides ?? {},
+                localOverrides: snapshotServiceOverrides,
+                services: mergedServizi,
+              });
+              const mergedRoleOverrides = mergeRoleColorOverrideMaps({
+                remoteOverrides: remotePortalSnapshot.roleCardColorOverrides ?? {},
+                localOverrides: snapshotRoleOverrides,
+              });
+
+              await Promise.all([
+                AsyncStorage.setItem(workspaceStorageKey, JSON.stringify(nextWorkspace)),
+                AsyncStorage.setItem(
+                  buildScopedStorageKey(STORAGE_KEYS.clienti, normalizedEmail),
+                  JSON.stringify(nextClienti)
+                ),
+                AsyncStorage.setItem(
+                  buildScopedStorageKey(STORAGE_KEYS.appuntamenti, normalizedEmail),
+                  JSON.stringify(nextAppuntamenti)
+                ),
+                AsyncStorage.setItem(
+                  buildScopedStorageKey(STORAGE_KEYS.servizi, normalizedEmail),
+                  JSON.stringify(mergedServizi)
+                ),
+                AsyncStorage.setItem(
+                  buildScopedStorageKey(STORAGE_KEYS.operatori, normalizedEmail),
+                  JSON.stringify(mergedOperatori)
+                ),
+                AsyncStorage.setItem(
+                  buildScopedStorageKey(STORAGE_KEYS.macchinari, normalizedEmail),
+                  JSON.stringify(mergedMacchinari)
+                ),
+                AsyncStorage.setItem(
+                  buildScopedStorageKey(STORAGE_KEYS.movimenti, normalizedEmail),
+                  JSON.stringify(privateServerState?.movimenti ?? normalizeMovimenti([]))
+                ),
+                AsyncStorage.setItem(
+                  buildScopedStorageKey(STORAGE_KEYS.carte, normalizedEmail),
+                  JSON.stringify(privateServerState?.carteCollegate ?? normalizeCarte([]))
+                ),
+                AsyncStorage.setItem(
+                  buildScopedStorageKey(STORAGE_KEYS.eventi, normalizedEmail),
+                  JSON.stringify(privateServerState?.eventi ?? normalizeEventi([]))
+                ),
+                AsyncStorage.setItem(
+                  buildScopedStorageKey(STORAGE_KEYS.richieste_prenotazione, normalizedEmail),
+                  JSON.stringify(mergedRichieste)
+                ),
+                AsyncStorage.setItem(
+                  buildScopedStorageKey(STORAGE_KEYS.availability_settings, normalizedEmail),
+                  JSON.stringify(mergedAvailability)
+                ),
+                AsyncStorage.setItem(
+                  buildScopedStorageKey(STORAGE_KEYS.eventi_template, normalizedEmail),
+                  privateServerState?.messaggioEventoTemplate ||
+                    'Ciao! Ti aspetto a {evento} il {data} alle {ora}. Scrivimi per conferma.'
+                ),
+                AsyncStorage.setItem(
+                  buildScopedStorageKey(STORAGE_KEYS.service_card_color_overrides, normalizedEmail),
+                  JSON.stringify(mergedServiceOverrides)
+                ),
+                AsyncStorage.setItem(
+                  buildScopedStorageKey(STORAGE_KEYS.role_card_color_overrides, normalizedEmail),
+                  JSON.stringify(mergedRoleOverrides)
+                ),
+              ]);
+
+              if (applyToState) {
+                setSalonWorkspace(nextWorkspace);
+                setClienti(nextClienti);
+                setAppuntamenti(nextAppuntamenti);
+                setMovimenti(privateServerState?.movimenti ?? normalizeMovimenti([]));
+                setServizi(mergedServizi);
+                setOperatori(mergedOperatori);
+                setMacchinari(mergedMacchinari);
+                setCarteCollegate(privateServerState?.carteCollegate ?? normalizeCarte([]));
+                setEventi(privateServerState?.eventi ?? normalizeEventi([]));
+                setRichiestePrenotazione(mergedRichieste);
+                setAvailabilitySettings(mergedAvailability);
+                setMessaggioEventoTemplate(
+                  privateServerState?.messaggioEventoTemplate ||
+                    'Ciao! Ti aspetto a {evento} il {data} alle {ora}. Scrivimi per conferma.'
+                );
+                setServiceCardColorOverrides(mergedServiceOverrides);
+                setRoleCardColorOverrides(mergedRoleOverrides);
+              }
+            }
+          } catch (portalSyncError) {
+            console.log('Errore idratazione snapshot servizi/account autenticato:', portalSyncError);
+          }
+        }
 
         if (applyToState) {
           setSalonWorkspace(nextWorkspace);
@@ -2332,7 +3976,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
         return nextWorkspace;
       } catch (error) {
-        console.log('Errore sincronizzazione workspace autenticato:', error);
+        if (!shouldSilenceTransientSyncError(error)) {
+          console.log('Errore sincronizzazione workspace autenticato:', error);
+        }
 
         if (applyToState) {
           setSalonWorkspace(fallbackWorkspace);
@@ -2341,66 +3987,72 @@ export function AppProvider({ children }: { children: ReactNode }) {
         return fallbackWorkspace;
       }
     },
-    []
+    [fetchPortalSnapshotWithRetry, loadOwnerPrivateServerState]
   );
 
-  const completeOnboarding = React.useCallback(() => {
-    pendingRegistrationOnboardingRef.current = false;
-    setHasCompletedOnboarding(true);
-    setShowOnboarding(false);
+  const completeOnboarding = React.useCallback(async () => {
+    setManualOnboardingVisible(false);
 
-    if (!salonAccountEmail) {
+    if (!onboardingPending || hasCompletedOnboarding || !salonAccountEmail) {
       return;
     }
 
-    void AsyncStorage.setItem(
-      buildScopedStorageKey(STORAGE_KEYS.onboarding_completed, salonAccountEmail),
-      'true'
-    ).catch(() => undefined);
-  }, [salonAccountEmail]);
+    const completedAt = new Date().toISOString();
+    applyOnboardingCompletionState(true);
+    await persistCachedOnboardingCompletion(salonAccountEmail, true);
+    await persistPendingFirstOnboardingFlag(salonAccountEmail, false);
+
+    try {
+      const { data: sessionResult } = await supabase.auth.getSession();
+      const sessionUserId = sessionResult.session?.user?.id ?? null;
+
+      if (!sessionUserId) {
+        throw new Error('owner_session_missing_for_onboarding_completion');
+      }
+
+      const persisted = await persistOwnerOnboardingCompletionToServer({
+        email: salonAccountEmail,
+        userId: sessionUserId,
+        completedAt,
+      });
+
+      if (!persisted) {
+        throw new Error('owner_onboarding_completion_not_persisted');
+      }
+    } catch (error) {
+      console.log('Errore persistenza completamento onboarding owner:', error);
+      await syncOwnerOnboardingState(salonAccountEmail);
+    }
+  }, [
+    applyOnboardingCompletionState,
+    hasCompletedOnboarding,
+    onboardingPending,
+    persistCachedOnboardingCompletion,
+    persistPendingFirstOnboardingFlag,
+    persistOwnerOnboardingCompletionToServer,
+    salonAccountEmail,
+    syncOwnerOnboardingState,
+  ]);
 
   const reopenOnboarding = React.useCallback(() => {
-    pendingRegistrationOnboardingRef.current = false;
-    setShowOnboarding(true);
+    setManualOnboardingVisible(true);
+    setOnboardingReady(true);
   }, []);
+
+  const showOnboarding = manualOnboardingVisible || (onboardingPending && onboardingReady);
+
+  const consumeOwnerProfileNeedsCompletion = React.useCallback(() => {
+    if (!ownerProfileNeedsCompletion) {
+      return false;
+    }
+
+    setOwnerProfileNeedsCompletion(false);
+    return true;
+  }, [ownerProfileNeedsCompletion]);
 
   React.useEffect(() => {
     pendingBiometricUnlockRef.current = pendingBiometricUnlock;
   }, [pendingBiometricUnlock]);
-
-  React.useEffect(() => {
-    if (
-      !pendingRegistrationOnboardingRef.current ||
-      !isAuthenticated ||
-      !hasInitializedAuth ||
-      !salonAccountEmail ||
-      hasCompletedOnboarding ||
-      showOnboarding
-    ) {
-      return;
-    }
-
-    const timer = setTimeout(() => {
-      if (
-        !pendingRegistrationOnboardingRef.current ||
-        hasCompletedOnboarding ||
-        showOnboarding
-      ) {
-        return;
-      }
-
-      setIsLoaded(true);
-      setShowOnboarding(true);
-    }, 650);
-
-    return () => clearTimeout(timer);
-  }, [
-    hasCompletedOnboarding,
-    hasInitializedAuth,
-    isAuthenticated,
-    salonAccountEmail,
-    showOnboarding,
-  ]);
 
   useEffect(() => {
     if (!isLoaded || !salonAccountEmail) return;
@@ -2499,6 +4151,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const caricaAccountAttivo = async () => {
       try {
+        await runOneOffOwnerAccountCleanup();
+
         const [accountSalvato, sessioneSalvata, linguaSalvata, authSessionResult] = await Promise.all([
           AsyncStorage.getItem(STORAGE_KEYS.account_attivo),
           AsyncStorage.getItem(STORAGE_KEYS.owner_session),
@@ -2523,7 +4177,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setSalonAccountEmail(normalizedAccount);
         setAppLanguage(resolveStoredAppLanguage(linguaSalvata));
 
+        setHasInitializedAuth(true);
+
         if (authSessionEmail) {
+          void prepareOnboardingStateForAuthenticatedAccount(authSessionEmail);
           void syncAuthenticatedWorkspace(
             authSessionEmail,
             normalizedAccount === authSessionEmail
@@ -2537,7 +4194,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
 
     caricaAccountAttivo();
-  }, [syncAuthenticatedWorkspace]);
+  }, [
+    prepareOnboardingStateForAuthenticatedAccount,
+    runOneOffOwnerAccountCleanup,
+    syncAuthenticatedWorkspace,
+  ]);
 
   useEffect(() => {
     const {
@@ -2553,6 +4214,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         AsyncStorage.removeItem(STORAGE_KEYS.owner_session).catch(() => undefined);
         setOwnerPasswordRecoveryActive(false);
         setIsAuthenticated(false);
+        setSalonAccountEmail('');
+        clearRuntimeDataForAccount('');
+        setIsLoaded(true);
+        resetOnboardingState();
         return;
       }
 
@@ -2563,13 +4228,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (event === 'USER_UPDATED' || event === 'SIGNED_IN') {
         setOwnerPasswordRecoveryActive(false);
       }
-      void syncAuthenticatedWorkspace(authEmail, true);
+      void (async () => {
+        await prepareOnboardingStateForAuthenticatedAccount(authEmail);
+        await syncAuthenticatedWorkspace(authEmail, true);
+      })();
     });
 
     return () => {
       subscription.unsubscribe();
     };
-  }, [syncAuthenticatedWorkspace]);
+  }, [
+    clearRuntimeDataForAccount,
+    prepareOnboardingStateForAuthenticatedAccount,
+    resetOnboardingState,
+    syncAuthenticatedWorkspace,
+  ]);
 
   const activateOwnerPasswordRecoveryFromUrl = React.useCallback(
     async (incomingUrl?: string | null) => {
@@ -2722,13 +4395,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
 
       if (!salonAccountEmail) {
-        ownerPortalBootstrapReadyRef.current = false;
         clearRuntimeDataForAccount('');
         setIsLoaded(true);
         return;
       }
 
-      ownerPortalBootstrapReadyRef.current = false;
       setIsLoaded(false);
 
       try {
@@ -2737,6 +4408,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
         );
         const workspaceSalvato = await AsyncStorage.getItem(
           buildScopedStorageKey(STORAGE_KEYS.workspace, salonAccountEmail)
+        );
+        const cashSectionDisabledSalvato = await AsyncStorage.getItem(
+          buildScopedStorageKey(STORAGE_KEYS.workspace_cash_section_disabled, salonAccountEmail)
+        );
+        const autoAcceptBookingRequestsSalvato = await AsyncStorage.getItem(
+          buildScopedStorageKey(
+            STORAGE_KEYS.workspace_auto_accept_booking_requests,
+            salonAccountEmail
+          )
+        );
+        const autoAcceptBookingRequestsUpdatedAtSalvato = await AsyncStorage.getItem(
+          buildScopedStorageKey(
+            STORAGE_KEYS.workspace_auto_accept_booking_requests_updated_at,
+            salonAccountEmail
+          )
+        );
+        const customerReminderHoursBeforeSalvato = await AsyncStorage.getItem(
+          buildScopedStorageKey(
+            STORAGE_KEYS.workspace_customer_reminder_hours_before,
+            salonAccountEmail
+          )
         );
         const appuntamentiSalvati = await AsyncStorage.getItem(
           buildScopedStorageKey(STORAGE_KEYS.appuntamenti, salonAccountEmail)
@@ -2765,9 +4457,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const availabilitySettingsSalvate = await AsyncStorage.getItem(
           buildScopedStorageKey(STORAGE_KEYS.availability_settings, salonAccountEmail)
         );
-        const onboardingCompletedSalvato = await AsyncStorage.getItem(
-          buildScopedStorageKey(STORAGE_KEYS.onboarding_completed, salonAccountEmail)
-        );
         const templateEventiSalvato = await AsyncStorage.getItem(
           buildScopedStorageKey(STORAGE_KEYS.eventi_template, salonAccountEmail)
         );
@@ -2780,9 +4469,34 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const roleCardColorsSalvate = await AsyncStorage.getItem(
           buildScopedStorageKey(STORAGE_KEYS.role_card_color_overrides, salonAccountEmail)
         );
-        const storedWorkspace = workspaceSalvato
-          ? normalizeWorkspace(JSON.parse(workspaceSalvato), salonAccountEmail)
-          : createDefaultWorkspace(salonAccountEmail);
+        const storedWorkspace = mergeWorkspacePreferenceOverrides({
+          workspace: workspaceSalvato
+            ? (JSON.parse(workspaceSalvato) as Partial<SalonWorkspace>)
+            : createDefaultWorkspace(salonAccountEmail),
+          cashSectionDisabled:
+            cashSectionDisabledSalvato === 'true'
+              ? true
+              : cashSectionDisabledSalvato === 'false'
+                ? false
+                : undefined,
+          autoAcceptBookingRequests:
+            autoAcceptBookingRequestsSalvato === 'true'
+              ? true
+              : autoAcceptBookingRequestsSalvato === 'false'
+                ? false
+                : undefined,
+          autoAcceptBookingRequestsUpdatedAt:
+            autoAcceptBookingRequestsUpdatedAtSalvato?.trim() || undefined,
+          customerReminderHoursBefore:
+            customerReminderHoursBeforeSalvato?.trim() &&
+            Number.isFinite(Number(customerReminderHoursBeforeSalvato))
+              ? Math.max(
+                  0,
+                  Math.min(168, Math.round(Number(customerReminderHoursBeforeSalvato)))
+                )
+              : undefined,
+          email: salonAccountEmail,
+        });
         let nextWorkspace = storedWorkspace;
         let nextClienti: Cliente[] = clientiSalvati
           ? normalizeClienti(JSON.parse(clientiSalvati))
@@ -2800,34 +4514,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
         let nextAvailabilitySettings = availabilitySettingsSalvate
           ? normalizeAvailabilitySettings(JSON.parse(availabilitySettingsSalvate))
           : normalizeAvailabilitySettings();
-        const nextMovimenti = movimentiSalvati
+        let nextMovimenti: Movimento[] = movimentiSalvati
           ? normalizeMovimenti(JSON.parse(movimentiSalvati))
           : normalizeMovimenti([]);
-        const nextMacchinari = macchinariSalvati ? normalizeMacchinari(JSON.parse(macchinariSalvati)) : [];
-        const nextCarte = carteSalvate ? normalizeCarte(JSON.parse(carteSalvate)) : [];
-        const nextEventi = eventiSalvati ? JSON.parse(eventiSalvati) : [];
-        const nextTemplateEventi =
+        let nextMacchinari: Macchinario[] = macchinariSalvati ? normalizeMacchinari(JSON.parse(macchinariSalvati)) : [];
+        let nextCarte: CartaCollegata[] = carteSalvate ? normalizeCarte(JSON.parse(carteSalvate)) : [];
+        let nextEventi: Evento[] = eventiSalvati ? normalizeEventi(JSON.parse(eventiSalvati)) : [];
+        let nextTemplateEventi =
           templateEventiSalvato ??
           'Ciao! Ti aspetto a {evento} il {data} alle {ora}. Scrivimi per conferma.';
         const nextServiceCardOverrides = serviceCardColorsSalvate ? JSON.parse(serviceCardColorsSalvate) : {};
         const nextRoleCardOverrides = roleCardColorsSalvate ? JSON.parse(roleCardColorsSalvate) : {};
-
-        const hasMeaningfulExistingData =
-          nextClienti.length > 0 ||
-          nextAppuntamenti.length > 0 ||
-          nextServizi.length > 0 ||
-          nextOperatori.length > 0 ||
-          nextRichieste.length > 0 ||
-          nextMovimenti.length > 0 ||
-          !!storedWorkspace.salonCode?.trim() ||
-          !!storedWorkspace.salonName?.trim();
-
-        const shouldForceOnboardingCompletedForExistingAccount =
-          onboardingCompletedSalvato == null && hasMeaningfulExistingData;
-
-        const onboardingCompleted =
-          onboardingCompletedSalvato === 'true' || shouldForceOnboardingCompletedForExistingAccount;
-
         const applyLoadedState = ({
           workspace,
           clientiState,
@@ -2849,9 +4546,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
             return;
           }
 
-          suppressAutoPortalPublishUntilRef.current =
-            Date.now() + PORTAL_REMOTE_REHYDRATION_SUPPRESS_PUBLISH_MS;
-
           setSalonWorkspace(workspace);
           setClienti(clientiState);
           setAppuntamenti(appuntamentiState);
@@ -2864,8 +4558,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
           setRichiestePrenotazione(richiesteState);
           setAvailabilitySettings(availabilityState);
           setBiometricEnabled(biometricEnabledSalvato === 'true');
-          setHasCompletedOnboarding(onboardingCompleted);
-          setShowOnboarding(!onboardingCompleted);
           setMessaggioEventoTemplate(nextTemplateEventi);
           setServiceCardColorOverrides(nextServiceCardOverrides);
           setRoleCardColorOverrides(nextRoleCardOverrides);
@@ -2880,37 +4572,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
           richiesteState: nextRichieste,
           availabilityState: nextAvailabilitySettings,
         });
-
-        if (shouldForceOnboardingCompletedForExistingAccount) {
-          void AsyncStorage.setItem(
-            buildScopedStorageKey(STORAGE_KEYS.onboarding_completed, salonAccountEmail),
-            'true'
-          ).catch(() => undefined);
-        }
         setIsLoaded(true);
+        void syncOwnerOnboardingState(salonAccountEmail);
 
         if (storedWorkspace.salonCode) {
           try {
-            const lightweightSettings = await fetchPortalAvailabilitySettingsWithRetry(
-              storedWorkspace.salonCode
-            );
-
-            if (lightweightSettings) {
-              nextAvailabilitySettings = mergeAvailabilitySettingsWithCriticalTimestamps(
-                nextAvailabilitySettings,
-                lightweightSettings.availabilitySettings
-              );
-              applyLoadedState({
-                workspace: nextWorkspace,
-                clientiState: nextClienti,
-                appuntamentiState: nextAppuntamenti,
-                serviziState: nextServizi,
-                operatoriState: nextOperatori,
-                richiesteState: nextRichieste,
-                availabilityState: nextAvailabilitySettings,
-              });
-            }
-
             const remoteSnapshot = await fetchPortalSnapshotWithRetry(storedWorkspace.salonCode);
 
             if (
@@ -2918,54 +4584,127 @@ export function AppProvider({ children }: { children: ReactNode }) {
               normalizeAccountEmail(remoteSnapshot.workspace.ownerEmail) ===
                 normalizeAccountEmail(salonAccountEmail)
             ) {
-              nextWorkspace = mergeWorkspaceWithCriticalTimestamps(
-                {
-                  ...nextWorkspace,
-                  cashSectionDisabled: nextWorkspace.cashSectionDisabled,
-                },
-                {
+              const privateServerState = isUuidValue(nextWorkspace.id)
+                ? await loadOwnerPrivateServerState(nextWorkspace.id)
+                : null;
+              nextWorkspace = mergeWorkspacePreservingLocalProfile({
+                localWorkspace: nextWorkspace,
+                remoteWorkspace: {
                   ...remoteSnapshot.workspace,
-                  cashSectionDisabled:
-                    remoteSnapshot.workspace.cashSectionDisabled ?? nextWorkspace.cashSectionDisabled,
+                  cashSectionDisabled: nextWorkspace.cashSectionDisabled,
+                  autoAcceptBookingRequests: nextWorkspace.autoAcceptBookingRequests,
+                  autoAcceptBookingRequestsUpdatedAt:
+                    nextWorkspace.autoAcceptBookingRequestsUpdatedAt,
+                  customerReminderHoursBefore: nextWorkspace.customerReminderHoursBefore,
+                  updatedAt: nextWorkspace.updatedAt,
                 },
-                salonAccountEmail
-              );
-              nextRichieste = normalizeRichiestePrenotazione(
-                remoteSnapshot.richiestePrenotazione as RichiestaPrenotazione[]
-              );
+                email: salonAccountEmail,
+              });
               nextClienti = filterRecentlyDeletedCustomers(
-                enrichClientiWithFrontendRequestSignals(
-                  mergeClientiCollections(nextClienti, remoteSnapshot.clienti as Cliente[]),
-                  nextRichieste
-                )
+                normalizeClienti(remoteSnapshot.clienti as Cliente[])
               );
               nextAppuntamenti = normalizeAppuntamenti(
                 filterRecentlyDeletedAppointments(
-                  mergeAppuntamentiCollections(nextAppuntamenti, remoteSnapshot.appuntamenti as Appuntamento[])
+                  normalizeAppuntamenti(remoteSnapshot.appuntamenti as Appuntamento[])
                 )
               );
               nextServizi = normalizeServizi(
-                mergeServiziCollections(nextServizi, remoteSnapshot.servizi as Servizio[])
+                mergeServiziCollections(
+                  normalizeServizi(remoteSnapshot.servizi as Servizio[]),
+                  privateServerState?.ownerSnapshot?.servizi ?? []
+                )
               );
-              nextOperatori = preferNonEmptyOperatoriSnapshot(
-                nextOperatori,
-                remoteSnapshot.operatori as Operatore[]
+              nextOperatori =
+                privateServerState?.ownerSnapshot?.operatori?.length
+                  ? normalizeOperatori(privateServerState.ownerSnapshot.operatori)
+                  : normalizeOperatori(remoteSnapshot.operatori as Operatore[]);
+              nextMacchinari =
+                privateServerState?.ownerSnapshot?.macchinari?.length
+                  ? normalizeMacchinari(privateServerState.ownerSnapshot.macchinari)
+                  : nextMacchinari;
+              nextMovimenti = privateServerState?.movimenti ?? nextMovimenti;
+              nextCarte = privateServerState?.carteCollegate ?? nextCarte;
+              nextEventi = privateServerState?.eventi ?? nextEventi;
+              nextTemplateEventi =
+                privateServerState?.messaggioEventoTemplate || nextTemplateEventi;
+              nextRichieste = normalizeRichiestePrenotazione(
+                mergeRichiesteCollections(
+                  normalizeRichiestePrenotazione(
+                    remoteSnapshot.richiestePrenotazione as RichiestaPrenotazione[]
+                  ),
+                  privateServerState?.ownerSnapshot?.richiestePrenotazione ?? []
+                )
               );
-              nextAvailabilitySettings = mergeAvailabilitySettingsWithCriticalTimestamps(
-                nextAvailabilitySettings,
-                lightweightSettings?.availabilitySettings ?? remoteSnapshot.availabilitySettings
-              );
+              nextAvailabilitySettings =
+                privateServerState?.ownerSnapshot?.availabilitySettings
+                  ? normalizeAvailabilitySettings(privateServerState.ownerSnapshot.availabilitySettings)
+                  : normalizeAvailabilitySettings(remoteSnapshot.availabilitySettings);
               const mergedServiceCardOverrides = mergeServiceColorOverrideMaps({
                 remoteOverrides: remoteSnapshot.serviceCardColorOverrides ?? {},
-                localOverrides: nextServiceCardOverrides,
+                localOverrides:
+                  privateServerState?.ownerSnapshot?.serviceCardColorOverrides ??
+                  nextServiceCardOverrides,
                 services: nextServizi,
               });
               const mergedRoleCardOverrides = mergeRoleColorOverrideMaps({
                 remoteOverrides: remoteSnapshot.roleCardColorOverrides ?? {},
-                localOverrides: nextRoleCardOverrides,
+                localOverrides:
+                  privateServerState?.ownerSnapshot?.roleCardColorOverrides ??
+                  nextRoleCardOverrides,
               });
               Object.assign(nextServiceCardOverrides, mergedServiceCardOverrides);
               Object.assign(nextRoleCardOverrides, mergedRoleCardOverrides);
+
+              await AsyncStorage.setItem(
+                buildScopedStorageKey(STORAGE_KEYS.workspace, salonAccountEmail),
+                JSON.stringify(nextWorkspace)
+              );
+              await Promise.all([
+                AsyncStorage.setItem(
+                  buildScopedStorageKey(STORAGE_KEYS.clienti, salonAccountEmail),
+                  JSON.stringify(nextClienti)
+                ),
+                AsyncStorage.setItem(
+                  buildScopedStorageKey(STORAGE_KEYS.appuntamenti, salonAccountEmail),
+                  JSON.stringify(nextAppuntamenti)
+                ),
+                AsyncStorage.setItem(
+                  buildScopedStorageKey(STORAGE_KEYS.movimenti, salonAccountEmail),
+                  JSON.stringify(nextMovimenti)
+                ),
+                AsyncStorage.setItem(
+                  buildScopedStorageKey(STORAGE_KEYS.servizi, salonAccountEmail),
+                  JSON.stringify(nextServizi)
+                ),
+                AsyncStorage.setItem(
+                  buildScopedStorageKey(STORAGE_KEYS.operatori, salonAccountEmail),
+                  JSON.stringify(nextOperatori)
+                ),
+                AsyncStorage.setItem(
+                  buildScopedStorageKey(STORAGE_KEYS.macchinari, salonAccountEmail),
+                  JSON.stringify(nextMacchinari)
+                ),
+                AsyncStorage.setItem(
+                  buildScopedStorageKey(STORAGE_KEYS.carte, salonAccountEmail),
+                  JSON.stringify(nextCarte)
+                ),
+                AsyncStorage.setItem(
+                  buildScopedStorageKey(STORAGE_KEYS.eventi, salonAccountEmail),
+                  JSON.stringify(nextEventi)
+                ),
+                AsyncStorage.setItem(
+                  buildScopedStorageKey(STORAGE_KEYS.richieste_prenotazione, salonAccountEmail),
+                  JSON.stringify(nextRichieste)
+                ),
+                AsyncStorage.setItem(
+                  buildScopedStorageKey(STORAGE_KEYS.availability_settings, salonAccountEmail),
+                  JSON.stringify(nextAvailabilitySettings)
+                ),
+                AsyncStorage.setItem(
+                  buildScopedStorageKey(STORAGE_KEYS.eventi_template, salonAccountEmail),
+                  nextTemplateEventi
+                ),
+              ]);
 
               applyLoadedState({
                 workspace: nextWorkspace,
@@ -2978,7 +4717,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
               });
             }
           } catch (error) {
-            console.log('Errore reidratazione snapshot remoto owner:', error);
+            if (!shouldSilenceTransientSyncError(error)) {
+              console.log('Errore reidratazione snapshot remoto owner:', error);
+            }
           }
         }
       } catch (error) {
@@ -2990,13 +4731,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setServizi(normalizeServizi([]));
         setOperatori(normalizeOperatori([]));
         setMacchinari(normalizeMacchinari([]));
-        setCarteCollegate([]);
-        setEventi([]);
+        setCarteCollegate(normalizeCarte([]));
+        setEventi(normalizeEventi([]));
         setRichiestePrenotazione([]);
         setAvailabilitySettings(normalizeAvailabilitySettings());
         setBiometricEnabled(false);
-        setHasCompletedOnboarding(false);
-        setShowOnboarding(false);
+        resetOnboardingState();
         setMessaggioEventoTemplate(
           'Ciao! Ti aspetto a {evento} il {data} alle {ora}. Scrivimi per conferma.'
         );
@@ -3013,12 +4753,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
   }, [
     clearRuntimeDataForAccount,
-    fetchPortalAvailabilitySettingsWithRetry,
+    filterRecentlyDeletedAppointments,
     fetchPortalSnapshotWithRetry,
     filterRecentlyDeletedCustomers,
     hasInitializedAuth,
-    isExpoGoRuntime,
+    loadOwnerPrivateServerState,
+    resetOnboardingState,
     salonAccountEmail,
+    syncOwnerOnboardingState,
   ]);
 
   useEffect(() => {
@@ -3026,17 +4768,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [appLanguage]);
 
   useEffect(() => {
-    if (
-      !isLoaded ||
-      !isAuthenticated ||
-      !hasInitializedAuth ||
-      !salonAccountEmail
-    )
-      return;
-
-    if (!ownerPortalBootstrapReadyRef.current) {
-      return;
-    }
+    if (!isLoaded || !isAuthenticated || !hasInitializedAuth || !salonAccountEmail) return;
 
     const normalizedOwnerEmail = normalizeAccountEmail(
       salonWorkspace.ownerEmail || salonAccountEmail
@@ -3056,10 +4788,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
 
     const publishPortalSnapshot = async () => {
-      if (Date.now() < suppressAutoPortalPublishUntilRef.current) {
-        return;
-      }
-
       try {
         const workspaceId = await enqueuePortalPublish({
           workspace: {
@@ -3089,7 +4817,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
           }));
         }
       } catch (error) {
-        console.log('Errore pubblicazione portale cliente:', error);
+        if (!shouldSilenceTransientSyncError(error)) {
+          console.log('Errore pubblicazione portale cliente:', error);
+        }
       }
     };
 
@@ -3124,7 +4854,191 @@ export function AppProvider({ children }: { children: ReactNode }) {
     salonWorkspace,
     serviceCardColorOverrides,
     servizi,
-    isExpoGoRuntime,
+  ]);
+
+  useEffect(() => {
+    if (!isLoaded || !isAuthenticated || !hasInitializedAuth || !salonAccountEmail) {
+      return;
+    }
+
+    const workspaceId = salonWorkspace.id?.trim() ?? '';
+    if (!isUuidValue(workspaceId)) {
+      return;
+    }
+
+    if (servicesBackendSyncDebounceRef.current) {
+      clearTimeout(servicesBackendSyncDebounceRef.current);
+    }
+
+    servicesBackendSyncDebounceRef.current = setTimeout(() => {
+      void syncServicesTableForWorkspace(workspaceId, servizi).catch((error) => {
+        if (!shouldSilenceTransientSyncError(error)) {
+          console.log('Errore sincronizzazione backend servizi:', error);
+        }
+      });
+    }, 420);
+
+    return () => {
+      if (servicesBackendSyncDebounceRef.current) {
+        clearTimeout(servicesBackendSyncDebounceRef.current);
+        servicesBackendSyncDebounceRef.current = null;
+      }
+    };
+  }, [
+    hasInitializedAuth,
+    isAuthenticated,
+    isLoaded,
+    salonAccountEmail,
+    salonWorkspace.id,
+    servizi,
+    syncServicesTableForWorkspace,
+  ]);
+
+  useEffect(() => {
+    if (!isLoaded || !isAuthenticated || !hasInitializedAuth || !salonAccountEmail) {
+      return;
+    }
+
+    const workspaceId = salonWorkspace.id?.trim() ?? '';
+    if (!isUuidValue(workspaceId)) {
+      return;
+    }
+
+    if (cashBackendSyncDebounceRef.current) {
+      clearTimeout(cashBackendSyncDebounceRef.current);
+    }
+
+    cashBackendSyncDebounceRef.current = setTimeout(() => {
+      void syncCashTablesForWorkspace(workspaceId, movimenti, carteCollegate).catch((error) => {
+        if (!shouldSilenceTransientSyncError(error)) {
+          console.log('Errore sincronizzazione backend cassa:', error);
+        }
+      });
+    }, 420);
+
+    return () => {
+      if (cashBackendSyncDebounceRef.current) {
+        clearTimeout(cashBackendSyncDebounceRef.current);
+        cashBackendSyncDebounceRef.current = null;
+      }
+    };
+  }, [
+    carteCollegate,
+    hasInitializedAuth,
+    isAuthenticated,
+    isLoaded,
+    movimenti,
+    salonAccountEmail,
+    salonWorkspace.id,
+    syncCashTablesForWorkspace,
+  ]);
+
+  useEffect(() => {
+    if (!isLoaded || !isAuthenticated || !hasInitializedAuth || !salonAccountEmail) {
+      return;
+    }
+
+    const workspaceId = salonWorkspace.id?.trim() ?? '';
+    if (!isUuidValue(workspaceId)) {
+      return;
+    }
+
+    if (eventsBackendSyncDebounceRef.current) {
+      clearTimeout(eventsBackendSyncDebounceRef.current);
+    }
+
+    eventsBackendSyncDebounceRef.current = setTimeout(() => {
+      void syncEventsAndTemplateForWorkspace(
+        workspaceId,
+        eventi,
+        messaggioEventoTemplate
+      ).catch((error) => {
+        if (!shouldSilenceTransientSyncError(error)) {
+          console.log('Errore sincronizzazione backend eventi/template:', error);
+        }
+      });
+    }, 420);
+
+    return () => {
+      if (eventsBackendSyncDebounceRef.current) {
+        clearTimeout(eventsBackendSyncDebounceRef.current);
+        eventsBackendSyncDebounceRef.current = null;
+      }
+    };
+  }, [
+    eventi,
+    hasInitializedAuth,
+    isAuthenticated,
+    isLoaded,
+    messaggioEventoTemplate,
+    salonAccountEmail,
+    salonWorkspace.id,
+    syncEventsAndTemplateForWorkspace,
+  ]);
+
+  useEffect(() => {
+    if (!isLoaded || !isAuthenticated || !hasInitializedAuth || !salonAccountEmail) {
+      return;
+    }
+
+    const workspaceId = salonWorkspace.id?.trim() ?? '';
+    if (!isUuidValue(workspaceId)) {
+      return;
+    }
+
+    if (ownerSnapshotSyncDebounceRef.current) {
+      clearTimeout(ownerSnapshotSyncDebounceRef.current);
+    }
+
+    ownerSnapshotSyncDebounceRef.current = setTimeout(() => {
+      void syncOwnerSnapshotForWorkspace(workspaceId, {
+        workspace: salonWorkspace,
+        clienti,
+        appuntamenti,
+        movimenti,
+        servizi,
+        operatori,
+        macchinari,
+        carteCollegate,
+        eventi,
+        richiestePrenotazione,
+        availabilitySettings,
+        messaggioEventoTemplate,
+        serviceCardColorOverrides,
+        roleCardColorOverrides,
+      }).catch((error) => {
+        if (!shouldSilenceTransientSyncError(error)) {
+          console.log('Errore sincronizzazione snapshot owner privata:', error);
+        }
+      });
+    }, 650);
+
+    return () => {
+      if (ownerSnapshotSyncDebounceRef.current) {
+        clearTimeout(ownerSnapshotSyncDebounceRef.current);
+        ownerSnapshotSyncDebounceRef.current = null;
+      }
+    };
+  }, [
+    appuntamenti,
+    availabilitySettings,
+    carteCollegate,
+    clienti,
+    eventi,
+    hasInitializedAuth,
+    isAuthenticated,
+    isLoaded,
+    macchinari,
+    messaggioEventoTemplate,
+    movimenti,
+    operatori,
+    richiestePrenotazione,
+    roleCardColorOverrides,
+    salonAccountEmail,
+    salonWorkspace,
+    serviceCardColorOverrides,
+    servizi,
+    syncOwnerSnapshotForWorkspace,
   ]);
 
   useEffect(() => {
@@ -3318,6 +5232,37 @@ export function AppProvider({ children }: { children: ReactNode }) {
         updatedAt: new Date().toISOString(),
       })
     );
+    AsyncStorage.multiSet([
+      [
+        buildScopedStorageKey(STORAGE_KEYS.workspace_cash_section_disabled, salonAccountEmail),
+        salonWorkspace.cashSectionDisabled ? 'true' : 'false',
+      ],
+      [
+        buildScopedStorageKey(
+          STORAGE_KEYS.workspace_auto_accept_booking_requests,
+          salonAccountEmail
+        ),
+        salonWorkspace.autoAcceptBookingRequests ? 'true' : 'false',
+      ],
+      [
+        buildScopedStorageKey(
+          STORAGE_KEYS.workspace_auto_accept_booking_requests_updated_at,
+          salonAccountEmail
+        ),
+        salonWorkspace.autoAcceptBookingRequestsUpdatedAt?.trim() || '',
+      ],
+      [
+        buildScopedStorageKey(
+          STORAGE_KEYS.workspace_customer_reminder_hours_before,
+          salonAccountEmail
+        ),
+        String(
+          Math.max(0, Math.min(168, Math.round(salonWorkspace.customerReminderHoursBefore ?? 24)))
+        ),
+      ],
+    ]).catch((error) => {
+      console.log('Errore persistenza preferenze workspace scoped:', error);
+    });
   }, [salonWorkspace, isLoaded, salonAccountEmail]);
 
   useEffect(() => {
@@ -3414,7 +5359,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     AsyncStorage.setItem(
       buildScopedStorageKey(STORAGE_KEYS.onboarding_completed, salonAccountEmail),
       hasCompletedOnboarding ? 'true' : 'false'
-    );
+    ).catch(() => undefined);
   }, [hasCompletedOnboarding, isLoaded, salonAccountEmail]);
 
   useEffect(() => {
@@ -3470,83 +5415,297 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const updateSalonWorkspacePersisted = React.useCallback(
     async (updater: SalonWorkspace | ((current: SalonWorkspace) => SalonWorkspace)) => {
-      const mutationTimestamp = Date.now();
-      const mutationUpdatedAt = new Date(mutationTimestamp).toISOString();
-      let nextWorkspaceSnapshot: SalonWorkspace | null = null;
+      const currentWorkspace = salonWorkspaceRef.current;
+      const resolved = typeof updater === 'function'
+        ? (updater as (current: SalonWorkspace) => SalonWorkspace)(currentWorkspace)
+        : updater;
+      const workspaceSnapshot = normalizeWorkspace(
+        {
+          ...resolved,
+          ownerEmail: salonAccountEmail || resolved.ownerEmail || currentWorkspace.ownerEmail,
+          updatedAt: new Date().toISOString(),
+        },
+        salonAccountEmail || resolved.ownerEmail || currentWorkspace.ownerEmail
+      );
 
-      setSalonWorkspace((current) => {
-        const resolved = typeof updater === 'function'
-          ? (updater as (current: SalonWorkspace) => SalonWorkspace)(current)
-          : updater;
-        const normalized = normalizeWorkspace(
-          {
-            ...resolved,
-            ownerEmail: salonAccountEmail || resolved.ownerEmail,
-            updatedAt: mutationUpdatedAt,
-          },
-          salonAccountEmail || resolved.ownerEmail
-        );
-        lastLocalWorkspaceMutationAtRef.current = mutationTimestamp;
-        latestSalonWorkspaceRef.current = normalized;
-        pendingWorkspaceSyncRef.current = {
-          signature: buildWorkspaceSyncSignature(normalized),
-          at: mutationTimestamp,
-        };
-        nextWorkspaceSnapshot = normalized;
-        return normalized;
-      });
+      salonWorkspaceRef.current = workspaceSnapshot;
+      setSalonWorkspace(workspaceSnapshot);
 
-      if (!isLoaded || !salonAccountEmail || !nextWorkspaceSnapshot) return;
+      if (!isLoaded || !salonAccountEmail) return;
 
       try {
         await AsyncStorage.setItem(
           buildScopedStorageKey(STORAGE_KEYS.workspace, salonAccountEmail),
-          JSON.stringify(nextWorkspaceSnapshot)
+          JSON.stringify(workspaceSnapshot)
         );
+        await AsyncStorage.multiSet([
+          [
+            buildScopedStorageKey(
+              STORAGE_KEYS.workspace_cash_section_disabled,
+              salonAccountEmail
+            ),
+            workspaceSnapshot.cashSectionDisabled ? 'true' : 'false',
+          ],
+          [
+            buildScopedStorageKey(
+              STORAGE_KEYS.workspace_auto_accept_booking_requests,
+              salonAccountEmail
+            ),
+            workspaceSnapshot.autoAcceptBookingRequests ? 'true' : 'false',
+          ],
+          [
+            buildScopedStorageKey(
+              STORAGE_KEYS.workspace_auto_accept_booking_requests_updated_at,
+              salonAccountEmail
+            ),
+            workspaceSnapshot.autoAcceptBookingRequestsUpdatedAt?.trim() || '',
+          ],
+          [
+            buildScopedStorageKey(
+              STORAGE_KEYS.workspace_customer_reminder_hours_before,
+              salonAccountEmail
+            ),
+            String(
+              Math.max(
+                0,
+                Math.min(
+                  168,
+                  Math.round(workspaceSnapshot.customerReminderHoursBefore ?? 24)
+                )
+              )
+            ),
+          ],
+        ]);
       } catch (error) {
         console.log('Errore persistenza workspace immediata:', error);
       }
 
-      if (!nextWorkspaceSnapshot) return;
-      const workspaceSnapshot: SalonWorkspace = nextWorkspaceSnapshot;
+      try {
+        const ownerAccounts = await loadOwnerAccounts();
+        const updatedOwnerAccounts = ownerAccounts.map((account) =>
+          normalizeAccountEmail(account.email) === normalizeAccountEmail(salonAccountEmail)
+            ? {
+                ...account,
+                salonName: workspaceSnapshot.salonName.trim() || account.salonName,
+                businessPhone: workspaceSnapshot.businessPhone.trim() || account.businessPhone,
+                streetLine: workspaceSnapshot.streetName.trim() || account.streetLine,
+                city: workspaceSnapshot.city.trim() || account.city,
+                postalCode: workspaceSnapshot.postalCode.trim() || account.postalCode,
+                activityCategory:
+                  workspaceSnapshot.activityCategory.trim() || account.activityCategory,
+              }
+            : account
+        );
+
+        await saveOwnerAccounts(updatedOwnerAccounts);
+      } catch (error) {
+        console.log('Errore sincronizzazione account owner locale:', error);
+      }
+
+      const normalizedOwnerEmail = normalizeAccountEmail(
+        workspaceSnapshot.ownerEmail || salonAccountEmail
+      );
+      const normalizedSalonCode = normalizeSalonCode(workspaceSnapshot.salonCode);
+      const resolvedSalonName = resolveSalonDisplayName({
+        salonName: workspaceSnapshot.salonName,
+        activityCategory: workspaceSnapshot.activityCategory,
+        salonCode: normalizedSalonCode,
+        ownerEmail: normalizedOwnerEmail,
+      });
+
+      if (!normalizedOwnerEmail || !normalizedSalonCode || !resolvedSalonName) {
+        return;
+      }
 
       try {
-        const workspaceId = await enqueuePortalPublish({
-          workspace: workspaceSnapshot,
-          clienti: filterRecentlyDeletedCustomers(clienti),
-          appuntamenti,
-          servizi,
-          operatori,
-          richiestePrenotazione,
-          availabilitySettings,
-          serviceCardColorOverrides,
-          roleCardColorOverrides,
-        });
+        let remoteUpdateQuery = supabase
+          .from('workspaces')
+          .update({
+            slug: normalizedSalonCode,
+            salon_name: resolvedSalonName,
+            owner_phone: workspaceSnapshot.businessPhone.trim() || null,
+            cash_section_disabled: workspaceSnapshot.cashSectionDisabled ?? false,
+            customer_reminder_hours_before: Math.max(
+              0,
+              Math.min(
+                168,
+                Math.round(workspaceSnapshot.customerReminderHoursBefore ?? 24)
+              )
+            ),
+            updated_at: workspaceSnapshot.updatedAt,
+          })
+          .select(
+            'id, slug, salon_name, owner_email, owner_phone, cash_section_disabled, customer_reminder_hours_before, subscription_plan, subscription_status, created_at, updated_at'
+          )
+          .limit(1);
 
-        if (workspaceId && workspaceSnapshot.id !== workspaceId) {
-          setSalonWorkspace((current) => ({ ...current, id: workspaceId }));
+        remoteUpdateQuery = isUuidValue(workspaceSnapshot.id)
+          ? remoteUpdateQuery.eq('id', workspaceSnapshot.id)
+          : remoteUpdateQuery.eq('owner_email', normalizedOwnerEmail);
+
+        const { data: updatedWorkspace, error: updateWorkspaceError } =
+          await remoteUpdateQuery.maybeSingle();
+
+        if (updateWorkspaceError) {
+          throw updateWorkspaceError;
+        }
+
+        const normalizedRemoteWorkspace = updatedWorkspace
+          ? normalizeWorkspace(
+              {
+                ...workspaceSnapshot,
+                id: updatedWorkspace.id,
+                salonCode: updatedWorkspace.slug,
+                salonName: updatedWorkspace.salon_name,
+                ownerEmail: updatedWorkspace.owner_email,
+                businessPhone: updatedWorkspace.owner_phone ?? undefined,
+                cashSectionDisabled: updatedWorkspace.cash_section_disabled ?? undefined,
+                customerReminderHoursBefore:
+                  updatedWorkspace.customer_reminder_hours_before ?? undefined,
+                subscriptionPlan: updatedWorkspace.subscription_plan,
+                subscriptionStatus: updatedWorkspace.subscription_status,
+                createdAt: updatedWorkspace.created_at,
+                updatedAt: updatedWorkspace.updated_at,
+              },
+              normalizedOwnerEmail
+            )
+          : null;
+
+        if (normalizedRemoteWorkspace) {
+          setSalonWorkspace(normalizedRemoteWorkspace);
           await AsyncStorage.setItem(
             buildScopedStorageKey(STORAGE_KEYS.workspace, salonAccountEmail),
-            JSON.stringify({ ...workspaceSnapshot, id: workspaceId })
+            JSON.stringify(normalizedRemoteWorkspace)
           );
+          await AsyncStorage.multiSet([
+            [
+              buildScopedStorageKey(
+                STORAGE_KEYS.workspace_cash_section_disabled,
+                salonAccountEmail
+              ),
+              normalizedRemoteWorkspace.cashSectionDisabled ? 'true' : 'false',
+            ],
+            [
+              buildScopedStorageKey(
+                STORAGE_KEYS.workspace_auto_accept_booking_requests,
+                salonAccountEmail
+              ),
+              normalizedRemoteWorkspace.autoAcceptBookingRequests ? 'true' : 'false',
+            ],
+            [
+              buildScopedStorageKey(
+                STORAGE_KEYS.workspace_auto_accept_booking_requests_updated_at,
+                salonAccountEmail
+              ),
+              normalizedRemoteWorkspace.autoAcceptBookingRequestsUpdatedAt?.trim() || '',
+            ],
+            [
+              buildScopedStorageKey(
+                STORAGE_KEYS.workspace_customer_reminder_hours_before,
+                salonAccountEmail
+              ),
+              String(
+                Math.max(
+                  0,
+                  Math.min(
+                    168,
+                    Math.round(normalizedRemoteWorkspace.customerReminderHoursBefore ?? 24)
+                  )
+                )
+              ),
+            ],
+          ]);
+
+          await enqueuePortalPublish({
+            workspace: normalizedRemoteWorkspace,
+            clienti: clienti as unknown as Array<Record<string, unknown>>,
+            appuntamenti: appuntamenti as unknown as Array<Record<string, unknown>>,
+            servizi: servizi as unknown as Array<Record<string, unknown>>,
+            operatori: operatori as unknown as Array<Record<string, unknown>>,
+            richiestePrenotazione:
+              richiestePrenotazione as unknown as Array<Record<string, unknown>>,
+            availabilitySettings,
+            serviceCardColorOverrides,
+            roleCardColorOverrides,
+          }).catch((publishError) => {
+            console.log('Errore publish portale dopo update workspace:', publishError);
+          });
+
+          if (isUuidValue(normalizedRemoteWorkspace.id)) {
+            await syncOwnerSnapshotForWorkspace(normalizedRemoteWorkspace.id, {
+              workspace: normalizedRemoteWorkspace,
+              clienti,
+              appuntamenti,
+              movimenti,
+              servizi,
+              operatori,
+              macchinari,
+              carteCollegate,
+              eventi,
+              richiestePrenotazione,
+              availabilitySettings,
+              messaggioEventoTemplate,
+              serviceCardColorOverrides,
+              roleCardColorOverrides,
+            }).catch((snapshotError) => {
+              console.log('Errore sync snapshot owner dopo update workspace:', snapshotError);
+            });
+          }
+        }
+
+        const ownerAccounts = await loadOwnerAccounts();
+        const matchingOwnerAccount = ownerAccounts.find(
+          (account) => normalizeAccountEmail(account.email) === normalizedOwnerEmail
+        );
+
+        if (matchingOwnerAccount) {
+          const bootstrapResult = await runWithDeadlockRetry(
+            () =>
+              Promise.resolve(
+                supabase.rpc('bootstrap_owner_account', {
+                  p_first_name: matchingOwnerAccount.firstName.trim(),
+                  p_last_name: matchingOwnerAccount.lastName.trim(),
+                  p_salon_name: resolvedSalonName,
+                  p_business_phone: workspaceSnapshot.businessPhone.trim(),
+                  p_owner_phone: workspaceSnapshot.businessPhone.trim(),
+                  p_owner_email: normalizedOwnerEmail,
+                  p_salon_code: normalizedSalonCode,
+                  p_activity_category: workspaceSnapshot.activityCategory.trim().toUpperCase(),
+                  p_street_line: workspaceSnapshot.streetName.trim().toUpperCase(),
+                  p_city: workspaceSnapshot.city.trim().toUpperCase(),
+                  p_postal_code: workspaceSnapshot.postalCode.trim(),
+                })
+              ),
+            'Sincronizzazione profilo owner backend'
+          );
+
+          if (bootstrapResult.error) {
+            console.log('Errore bootstrap backend profilo owner:', bootstrapResult.error);
+          }
         }
       } catch (error) {
-        console.log('Errore pubblicazione workspace aggiornata:', error);
+        console.log('Errore persistenza workspace remota:', error);
       }
     },
     [
       appuntamenti,
       availabilitySettings,
+      carteCollegate,
       clienti,
       enqueuePortalPublish,
-      filterRecentlyDeletedCustomers,
+      eventi,
       isLoaded,
+      macchinari,
+      messaggioEventoTemplate,
+      movimenti,
       operatori,
       richiestePrenotazione,
       roleCardColorOverrides,
       salonAccountEmail,
       serviceCardColorOverrides,
+      serviceCardColorOverrides,
       servizi,
+      syncOwnerSnapshotForWorkspace,
     ]
   );
 
@@ -3556,10 +5715,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         | AvailabilitySettings
         | ((current: AvailabilitySettings) => AvailabilitySettings)
     ) => {
-      const mutationTimestamp = Date.now();
-      const mutationUpdatedAt = new Date(mutationTimestamp).toISOString();
       let nextAvailabilitySnapshot: AvailabilitySettings | null = null;
-      lastLocalAvailabilityMutationAtRef.current = mutationTimestamp;
 
       setAvailabilitySettings((current) => {
         const resolved =
@@ -3567,116 +5723,108 @@ export function AppProvider({ children }: { children: ReactNode }) {
             ? (updater as (current: AvailabilitySettings) => AvailabilitySettings)(current)
             : updater;
         const normalized = normalizeAvailabilitySettings(resolved);
-        latestAvailabilitySettingsRef.current = normalized;
-        pendingAvailabilitySyncRef.current = {
-          signature: buildAvailabilitySettingsSyncSignature(normalized),
-          at: mutationTimestamp,
-        };
         nextAvailabilitySnapshot = normalized;
         return normalized;
       });
 
-      if (!isLoaded || !salonAccountEmail || !nextAvailabilitySnapshot) return;
-      const availabilitySnapshot: AvailabilitySettings = nextAvailabilitySnapshot;
-      const workspaceSnapshot = normalizeWorkspace(
-        {
-          ...latestSalonWorkspaceRef.current,
-          ownerEmail:
-            salonAccountEmail || latestSalonWorkspaceRef.current.ownerEmail,
-          updatedAt: mutationUpdatedAt,
-        },
-        salonAccountEmail || latestSalonWorkspaceRef.current.ownerEmail
-      );
-
-      latestSalonWorkspaceRef.current = workspaceSnapshot;
-      setSalonWorkspace((current) =>
-        current.updatedAt === workspaceSnapshot.updatedAt &&
-        current.id === workspaceSnapshot.id
-          ? current
-          : workspaceSnapshot
-      );
+      if (!isLoaded || !salonAccountEmail || !nextAvailabilitySnapshot) {
+        return;
+      }
 
       try {
         await AsyncStorage.setItem(
           buildScopedStorageKey(STORAGE_KEYS.availability_settings, salonAccountEmail),
-          JSON.stringify(availabilitySnapshot)
+          JSON.stringify(nextAvailabilitySnapshot)
         );
       } catch (error) {
         console.log('Errore persistenza availability immediata:', error);
       }
 
-      try {
-        await AsyncStorage.setItem(
-          buildScopedStorageKey(STORAGE_KEYS.workspace, salonAccountEmail),
-          JSON.stringify(workspaceSnapshot)
-        );
-      } catch (error) {
-        console.log('Errore persistenza workspace con availability aggiornata:', error);
+      const normalizedOwnerEmail = normalizeAccountEmail(
+        salonWorkspace.ownerEmail || salonAccountEmail
+      );
+      const normalizedSalonCode = normalizeSalonCode(salonWorkspace.salonCode);
+
+      if (!normalizedOwnerEmail || !normalizedSalonCode) {
+        return;
       }
 
       try {
-        const normalizedSalonCode = normalizeSalonCode(
-          workspaceSnapshot.salonCode || latestSalonWorkspaceRef.current.salonCode
-        );
-
-        if (normalizedSalonCode) {
-          try {
-            const updatedAvailabilitySnapshot = await runWithDeadlockRetry(
-              () =>
-                updateClientPortalAvailabilitySettings({
-                  ownerEmail: salonAccountEmail,
-                  salonCode: normalizedSalonCode,
-                  availabilitySettings: availabilitySnapshot,
-                }),
-              'Aggiornamento availability portale cliente'
-            );
-
-            if (updatedAvailabilitySnapshot?.availabilitySettings) {
-              applyRemoteAvailabilitySettings(updatedAvailabilitySnapshot.availabilitySettings);
-            }
-          } catch (error) {
-            console.log('Errore aggiornamento availability dedicata:', error);
-          }
-        }
-
-        const workspaceId = await enqueuePortalPublish({
-          workspace: workspaceSnapshot,
-          clienti: filterRecentlyDeletedCustomers(clienti),
-          appuntamenti,
-          servizi,
-          operatori,
-          richiestePrenotazione,
-          availabilitySettings: availabilitySnapshot,
-          serviceCardColorOverrides,
-          roleCardColorOverrides,
+        const { error } = await supabase.rpc('update_client_portal_availability_settings', {
+          p_owner_email: normalizedOwnerEmail,
+          p_salon_code: normalizedSalonCode,
+          p_availability_settings: nextAvailabilitySnapshot,
         });
 
-        if (workspaceId && workspaceSnapshot.id !== workspaceId) {
-          setSalonWorkspace((current) => {
-            const nextWorkspace = { ...current, id: workspaceId };
-            latestSalonWorkspaceRef.current = nextWorkspace;
-            return nextWorkspace;
+        if (error) {
+          throw error;
+        }
+
+        await enqueuePortalPublish({
+          workspace: {
+            ...salonWorkspace,
+            ownerEmail: normalizedOwnerEmail,
+            salonCode: normalizedSalonCode,
+          },
+          clienti: clienti as unknown as Array<Record<string, unknown>>,
+          appuntamenti: appuntamenti as unknown as Array<Record<string, unknown>>,
+          servizi: servizi as unknown as Array<Record<string, unknown>>,
+          operatori: operatori as unknown as Array<Record<string, unknown>>,
+          richiestePrenotazione:
+            richiestePrenotazione as unknown as Array<Record<string, unknown>>,
+          availabilitySettings: nextAvailabilitySnapshot,
+          serviceCardColorOverrides,
+          roleCardColorOverrides,
+        }).catch((publishError) => {
+          console.log('Errore publish live availability settings:', publishError);
+        });
+
+        const workspaceId = salonWorkspace.id?.trim() ?? '';
+        if (isUuidValue(workspaceId)) {
+          await syncOwnerSnapshotForWorkspace(workspaceId, {
+            workspace: {
+              ...salonWorkspace,
+              ownerEmail: normalizedOwnerEmail,
+              salonCode: normalizedSalonCode,
+            },
+            clienti,
+            appuntamenti,
+            movimenti,
+            servizi,
+            operatori,
+            macchinari,
+            carteCollegate,
+            eventi,
+            richiestePrenotazione,
+            availabilitySettings: nextAvailabilitySnapshot,
+            messaggioEventoTemplate,
+            serviceCardColorOverrides,
+            roleCardColorOverrides,
+          }).catch((snapshotError) => {
+            if (!shouldSilenceTransientSyncError(snapshotError)) {
+              console.log('Errore sync snapshot owner dopo availability settings:', snapshotError);
+            }
           });
         }
       } catch (error) {
-        console.log('Errore pubblicazione availability aggiornata:', error);
+        console.log('Errore persistenza remota availability settings:', error);
       }
     },
     [
-      applyRemoteAvailabilitySettings,
       appuntamenti,
       clienti,
       enqueuePortalPublish,
-      filterRecentlyDeletedCustomers,
       isLoaded,
+      macchinari,
+      messaggioEventoTemplate,
+      movimenti,
       operatori,
       richiestePrenotazione,
       roleCardColorOverrides,
-      runWithDeadlockRetry,
       salonAccountEmail,
       salonWorkspace,
       serviceCardColorOverrides,
-      updateClientPortalAvailabilitySettings,
+      syncOwnerSnapshotForWorkspace,
       servizi,
     ]
   );
@@ -3687,32 +5835,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
         | AvailabilitySettings
         | ((current: AvailabilitySettings) => AvailabilitySettings)
     ) => {
-      const mutationTimestamp = Date.now();
-      const mutationUpdatedAt = new Date(mutationTimestamp).toISOString();
-      lastLocalAvailabilityMutationAtRef.current = mutationTimestamp;
-      const currentAvailabilitySnapshot = latestAvailabilitySettingsRef.current;
-      const resolved =
-        typeof updater === 'function'
-          ? (updater as (current: AvailabilitySettings) => AvailabilitySettings)(
-              currentAvailabilitySnapshot
-            )
-          : updater;
-      const guidedSlotsUpdatedAt = buildNextMonotonicIsoTimestamp(
-        latestGuidedSlotsUpdatedAtRef.current,
-        resolved.guidedSlotsUpdatedAt ?? mutationUpdatedAt
-      );
-      const availabilitySnapshot = normalizeAvailabilitySettings({
-        ...resolved,
-        guidedSlotsUpdatedAt,
-      });
+      await updateAvailabilitySettingsPersisted((current) => {
+        const resolved =
+          typeof updater === 'function'
+            ? (updater as (current: AvailabilitySettings) => AvailabilitySettings)(current)
+            : updater;
 
-      latestAvailabilitySettingsRef.current = availabilitySnapshot;
-      latestGuidedSlotsUpdatedAtRef.current = guidedSlotsUpdatedAt;
-      await updateAvailabilitySettingsPersisted(availabilitySnapshot);
+        return normalizeAvailabilitySettings({
+          ...current,
+          ...resolved,
+        });
+      });
     },
-    [
-      updateAvailabilitySettingsPersisted,
-    ]
+    [updateAvailabilitySettingsPersisted]
   );
 
   const switchSalonAccount = async (email: string) => {
@@ -3734,6 +5869,150 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setSalonAccountEmail(normalizedEmail);
     return true;
   };
+
+  const primeScopedOwnerAccountState = React.useCallback(
+    async (email: string) => {
+      const normalizedEmail = normalizeAccountEmail(email);
+      if (!normalizedEmail) {
+        return;
+      }
+
+      try {
+        const [
+          clientiSalvati,
+          workspaceSalvato,
+          cashSectionDisabledSalvato,
+          autoAcceptBookingRequestsSalvato,
+          autoAcceptBookingRequestsUpdatedAtSalvato,
+          customerReminderHoursBeforeSalvato,
+          appuntamentiSalvati,
+          movimentiSalvati,
+          serviziSalvati,
+          carteSalvate,
+          operatoriSalvati,
+          macchinariSalvati,
+          eventiSalvati,
+          richiesteSalvate,
+          availabilitySettingsSalvate,
+          templateEventiSalvato,
+          biometricEnabledSalvato,
+          serviceCardColorsSalvate,
+          roleCardColorsSalvate,
+        ] = await Promise.all([
+          AsyncStorage.getItem(buildScopedStorageKey(STORAGE_KEYS.clienti, normalizedEmail)),
+          AsyncStorage.getItem(buildScopedStorageKey(STORAGE_KEYS.workspace, normalizedEmail)),
+          AsyncStorage.getItem(
+            buildScopedStorageKey(
+              STORAGE_KEYS.workspace_cash_section_disabled,
+              normalizedEmail
+            )
+          ),
+          AsyncStorage.getItem(
+            buildScopedStorageKey(
+              STORAGE_KEYS.workspace_auto_accept_booking_requests,
+              normalizedEmail
+            )
+          ),
+          AsyncStorage.getItem(
+            buildScopedStorageKey(
+              STORAGE_KEYS.workspace_auto_accept_booking_requests_updated_at,
+              normalizedEmail
+            )
+          ),
+          AsyncStorage.getItem(
+            buildScopedStorageKey(
+              STORAGE_KEYS.workspace_customer_reminder_hours_before,
+              normalizedEmail
+            )
+          ),
+          AsyncStorage.getItem(buildScopedStorageKey(STORAGE_KEYS.appuntamenti, normalizedEmail)),
+          AsyncStorage.getItem(buildScopedStorageKey(STORAGE_KEYS.movimenti, normalizedEmail)),
+          AsyncStorage.getItem(buildScopedStorageKey(STORAGE_KEYS.servizi, normalizedEmail)),
+          AsyncStorage.getItem(buildScopedStorageKey(STORAGE_KEYS.carte, normalizedEmail)),
+          AsyncStorage.getItem(buildScopedStorageKey(STORAGE_KEYS.operatori, normalizedEmail)),
+          AsyncStorage.getItem(buildScopedStorageKey(STORAGE_KEYS.macchinari, normalizedEmail)),
+          AsyncStorage.getItem(buildScopedStorageKey(STORAGE_KEYS.eventi, normalizedEmail)),
+          AsyncStorage.getItem(
+            buildScopedStorageKey(STORAGE_KEYS.richieste_prenotazione, normalizedEmail)
+          ),
+          AsyncStorage.getItem(
+            buildScopedStorageKey(STORAGE_KEYS.availability_settings, normalizedEmail)
+          ),
+          AsyncStorage.getItem(buildScopedStorageKey(STORAGE_KEYS.eventi_template, normalizedEmail)),
+          AsyncStorage.getItem(buildScopedStorageKey(STORAGE_KEYS.biometric_enabled, normalizedEmail)),
+          AsyncStorage.getItem(
+            buildScopedStorageKey(STORAGE_KEYS.service_card_color_overrides, normalizedEmail)
+          ),
+          AsyncStorage.getItem(
+            buildScopedStorageKey(STORAGE_KEYS.role_card_color_overrides, normalizedEmail)
+          ),
+        ]);
+
+        setSalonWorkspace(
+          mergeWorkspacePreferenceOverrides({
+            workspace: workspaceSalvato
+              ? (JSON.parse(workspaceSalvato) as Partial<SalonWorkspace>)
+              : createDefaultWorkspace(normalizedEmail),
+            cashSectionDisabled:
+              cashSectionDisabledSalvato === 'true'
+                ? true
+                : cashSectionDisabledSalvato === 'false'
+                  ? false
+                  : undefined,
+            autoAcceptBookingRequests:
+              autoAcceptBookingRequestsSalvato === 'true'
+                ? true
+                : autoAcceptBookingRequestsSalvato === 'false'
+                  ? false
+                  : undefined,
+            autoAcceptBookingRequestsUpdatedAt:
+              autoAcceptBookingRequestsUpdatedAtSalvato?.trim() || undefined,
+            customerReminderHoursBefore:
+              customerReminderHoursBeforeSalvato?.trim() &&
+              Number.isFinite(Number(customerReminderHoursBeforeSalvato))
+                ? Math.max(
+                    0,
+                    Math.min(168, Math.round(Number(customerReminderHoursBeforeSalvato)))
+                  )
+                : undefined,
+            email: normalizedEmail,
+          })
+        );
+        setClienti(clientiSalvati ? normalizeClienti(JSON.parse(clientiSalvati)) : normalizeClienti([]));
+        setAppuntamenti(
+          appuntamentiSalvati ? normalizeAppuntamenti(JSON.parse(appuntamentiSalvati)) : normalizeAppuntamenti([])
+        );
+        setMovimenti(movimentiSalvati ? normalizeMovimenti(JSON.parse(movimentiSalvati)) : normalizeMovimenti([]));
+        setServizi(serviziSalvati ? normalizeServizi(JSON.parse(serviziSalvati)) : normalizeServizi([]));
+        setOperatori(operatoriSalvati ? normalizeOperatori(JSON.parse(operatoriSalvati)) : normalizeOperatori([]));
+        setMacchinari(macchinariSalvati ? normalizeMacchinari(JSON.parse(macchinariSalvati)) : normalizeMacchinari([]));
+        setCarteCollegate(carteSalvate ? normalizeCarte(JSON.parse(carteSalvate)) : normalizeCarte([]));
+        setEventi(eventiSalvati ? normalizeEventi(JSON.parse(eventiSalvati)) : normalizeEventi([]));
+        setRichiestePrenotazione(
+          richiesteSalvate ? normalizeRichiestePrenotazione(JSON.parse(richiesteSalvate)) : []
+        );
+        setAvailabilitySettings(
+          availabilitySettingsSalvate
+            ? normalizeAvailabilitySettings(JSON.parse(availabilitySettingsSalvate))
+            : normalizeAvailabilitySettings()
+        );
+        setBiometricEnabled(biometricEnabledSalvato === 'true');
+        setMessaggioEventoTemplate(
+          templateEventiSalvato ??
+            'Ciao! Ti aspetto a {evento} il {data} alle {ora}. Scrivimi per conferma.'
+        );
+        setServiceCardColorOverrides(serviceCardColorsSalvate ? JSON.parse(serviceCardColorsSalvate) : {});
+        setRoleCardColorOverrides(roleCardColorsSalvate ? JSON.parse(roleCardColorsSalvate) : {});
+        await syncOwnerOnboardingState(normalizedEmail);
+      } catch (error) {
+        console.log('Errore prime stato account owner:', error);
+        clearRuntimeDataForAccount(normalizedEmail);
+      } finally {
+        setIsLoaded(true);
+      }
+    },
+    [clearRuntimeDataForAccount, syncOwnerOnboardingState]
+  );
 
   const loadOwnerAccounts = async () => {
     try {
@@ -3809,6 +6088,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
       buildScopedStorageKey(STORAGE_KEYS.biometric_login_password, email)
     );
 
+  const ensureFreshOwnerAuthSession = async (targetEmail: string) => {
+    const normalizedTargetEmail = normalizeAccountEmail(targetEmail);
+    if (!normalizedTargetEmail) {
+      return;
+    }
+
+    try {
+      const { data: sessionResult } = await supabase.auth.getSession();
+      const currentSessionEmail = normalizeAccountEmail(sessionResult.session?.user?.email);
+
+      if (!currentSessionEmail || currentSessionEmail === normalizedTargetEmail) {
+        return;
+      }
+
+      await supabase.auth.signOut();
+      await AsyncStorage.removeItem(STORAGE_KEYS.owner_session);
+    } catch (error) {
+      console.log('Errore riallineamento sessione owner prima del bootstrap:', error);
+    }
+  };
+
   const loadStoredWorkspaceForOwner = async (email: string) => {
     const normalizedEmail = normalizeAccountEmail(email);
     if (!normalizedEmail) {
@@ -3848,38 +6148,41 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const localAccount =
       accounts.find((item) => normalizeAccountEmail(item.email) === normalizedEmail) ?? null;
     const storedWorkspace = await loadStoredWorkspaceForOwner(normalizedEmail);
-    let remoteWorkspaceFallback: RemoteWorkspaceRow | null = null;
+    const existingRemoteWorkspace = await loadExistingOwnerWorkspaceRecord(normalizedEmail);
 
-    if (!storedWorkspace?.salonName?.trim()) {
-      try {
-        const { data, error } = await supabase
-          .from('workspaces')
-          .select(
-            'id, slug, salon_name, owner_email, customer_reminder_hours_before, subscription_plan, subscription_status, created_at, updated_at'
-          )
-          .eq('owner_email', normalizedEmail)
-          .order('updated_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
-
-        if (error) {
-          throw error;
-        }
-
-        remoteWorkspaceFallback = (data ?? null) as RemoteWorkspaceRow | null;
-      } catch (error) {
-        console.log('Errore recupero workspace remoto per bootstrap owner:', error);
-      }
+    if (existingRemoteWorkspace?.id) {
+      setOwnerProfileNeedsCompletion(false);
+      setSalonWorkspace((current) =>
+        mergeWorkspacePreservingLocalProfile({
+          localWorkspace: current,
+          remoteWorkspace: {
+            ...current,
+            id: existingRemoteWorkspace.id,
+            salonCode: existingRemoteWorkspace.slug,
+            salonName: existingRemoteWorkspace.salon_name,
+            ownerEmail: existingRemoteWorkspace.owner_email,
+            businessPhone: existingRemoteWorkspace.owner_phone ?? undefined,
+            cashSectionDisabled: existingRemoteWorkspace.cash_section_disabled ?? undefined,
+            customerReminderHoursBefore:
+              existingRemoteWorkspace.customer_reminder_hours_before ?? undefined,
+            subscriptionPlan: existingRemoteWorkspace.subscription_plan,
+            subscriptionStatus: existingRemoteWorkspace.subscription_status,
+            createdAt: existingRemoteWorkspace.created_at,
+            updatedAt: existingRemoteWorkspace.updated_at,
+          },
+          email: normalizedEmail,
+        })
+      );
+      return { ok: true as const, skipped: 'workspace_already_linked' as const };
     }
 
     const salonName =
       localAccount?.salonName.trim() ||
-      remoteWorkspaceFallback?.salon_name?.trim() ||
       storedWorkspace?.salonName.trim() ||
       resolveSalonDisplayName({
-        salonName: remoteWorkspaceFallback?.salon_name ?? storedWorkspace?.salonName,
+        salonName: storedWorkspace?.salonName,
         activityCategory: storedWorkspace?.activityCategory,
-        salonCode: remoteWorkspaceFallback?.slug ?? storedWorkspace?.salonCode,
+        salonCode: storedWorkspace?.salonCode,
         ownerEmail: normalizedEmail,
       }).trim();
 
@@ -3893,32 +6196,152 @@ export function AppProvider({ children }: { children: ReactNode }) {
       'Titolare';
     const lastName = localAccount?.lastName.trim() || 'Salon';
     const businessPhone =
-      localAccount?.businessPhone.trim() ||
-      storedWorkspace?.businessPhone.trim() ||
-      null;
+      localAccount?.businessPhone.trim() || storedWorkspace?.businessPhone.trim() || null;
     const ownerPhone = businessPhone;
-    const salonCode = normalizeSalonCode(
-      remoteWorkspaceFallback?.slug ||
-      storedWorkspace?.salonCode ||
-      buildSalonCode(salonName, normalizedEmail)
+    const activityCategory =
+      localAccount?.activityCategory.trim() || storedWorkspace?.activityCategory.trim() || null;
+    const streetLine =
+      localAccount?.streetLine.trim() || storedWorkspace?.streetName.trim() || null;
+    const city =
+      localAccount?.city.trim() || storedWorkspace?.city.trim() || null;
+    const postalCode =
+      localAccount?.postalCode.trim() || storedWorkspace?.postalCode.trim() || null;
+    const preferredSalonCode = normalizeSalonCode(
+      storedWorkspace?.salonCode || buildSalonCode(salonName, normalizedEmail)
+    );
+    const salonCodeCandidates = Array.from(
+      new Set([
+        preferredSalonCode,
+        ...buildOwnerBootstrapSlugCandidates(salonName, normalizedEmail),
+      ])
     );
 
-    const { error } = await supabase.rpc('bootstrap_owner_account', {
-      p_first_name: firstName,
-      p_last_name: lastName,
-      p_salon_name: salonName,
-      p_business_phone: businessPhone,
-      p_owner_phone: ownerPhone,
-      p_owner_email: normalizedEmail,
-      p_salon_code: salonCode,
-    });
+    if (
+      !hasCompleteOwnerBootstrapProfile({
+        activityCategory,
+        streetLine,
+        city,
+        postalCode,
+      })
+    ) {
+      console.log('Bootstrap backend owner skipped: owner profile incomplete', {
+        email: normalizedEmail,
+        hasActivityCategory: !!activityCategory?.trim(),
+        hasStreetLine: !!streetLine?.trim(),
+        hasCity: !!city?.trim(),
+        hasPostalCode: !!postalCode?.trim(),
+      });
+      setOwnerProfileNeedsCompletion(true);
+      return { ok: true as const, skipped: 'owner_profile_incomplete' as const };
+    }
 
-    if (error) {
-      console.log('Errore bootstrap backend owner:', error);
+    let bootstrapError: unknown = null;
+
+    for (const candidateSalonCode of salonCodeCandidates) {
+      try {
+        const bootstrapResult = await runWithDeadlockRetry(
+          () =>
+            Promise.resolve(
+              supabase.rpc('bootstrap_owner_account', {
+                p_first_name: firstName,
+                p_last_name: lastName,
+                p_salon_name: salonName,
+                p_business_phone: businessPhone,
+                p_owner_phone: ownerPhone,
+                p_owner_email: normalizedEmail,
+                p_salon_code: candidateSalonCode,
+                p_activity_category: activityCategory,
+                p_street_line: streetLine,
+                p_city: city,
+                p_postal_code: postalCode,
+              })
+            ),
+          'Bootstrap backend owner'
+        );
+
+        bootstrapError = bootstrapResult.error;
+      } catch (error) {
+        bootstrapError = error;
+      }
+
+      if (!bootstrapError) {
+        setOwnerProfileNeedsCompletion(false);
+        if (candidateSalonCode !== preferredSalonCode) {
+          setSalonWorkspace((current) =>
+            normalizeWorkspace(
+              {
+                ...(current ?? createDefaultWorkspace(normalizedEmail)),
+                salonCode: candidateSalonCode,
+                ownerEmail: normalizedEmail,
+              },
+              normalizedEmail
+            )
+          );
+        }
+        break;
+      }
+
+      if (!isWorkspaceSlugConflictError(bootstrapError)) {
+        break;
+      }
+    }
+
+    if (bootstrapError) {
+      if (isDeadlockError(bootstrapError)) {
+        console.log(
+          'Bootstrap backend owner in deadlock persistente: continuo l’accesso e ritento in background.',
+          bootstrapError
+        );
+        setTimeout(() => {
+          void ensureOwnerBackendBootstrap(normalizedEmail, accounts).catch((error) => {
+            console.log('Retry bootstrap backend owner post-login fallito:', error);
+          });
+        }, 1400);
+
+        return { ok: true as const, skipped: 'bootstrap_retry_pending' as const };
+      }
+
+      if (isStatementTimeoutError(bootstrapError)) {
+        console.log(
+          'Bootstrap backend owner in timeout: continuo l’accesso e ritento in background.',
+          bootstrapError
+        );
+        setTimeout(() => {
+          void ensureOwnerBackendBootstrap(normalizedEmail, accounts).catch((error) => {
+            console.log('Retry bootstrap backend owner post-timeout fallito:', error);
+          });
+        }, 1800);
+
+        return { ok: true as const, skipped: 'bootstrap_retry_pending' as const };
+      }
+
+      if (isSupabaseSchemaCacheLookupError(bootstrapError)) {
+        console.log(
+          'Bootstrap backend owner in schema cache transient error: continuo l’accesso e ritento in background.',
+          bootstrapError
+        );
+        setTimeout(() => {
+          void ensureOwnerBackendBootstrap(normalizedEmail, accounts).catch((error) => {
+            console.log('Retry bootstrap backend owner post-schema-cache fallito:', error);
+          });
+        }, 1800);
+
+        return { ok: true as const, skipped: 'bootstrap_retry_pending' as const };
+      }
+
+      if (isOwnerBootstrapProfileRequirementError(bootstrapError)) {
+        console.log('Bootstrap backend owner skipped after backend validation:', bootstrapError);
+        setOwnerProfileNeedsCompletion(true);
+        return { ok: true as const, skipped: 'owner_profile_incomplete' as const };
+      }
+
+      console.log('Errore bootstrap backend owner:', bootstrapError);
       return {
         ok: false as const,
-        error:
-          error.message?.trim() || 'Account collegato ma workspace backend non allineato.',
+        error: formatOwnerBootstrapError(
+          bootstrapError,
+          'Account collegato ma workspace backend non allineato.'
+        ),
       };
     }
 
@@ -3979,7 +6402,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       await AsyncStorage.setItem(STORAGE_KEYS.owner_session, authenticatedEmail);
       await switchSalonAccount(authenticatedEmail);
       await syncAuthenticatedWorkspace(authenticatedEmail);
+      await primeScopedOwnerAccountState(authenticatedEmail);
       setPendingBiometricUnlock(false);
+      await prepareOnboardingStateForAuthenticatedAccount(authenticatedEmail);
       setIsAuthenticated(true);
 
       return { ok: true as const, email: authenticatedEmail };
@@ -4166,6 +6591,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     let authenticatedEmail = normalizedEmail;
 
     try {
+      await ensureFreshOwnerAuthSession(normalizedEmail);
+
       const { data: loginData, error: loginError } = await supabase.auth.signInWithPassword({
         email: normalizedEmail,
         password: normalizedPassword,
@@ -4244,22 +6671,86 @@ export function AppProvider({ children }: { children: ReactNode }) {
         );
       }
 
-      const { error: bootstrapError } = await supabase.rpc('bootstrap_owner_account', {
-        p_first_name: account.firstName.trim(),
-        p_last_name: account.lastName.trim(),
-        p_salon_name: account.salonName.trim(),
-        p_business_phone: account.businessPhone.trim(),
-        p_owner_phone: account.businessPhone.trim(),
-        p_owner_email: authenticatedEmail,
-        p_salon_code: buildSalonCode(account.salonName.trim(), authenticatedEmail),
-      });
+      const existingRemoteWorkspace = await loadExistingOwnerWorkspaceRecord(authenticatedEmail);
+      if (existingRemoteWorkspace?.id) {
+        setOwnerProfileNeedsCompletion(false);
+        return { ok: true as const, email: authenticatedEmail };
+      }
+
+      let bootstrapError: unknown = null;
+      const salonCodeCandidates = buildOwnerBootstrapSlugCandidates(
+        account.salonName.trim(),
+        authenticatedEmail
+      );
+
+      for (const candidateSalonCode of salonCodeCandidates) {
+        try {
+          const bootstrapResult = await runWithDeadlockRetry(
+            () =>
+              Promise.resolve(
+                supabase.rpc('bootstrap_owner_account', {
+                  p_first_name: account.firstName.trim(),
+                  p_last_name: account.lastName.trim(),
+                  p_salon_name: account.salonName.trim(),
+                  p_business_phone: account.businessPhone.trim(),
+                  p_owner_phone: account.businessPhone.trim(),
+                  p_owner_email: authenticatedEmail,
+                  p_salon_code: candidateSalonCode,
+                  p_activity_category: account.activityCategory.trim().toUpperCase(),
+                  p_street_line: account.streetLine.trim().toUpperCase(),
+                  p_city: account.city.trim().toUpperCase(),
+                  p_postal_code: account.postalCode.trim(),
+                })
+              ),
+            'Collegamento account owner locale al backend'
+          );
+
+          bootstrapError = bootstrapResult.error;
+        } catch (error) {
+          bootstrapError = error;
+        }
+
+        if (!bootstrapError || !isWorkspaceSlugConflictError(bootstrapError)) {
+          if (!bootstrapError) {
+            setOwnerProfileNeedsCompletion(false);
+          }
+          break;
+        }
+      }
 
       if (bootstrapError) {
+        if (isOwnerBootstrapProfileRequirementError(bootstrapError)) {
+          console.log(
+            'Collegamento account owner locale al backend: bootstrap saltato, profilo incompleto',
+            bootstrapError
+          );
+          setOwnerProfileNeedsCompletion(true);
+          return { ok: true as const, email: authenticatedEmail };
+        }
+
+        if (isStatementTimeoutError(bootstrapError)) {
+          console.log(
+            'Collegamento account owner locale al backend in timeout: continuo l’accesso e ritento in background.',
+            bootstrapError
+          );
+          setTimeout(() => {
+            void connectLocalOwnerAccountToBackend(
+              account,
+              authenticatedEmail,
+              normalizedPassword
+            ).catch((error) => {
+              console.log('Retry collegamento backend owner locale post-timeout fallito:', error);
+            });
+          }, 1800);
+          return { ok: true as const, email: authenticatedEmail };
+        }
+
         return {
           ok: false as const,
-          error:
-            bootstrapError.message?.trim() ||
-            'Account locale trovato ma collegamento backend non riuscito.',
+          error: formatOwnerBootstrapError(
+            bootstrapError,
+            'Account locale trovato ma collegamento backend non riuscito.'
+          ),
         };
       }
 
@@ -4282,6 +6773,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
 
     try {
+      await ensureFreshOwnerAuthSession(normalizedEmail);
+
       const { data, error } = await supabase.auth.signInWithPassword({
         email: normalizedEmail,
         password: normalizedPassword,
@@ -4300,9 +6793,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
         await AsyncStorage.setItem(STORAGE_KEYS.owner_session, authenticatedEmail);
         await switchSalonAccount(authenticatedEmail);
-        await storeBiometricCredentials(authenticatedEmail, normalizedPassword);
+        await primeScopedOwnerAccountState(authenticatedEmail);
         setPendingBiometricUnlock(false);
         setIsAuthenticated(true);
+        void storeBiometricCredentials(authenticatedEmail, normalizedPassword);
+        void prepareOnboardingStateForAuthenticatedAccount(authenticatedEmail);
         void syncAuthenticatedWorkspace(authenticatedEmail);
         return { ok: true };
       }
@@ -4358,9 +6853,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
       await AsyncStorage.setItem(STORAGE_KEYS.owner_session, authenticatedEmail);
       await switchSalonAccount(authenticatedEmail);
-      await storeBiometricCredentials(authenticatedEmail, normalizedPassword);
+      await primeScopedOwnerAccountState(authenticatedEmail);
       setPendingBiometricUnlock(false);
       setIsAuthenticated(true);
+      void storeBiometricCredentials(authenticatedEmail, normalizedPassword);
+      void prepareOnboardingStateForAuthenticatedAccount(authenticatedEmail);
       void syncAuthenticatedWorkspace(authenticatedEmail);
       return { ok: true };
     }
@@ -4407,9 +6904,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (sessionEmail && sessionEmail === normalizedEmail) {
       await AsyncStorage.setItem(STORAGE_KEYS.owner_session, normalizedEmail);
       await switchSalonAccount(normalizedEmail);
+      await syncAuthenticatedWorkspace(normalizedEmail);
+      await primeScopedOwnerAccountState(normalizedEmail);
       setPendingBiometricUnlock(true);
+      await prepareOnboardingStateForAuthenticatedAccount(normalizedEmail);
       setIsAuthenticated(true);
-      void syncAuthenticatedWorkspace(normalizedEmail);
       return { ok: true };
     }
 
@@ -4505,10 +7004,36 @@ export function AppProvider({ children }: { children: ReactNode }) {
       accounts.find((item) => item.email === normalizedEmail) ?? null;
 
     if (existingAccount) {
-      return {
-        ok: false,
-        error: 'Account mail gia registrato. Inserire una nuova mail.',
-      };
+      const existingPassword = (await getOwnerPassword(normalizedEmail))?.trim() ?? '';
+      if (existingPassword !== normalizedPassword) {
+        return {
+          ok: false,
+          error:
+            'Questo account esiste gia su questo dispositivo. Usa la password gia registrata oppure entra da Accedi.',
+        };
+      }
+
+      const backendConnectionResult = await connectLocalOwnerAccountToBackend(
+        existingAccount,
+        normalizedEmail
+      );
+      if (!backendConnectionResult.ok) {
+        return { ok: false, error: backendConnectionResult.error };
+      }
+
+      const authenticatedEmail = normalizeAccountEmail(
+        backendConnectionResult.email ?? normalizedEmail
+      );
+
+      await AsyncStorage.setItem(STORAGE_KEYS.owner_session, authenticatedEmail);
+      await switchSalonAccount(authenticatedEmail);
+      await syncAuthenticatedWorkspace(authenticatedEmail);
+      await primeScopedOwnerAccountState(authenticatedEmail);
+      await storeBiometricCredentials(authenticatedEmail, normalizedPassword);
+      setPendingBiometricUnlock(false);
+      await prepareOnboardingStateForAuthenticatedAccount(authenticatedEmail);
+      setIsAuthenticated(true);
+      return { ok: true, email: authenticatedEmail };
     }
 
     const nextAccount: OwnerAccount = {
@@ -4600,12 +7125,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
         JSON.stringify(normalizeAvailabilitySettings())
       );
       await AsyncStorage.setItem(
+        buildScopedStorageKey(STORAGE_KEYS.onboarding_completed, targetEmail),
+        'false'
+      );
+      await AsyncStorage.setItem(
+        buildScopedStorageKey(STORAGE_KEYS.onboarding_first_access_pending, targetEmail),
+        'true'
+      );
+      await AsyncStorage.setItem(
+        buildScopedStorageKey(STORAGE_KEYS.biometric_enabled, targetEmail),
+        'false'
+      );
+      await AsyncStorage.setItem(
         buildScopedStorageKey(STORAGE_KEYS.eventi_template, targetEmail),
         'Ciao! Ti aspetto a {evento} il {data} alle {ora}. Scrivimi per conferma.'
       );
     };
 
     try {
+      await ensureFreshOwnerAuthSession(normalizedEmail);
+
       const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
         email: normalizedEmail,
         password: normalizedPassword,
@@ -4618,14 +7157,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       let resolvedUser = signUpData.user ?? null;
 
       if (signUpError) {
-        if (isSupabaseAlreadyRegisteredError(signUpError.message)) {
-          return {
-            ok: false,
-            error: 'Account mail gia registrato. Inserire una nuova mail.',
-          };
-        }
-
-        if (isSupabaseAuthRateLimitError(signUpError.message)) {
+        if (
+          isSupabaseAlreadyRegisteredError(signUpError.message) ||
+          isSupabaseAuthRateLimitError(signUpError.message)
+        ) {
           const { data: retryLoginData, error: retryLoginError } =
             await supabase.auth.signInWithPassword({
               email: normalizedEmail,
@@ -4670,22 +7205,51 @@ export function AppProvider({ children }: { children: ReactNode }) {
         };
       }
 
-      const { error: bootstrapError } = await supabase.rpc('bootstrap_owner_account', {
-        p_first_name: firstName.trim(),
-        p_last_name: lastName.trim(),
-        p_salon_name: salonName.trim(),
-        p_business_phone: businessPhone.trim(),
-        p_owner_phone: businessPhone.trim(),
-        p_owner_email: authenticatedEmail,
-        p_salon_code: buildSalonCode(salonName.trim(), authenticatedEmail),
-      });
+      let bootstrapError: unknown = null;
+      const salonCodeCandidates = buildOwnerBootstrapSlugCandidates(
+        salonName.trim(),
+        authenticatedEmail
+      );
+
+      for (const candidateSalonCode of salonCodeCandidates) {
+        try {
+          const bootstrapResult = await runWithDeadlockRetry(
+            () =>
+              Promise.resolve(
+                supabase.rpc('bootstrap_owner_account', {
+                  p_first_name: firstName.trim(),
+                  p_last_name: lastName.trim(),
+                  p_salon_name: salonName.trim(),
+                  p_business_phone: businessPhone.trim(),
+                  p_owner_phone: businessPhone.trim(),
+                  p_owner_email: authenticatedEmail,
+                  p_salon_code: candidateSalonCode,
+                  p_activity_category: normalizedActivityCategory,
+                  p_street_line: streetLine.trim().toUpperCase(),
+                  p_city: city.trim().toUpperCase(),
+                  p_postal_code: postalCode.trim(),
+                })
+              ),
+            'Registrazione account owner sul backend'
+          );
+
+          bootstrapError = bootstrapResult.error;
+        } catch (error) {
+          bootstrapError = error;
+        }
+
+        if (!bootstrapError || !isWorkspaceSlugConflictError(bootstrapError)) {
+          break;
+        }
+      }
 
       if (bootstrapError) {
         return {
           ok: false,
-          error:
-            bootstrapError.message?.trim() ||
-            'Registrazione completata ma bootstrap backend non riuscito.',
+          error: formatOwnerBootstrapError(
+            bootstrapError,
+            'Registrazione completata ma bootstrap backend non riuscito.'
+          ),
         };
       }
     } catch (error) {
@@ -4699,12 +7263,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     await persistLocalOwnerRegistrationState(authenticatedEmail);
     await AsyncStorage.setItem(STORAGE_KEYS.owner_session, authenticatedEmail);
     await switchSalonAccount(authenticatedEmail);
-    pendingRegistrationOnboardingRef.current = true;
-    setHasCompletedOnboarding(false);
-    setShowOnboarding(true);
-    setIsLoaded(true);
+    await syncAuthenticatedWorkspace(authenticatedEmail);
+    await primeScopedOwnerAccountState(authenticatedEmail);
     await storeBiometricCredentials(authenticatedEmail, normalizedPassword);
     setPendingBiometricUnlock(false);
+    await prepareOnboardingStateForAuthenticatedAccount(authenticatedEmail, {
+      forceFirstAccess: true,
+    });
     setIsAuthenticated(true);
     return { ok: true, email: authenticatedEmail };
   };
@@ -4777,7 +7342,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
       if (authenticatedEmail) {
         const accounts = await loadOwnerAccounts();
-        const nextAccounts = accounts.map((item) =>
+      const nextAccounts = accounts.map((item) =>
           normalizeAccountEmail(item.email) === authenticatedEmail
             ? {
                 ...item,
@@ -4799,18 +7364,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
       console.log('Errore riallineamento password proprietario locale:', storageError);
     }
 
-    try {
-      await supabase.auth.signOut();
-    } catch (error) {
-      console.log('Errore chiusura sessione recovery proprietario:', error);
-    }
-
     setOwnerLocalRecoveryEmail('');
     setOwnerPasswordRecoveryActive(false);
     return { ok: true as const };
   };
 
   const logoutOwnerAccount = async () => {
+    setOwnerLocalRecoveryEmail('');
+    setPendingBiometricUnlock(false);
+    setIsAuthenticated(false);
+    setSalonAccountEmail('');
+    clearRuntimeDataForAccount('');
+    setIsLoaded(true);
+    resetOnboardingState();
+
     try {
       await supabase.auth.signOut();
     } catch (error) {
@@ -4818,9 +7385,141 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
 
     await AsyncStorage.removeItem(STORAGE_KEYS.owner_session);
-    setOwnerLocalRecoveryEmail('');
-    setPendingBiometricUnlock(false);
-    setIsAuthenticated(false);
+  };
+
+  const createClientePersisted = async (customer: {
+    nome: string;
+    telefono: string;
+    email?: string;
+    instagram?: string;
+    birthday?: string;
+    maxFutureAppointments?: number | null;
+    maxFutureAppointmentsMode?: 'total_future' | 'monthly' | null;
+    maxDailyAppointments?: number | null;
+  }) => {
+    const workspaceId = salonWorkspace.id.trim();
+    if (!isUuid(workspaceId)) {
+      return {
+        ok: false as const,
+        error: 'Workspace non valido. Completa il profilo salone e riprova.',
+      };
+    }
+
+    const normalizedCustomer = {
+      nome: customer.nome.trim(),
+      telefono: customer.telefono.trim(),
+      email: customer.email?.trim().toLowerCase() ?? '',
+      instagram: customer.instagram?.trim() ?? '',
+      birthday: customer.birthday?.trim() ?? '',
+      maxFutureAppointments:
+        typeof customer.maxFutureAppointments === 'number' &&
+        customer.maxFutureAppointments >= 0
+          ? customer.maxFutureAppointments
+          : null,
+      maxFutureAppointmentsMode:
+        customer.maxFutureAppointmentsMode === 'monthly' ||
+        customer.maxFutureAppointmentsMode === 'total_future'
+          ? customer.maxFutureAppointmentsMode
+          : null,
+      maxDailyAppointments:
+        typeof customer.maxDailyAppointments === 'number' && customer.maxDailyAppointments >= 0
+          ? customer.maxDailyAppointments
+          : null,
+    };
+
+    if (
+      !normalizedCustomer.nome ||
+      !normalizedCustomer.telefono ||
+      !normalizedCustomer.email
+    ) {
+      return { ok: false as const, error: 'Compila i campi obbligatori del cliente.' };
+    }
+
+    const ownerSessionResult = await ensureRealtimeOwnerSession();
+    if (!ownerSessionResult.ok) {
+      return {
+        ok: false as const,
+        error: 'Sessione proprietario scaduta. Rientra nel salone e riprova.',
+      };
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from('customers')
+        .insert({
+          workspace_id: workspaceId,
+          full_name: normalizedCustomer.nome,
+          phone: normalizedCustomer.telefono || null,
+          email: normalizedCustomer.email || null,
+          instagram: normalizedCustomer.instagram || null,
+          note: '',
+          source: 'salon',
+          viewed_by_salon: true,
+          max_future_appointments: normalizedCustomer.maxFutureAppointments,
+          max_future_appointments_mode: normalizedCustomer.maxFutureAppointmentsMode,
+          max_daily_appointments: normalizedCustomer.maxDailyAppointments,
+        })
+        .select(
+          'id, full_name, phone, email, instagram, note, source, viewed_by_salon, max_future_appointments, max_future_appointments_mode, max_daily_appointments'
+        )
+        .single();
+
+      if (error) {
+        console.log('Errore creazione cliente backend:', error);
+        return {
+          ok: false as const,
+          error: error.message?.trim() || 'Non sono riuscito a creare il cliente.',
+        };
+      }
+
+      const insertedCustomer = data as
+        | {
+            id: string;
+            full_name: string;
+            phone: string | null;
+            email: string | null;
+            instagram: string | null;
+            viewed_by_salon: boolean | null;
+            max_future_appointments: number | null;
+            max_future_appointments_mode: 'total_future' | 'monthly' | null;
+            max_daily_appointments: number | null;
+          }
+        | null;
+
+      setClienti((current) =>
+        normalizeClienti([
+          {
+            id: insertedCustomer?.id?.trim() || `cliente-${Date.now()}`,
+            nome: insertedCustomer?.full_name?.trim() || normalizedCustomer.nome,
+            telefono: insertedCustomer?.phone?.trim() || normalizedCustomer.telefono,
+            email: insertedCustomer?.email?.trim().toLowerCase() || normalizedCustomer.email,
+            instagram: insertedCustomer?.instagram?.trim() || normalizedCustomer.instagram,
+            birthday: normalizedCustomer.birthday,
+            nota: '',
+            fonte: 'salone',
+            viewedBySalon: insertedCustomer?.viewed_by_salon ?? true,
+            annullamentiCount: 0,
+            inibito: false,
+            maxFutureAppointments:
+              insertedCustomer?.max_future_appointments ?? normalizedCustomer.maxFutureAppointments,
+            maxFutureAppointmentsMode:
+              insertedCustomer?.max_future_appointments_mode ??
+              normalizedCustomer.maxFutureAppointmentsMode,
+            maxDailyAppointments:
+              insertedCustomer?.max_daily_appointments ?? normalizedCustomer.maxDailyAppointments,
+          },
+          ...current,
+        ])
+      );
+
+      return { ok: true as const };
+    } catch (error) {
+      console.log('Errore creazione cliente backend:', error);
+      return {
+        ok: false as const,
+        error: 'Non sono riuscito a creare il cliente.',
+      };
+    }
   };
 
   const updateClientePersisted = async (
@@ -4946,11 +7645,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const matchingCurrentCustomers = normalizeClienti(clienti).filter((item) =>
       matchesCustomerIdentity(item, targetIdentity)
     );
+    const deletedCustomerKeys = recentlyDeletedCustomerKeysRef.current;
 
     matchingCurrentCustomers.forEach((item) => {
-      markRecentlyDeletedCustomer(item);
+      deletedCustomerKeys.set(buildCustomerIdentityKey(item), Date.now());
     });
-    markRecentlyDeletedCustomer(targetIdentity);
+    deletedCustomerKeys.set(buildCustomerIdentityKey(targetIdentity), Date.now());
 
     setClienti((current) =>
       current.filter((item) => !matchesCustomerIdentity(item, targetIdentity))
@@ -4971,10 +7671,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     const ownerSessionResult = await ensureRealtimeOwnerSession();
     if (!ownerSessionResult.ok) {
-      matchingCurrentCustomers.forEach((item) => {
-        unmarkRecentlyDeletedCustomer(item);
-      });
-      unmarkRecentlyDeletedCustomer(targetIdentity);
       return {
         ok: false as const,
         error: 'Sessione proprietario scaduta. Rientra nel salone e riprova.',
@@ -4989,13 +7685,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
       if (error) {
         console.log('Errore eliminazione cliente backend:', error);
-        if (isLikelyNetworkRequestFailure(error)) {
-          return { ok: true as const };
-        }
-        matchingCurrentCustomers.forEach((item) => {
-          unmarkRecentlyDeletedCustomer(item);
-        });
-        unmarkRecentlyDeletedCustomer(targetIdentity);
         return {
           ok: false as const,
           error: error.message?.trim() || 'Non sono riuscito a eliminare il cliente.',
@@ -5005,16 +7694,366 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return { ok: true as const };
     } catch (error) {
       console.log('Errore eliminazione cliente backend:', error);
-      if (isLikelyNetworkRequestFailure(error)) {
-        return { ok: true as const };
-      }
-      matchingCurrentCustomers.forEach((item) => {
-        unmarkRecentlyDeletedCustomer(item);
-      });
-      unmarkRecentlyDeletedCustomer(targetIdentity);
       return {
         ok: false as const,
         error: 'Non sono riuscito a eliminare il cliente.',
+      };
+    }
+  };
+
+  const createMovimentoPersisted = async (movement: {
+    descrizione: string;
+    importo: number;
+    metodo?: Movimento['metodo'];
+    cartaLabel?: string;
+    createdAt?: string;
+  }) => {
+    const workspaceId = salonWorkspace.id.trim();
+    if (!isUuidValue(workspaceId)) {
+      return {
+        ok: false as const,
+        error: 'Workspace non valido. Completa il profilo salone e riprova.',
+      };
+    }
+
+    const normalizedMovement = {
+      descrizione: movement.descrizione.trim(),
+      importo: Number(movement.importo ?? 0),
+      metodo: movement.metodo,
+      cartaLabel: movement.cartaLabel?.trim() || undefined,
+      createdAt: movement.createdAt?.trim() || new Date().toISOString(),
+    };
+
+    if (!normalizedMovement.descrizione || !Number.isFinite(normalizedMovement.importo)) {
+      return { ok: false as const, error: 'Compila descrizione e importo del movimento.' };
+    }
+
+    const ownerSessionResult = await ensureRealtimeOwnerSession();
+    if (!ownerSessionResult.ok) {
+      return {
+        ok: false as const,
+        error: 'Sessione proprietario scaduta. Rientra nel salone e riprova.',
+      };
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from('cash_movements')
+        .insert({
+          workspace_id: workspaceId,
+          description: normalizedMovement.descrizione,
+          amount: normalizedMovement.importo,
+          payment_method: movementMethodToRemote(normalizedMovement.metodo),
+          card_label: normalizedMovement.cartaLabel ?? null,
+          created_at: normalizedMovement.createdAt,
+        })
+        .select('id, description, amount, payment_method, card_label, created_at')
+        .single();
+
+      if (error) {
+        console.log('Errore creazione movimento backend:', error);
+        return {
+          ok: false as const,
+          error: error.message?.trim() || 'Non sono riuscito a registrare il movimento.',
+        };
+      }
+
+      const insertedMovement = data as {
+        id: string;
+        description: string;
+        amount: number | string;
+        payment_method: string | null;
+        card_label: string | null;
+        created_at: string;
+      };
+
+      setMovimenti((current) =>
+        normalizeMovimenti([
+          {
+            id: insertedMovement.id,
+            descrizione: insertedMovement.description,
+            importo: Number(insertedMovement.amount ?? 0),
+            metodo: movementMethodFromRemote(insertedMovement.payment_method),
+            cartaLabel: insertedMovement.card_label ?? undefined,
+            createdAt: insertedMovement.created_at,
+          },
+          ...current.filter(
+            (item) => buildMovementSemanticKey(item) !== buildMovementSemanticKey(normalizedMovement)
+          ),
+        ])
+      );
+
+      return { ok: true as const };
+    } catch (error) {
+      console.log('Errore creazione movimento backend:', error);
+      return {
+        ok: false as const,
+        error: 'Non sono riuscito a registrare il movimento.',
+      };
+    }
+  };
+
+  const updateMovimentoPersisted = async (
+    movementId: string,
+    updates: {
+      metodo?: Movimento['metodo'];
+      cartaLabel?: string;
+    }
+  ) => {
+    const normalizedMovementId = movementId.trim();
+    if (!normalizedMovementId) {
+      return { ok: false as const, error: 'Movimento non valido.' };
+    }
+
+    const ownerSessionResult = await ensureRealtimeOwnerSession();
+    if (!ownerSessionResult.ok) {
+      return {
+        ok: false as const,
+        error: 'Sessione proprietario scaduta. Rientra nel salone e riprova.',
+      };
+    }
+
+    setMovimenti((current) =>
+      current.map((item) =>
+        item.id === normalizedMovementId
+          ? {
+              ...item,
+              metodo: updates.metodo,
+              cartaLabel: updates.cartaLabel?.trim() || undefined,
+            }
+          : item
+      )
+    );
+
+    if (!isUuidValue(normalizedMovementId)) {
+      return { ok: true as const };
+    }
+
+    try {
+      const { error } = await supabase
+        .from('cash_movements')
+        .update({
+          payment_method: movementMethodToRemote(updates.metodo),
+          card_label: updates.cartaLabel?.trim() || null,
+        })
+        .eq('id', normalizedMovementId);
+
+      if (error) {
+        console.log('Errore aggiornamento movimento backend:', error);
+        return {
+          ok: false as const,
+          error: error.message?.trim() || 'Non sono riuscito ad aggiornare il movimento.',
+        };
+      }
+
+      return { ok: true as const };
+    } catch (error) {
+      console.log('Errore aggiornamento movimento backend:', error);
+      return {
+        ok: false as const,
+        error: 'Non sono riuscito ad aggiornare il movimento.',
+      };
+    }
+  };
+
+  const createCartaPersisted = async (card: {
+    nome: string;
+    circuito: string;
+    ultime4: string;
+    predefinita?: boolean;
+  }) => {
+    const workspaceId = salonWorkspace.id.trim();
+    if (!isUuidValue(workspaceId)) {
+      return {
+        ok: false as const,
+        error: 'Workspace non valido. Completa il profilo salone e riprova.',
+      };
+    }
+
+    const normalizedCard = {
+      nome: card.nome.trim(),
+      circuito: card.circuito.trim(),
+      ultime4: card.ultime4.trim(),
+      predefinita: card.predefinita ?? carteCollegate.length === 0,
+    };
+
+    if (!normalizedCard.nome || !normalizedCard.circuito || normalizedCard.ultime4.length !== 4) {
+      return { ok: false as const, error: 'Compila correttamente i dati della carta.' };
+    }
+
+    const ownerSessionResult = await ensureRealtimeOwnerSession();
+    if (!ownerSessionResult.ok) {
+      return {
+        ok: false as const,
+        error: 'Sessione proprietario scaduta. Rientra nel salone e riprova.',
+      };
+    }
+
+    try {
+      if (normalizedCard.predefinita) {
+        const { error: clearDefaultError } = await supabase
+          .from('connected_cards')
+          .update({ is_default: false })
+          .eq('workspace_id', workspaceId);
+        if (clearDefaultError) {
+          throw clearDefaultError;
+        }
+      }
+
+      const { data, error } = await supabase
+        .from('connected_cards')
+        .insert({
+          workspace_id: workspaceId,
+          label: normalizedCard.nome,
+          circuit: normalizedCard.circuito,
+          last4: normalizedCard.ultime4,
+          is_default: normalizedCard.predefinita,
+        })
+        .select('id, label, circuit, last4, is_default')
+        .single();
+
+      if (error) {
+        console.log('Errore creazione carta backend:', error);
+        return {
+          ok: false as const,
+          error: error.message?.trim() || 'Non sono riuscito a collegare la carta.',
+        };
+      }
+
+      const insertedCard = data as {
+        id: string;
+        label: string;
+        circuit: string;
+        last4: string;
+        is_default: boolean;
+      };
+
+      setCarteCollegate((current) =>
+        normalizeCarte([
+          {
+            id: insertedCard.id,
+            nome: insertedCard.label,
+            circuito: insertedCard.circuit,
+            ultime4: insertedCard.last4,
+            predefinita: insertedCard.is_default,
+          },
+          ...current
+            .filter((item) => buildCardSemanticKey(item) !== buildCardSemanticKey(normalizedCard))
+            .map((item) => ({
+              ...item,
+              predefinita: insertedCard.is_default ? false : item.predefinita,
+            })),
+        ])
+      );
+
+      return { ok: true as const, cardId: insertedCard.id };
+    } catch (error) {
+      console.log('Errore creazione carta backend:', error);
+      return {
+        ok: false as const,
+        error: 'Non sono riuscito a collegare la carta.',
+      };
+    }
+  };
+
+  const setDefaultCartaPersisted = async (cardId: string) => {
+    const normalizedCardId = cardId.trim();
+    const workspaceId = salonWorkspace.id.trim();
+    if (!normalizedCardId || !isUuidValue(workspaceId)) {
+      return { ok: false as const, error: 'Carta non valida.' };
+    }
+
+    const ownerSessionResult = await ensureRealtimeOwnerSession();
+    if (!ownerSessionResult.ok) {
+      return {
+        ok: false as const,
+        error: 'Sessione proprietario scaduta. Rientra nel salone e riprova.',
+      };
+    }
+
+    setCarteCollegate((current) =>
+      normalizeCarte(
+        current.map((item) => ({
+          ...item,
+          predefinita: item.id === normalizedCardId,
+        }))
+      )
+    );
+
+    try {
+      await supabase
+        .from('connected_cards')
+        .update({ is_default: false })
+        .eq('workspace_id', workspaceId);
+
+      const { error } = await supabase
+        .from('connected_cards')
+        .update({ is_default: true })
+        .eq('id', normalizedCardId);
+
+      if (error) {
+        console.log('Errore aggiornamento carta predefinita backend:', error);
+        return {
+          ok: false as const,
+          error: error.message?.trim() || 'Non sono riuscito ad aggiornare la carta predefinita.',
+        };
+      }
+
+      return { ok: true as const };
+    } catch (error) {
+      console.log('Errore aggiornamento carta predefinita backend:', error);
+      return {
+        ok: false as const,
+        error: 'Non sono riuscito ad aggiornare la carta predefinita.',
+      };
+    }
+  };
+
+  const deleteCartaPersisted = async (cardId: string) => {
+    const normalizedCardId = cardId.trim();
+    if (!normalizedCardId) {
+      return { ok: false as const, error: 'Carta non valida.' };
+    }
+
+    const nextCards = normalizeCarte(carteCollegate.filter((item) => item.id !== normalizedCardId));
+    setCarteCollegate(nextCards);
+
+    if (!isUuidValue(normalizedCardId)) {
+      return { ok: true as const };
+    }
+
+    const ownerSessionResult = await ensureRealtimeOwnerSession();
+    if (!ownerSessionResult.ok) {
+      return {
+        ok: false as const,
+        error: 'Sessione proprietario scaduta. Rientra nel salone e riprova.',
+      };
+    }
+
+    try {
+      const { error } = await supabase
+        .from('connected_cards')
+        .delete()
+        .eq('id', normalizedCardId);
+
+      if (error) {
+        console.log('Errore eliminazione carta backend:', error);
+        return {
+          ok: false as const,
+          error: error.message?.trim() || 'Non sono riuscito a eliminare la carta.',
+        };
+      }
+
+      if (nextCards.length > 0 && !nextCards.some((item) => item.predefinita)) {
+        await setDefaultCartaPersisted(nextCards[0].id);
+      }
+
+      return { ok: true as const };
+    } catch (error) {
+      console.log('Errore eliminazione carta backend:', error);
+      return {
+        ok: false as const,
+        error: 'Non sono riuscito a eliminare la carta.',
       };
     }
   };
@@ -5030,39 +8069,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (remoteSnapshot) {
         const isCurrentWorkspaceSalon =
           normalizedCode === normalizeSalonCode(salonWorkspace.salonCode);
-        const normalizedRemoteRequests = normalizeRichiestePrenotazione(
-          remoteSnapshot.richiestePrenotazione as RichiestaPrenotazione[]
-        );
-        const normalizedRemoteClienti = enrichClientiWithFrontendRequestSignals(
-          remoteSnapshot.clienti as Cliente[],
-          normalizedRemoteRequests
-        );
         const normalizedRemoteAppointments = normalizeAppuntamenti(
           remoteSnapshot.appuntamenti as Appuntamento[]
         );
 
-        const hasFreshLocalAvailabilityMutation =
-          Date.now() - lastLocalAvailabilityMutationAtRef.current <
-          PORTAL_REMOTE_OVERRIDE_GUARD_MS;
-
         return {
           workspace: isCurrentWorkspaceSalon
-            ? normalizeWorkspace(
-                {
-                  ...salonWorkspace,
-                  ...remoteSnapshot.workspace,
-                  cashSectionDisabled:
-                    remoteSnapshot.workspace.cashSectionDisabled ?? salonWorkspace.cashSectionDisabled,
-                  autoAcceptBookingRequests:
-                    remoteSnapshot.workspace.autoAcceptBookingRequests ??
-                    salonWorkspace.autoAcceptBookingRequests,
-                },
-                salonWorkspace.ownerEmail
-              )
+            ? mergeWorkspacePreservingLocalProfile({
+                localWorkspace: salonWorkspace,
+                remoteWorkspace: remoteSnapshot.workspace,
+                email: salonWorkspace.ownerEmail,
+              })
             : remoteSnapshot.workspace,
           clienti: isCurrentWorkspaceSalon
-            ? filterRecentlyDeletedCustomers(normalizedRemoteClienti)
-            : normalizedRemoteClienti,
+            ? filterRecentlyDeletedCustomers(normalizeClienti(remoteSnapshot.clienti as Cliente[]))
+            : normalizeClienti(remoteSnapshot.clienti as Cliente[]),
           appuntamenti: isCurrentWorkspaceSalon
             ? filterRecentlyDeletedAppointments(
                 normalizeAppuntamenti(
@@ -5079,13 +8100,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
             : normalizedRemoteAppointments,
           servizi: normalizeServizi(remoteSnapshot.servizi as Servizio[]),
           operatori: normalizeOperatori(remoteSnapshot.operatori as Operatore[]),
-          richiestePrenotazione: normalizedRemoteRequests,
-          availabilitySettings: hasFreshLocalAvailabilityMutation
-            ? mergeAvailabilitySettingsWithCriticalTimestamps(
-                availabilitySettings,
-                remoteSnapshot.availabilitySettings
-              )
-            : normalizeAvailabilitySettings(remoteSnapshot.availabilitySettings),
+          richiestePrenotazione: normalizeRichiestePrenotazione(
+            remoteSnapshot.richiestePrenotazione as RichiestaPrenotazione[]
+          ),
+          availabilitySettings: normalizeAvailabilitySettings(remoteSnapshot.availabilitySettings),
           serviceCardColorOverrides: remoteSnapshot.serviceCardColorOverrides ?? {},
           roleCardColorOverrides: remoteSnapshot.roleCardColorOverrides ?? {},
         };
@@ -5111,7 +8129,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
       return null;
     } catch (error) {
-      console.log('Errore caricamento salone pubblico:', error);
+      if (!shouldSilenceTransientSyncError(error)) {
+        console.log('Errore caricamento salone pubblico:', error);
+      }
       return null;
     }
   };
@@ -5122,7 +8142,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
 
     const normalizedSalonCode = normalizeSalonCode(salonWorkspace.salonCode);
-    const ownerWorkspaceId = salonWorkspace.id?.trim() ?? '';
     if (!normalizedSalonCode) {
       return;
     }
@@ -5130,176 +8149,109 @@ export function AppProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
 
     const refreshOwnerFromPortal = async () => {
-      const lightweightSettings =
-        await fetchPortalAvailabilitySettingsWithRetry(normalizedSalonCode);
-
-      if (cancelled) {
-        return;
-      }
-
-      if (lightweightSettings) {
-        applyRemoteAvailabilitySettings(lightweightSettings.availabilitySettings);
-      }
-
-      const remoteSnapshot = await fetchPortalSnapshotWithRetry(normalizedSalonCode);
-      if (cancelled) {
-        return;
-      }
-
-      if (!remoteSnapshot) {
-        ownerPortalBootstrapReadyRef.current = true;
-        if (!lightweightSettings || cancelled) {
+      try {
+        const remoteSnapshot = await fetchPortalSnapshotWithRetry(normalizedSalonCode);
+        if (!remoteSnapshot || cancelled) {
           return;
         }
-        return;
-      }
 
-      const currentWorkspace = latestSalonWorkspaceRef.current;
-      const currentAvailabilitySettings = latestAvailabilitySettingsRef.current;
+        const privateServerState = isUuidValue(salonWorkspace.id)
+          ? await loadOwnerPrivateServerState(salonWorkspace.id)
+          : null;
 
-      const normalizedRemoteAppointments = normalizeAppuntamenti(
-        remoteSnapshot.appuntamenti as Appuntamento[]
-      );
-      const normalizedRemoteRequests = normalizeRichiestePrenotazione(
-        remoteSnapshot.richiestePrenotazione as RichiestaPrenotazione[]
-      );
-      const refreshedWorkspace = mergeWorkspaceWithCriticalTimestamps(
-        {
-          ...currentWorkspace,
-          cashSectionDisabled: currentWorkspace.cashSectionDisabled,
-        },
-        {
-          ...remoteSnapshot.workspace,
-          cashSectionDisabled:
-            remoteSnapshot.workspace.cashSectionDisabled ?? currentWorkspace.cashSectionDisabled,
-        },
-        currentWorkspace.ownerEmail
-      );
-      const remoteWorkspaceUpdatedAtMs = parseIsoTimestampToMs(refreshedWorkspace.updatedAt);
-      const localWorkspaceUpdatedAtMs = parseIsoTimestampToMs(currentWorkspace.updatedAt);
-      const hasRecentLocalWorkspaceMutation =
-        Date.now() - lastLocalWorkspaceMutationAtRef.current < PORTAL_REMOTE_OVERRIDE_GUARD_MS;
-      const hasRecentLocalAvailabilityMutation =
-        Date.now() - lastLocalAvailabilityMutationAtRef.current < PORTAL_REMOTE_OVERRIDE_GUARD_MS;
-      const remoteWorkspaceSignature = buildWorkspaceSyncSignature(refreshedWorkspace);
-      const normalizedRemoteAvailabilitySettings = mergeAvailabilitySettingsWithCriticalTimestamps(
-        currentAvailabilitySettings,
-        lightweightSettings?.availabilitySettings ?? remoteSnapshot.availabilitySettings
-      );
-      const remoteAvailabilitySignature = buildAvailabilitySettingsSyncSignature(
-        normalizedRemoteAvailabilitySettings
-      );
-      const pendingWorkspaceSync = pendingWorkspaceSyncRef.current;
-      const pendingAvailabilitySync = pendingAvailabilitySyncRef.current;
-      const pendingWorkspaceStillFresh =
-        !!pendingWorkspaceSync &&
-        Date.now() - pendingWorkspaceSync.at < PORTAL_REMOTE_OVERRIDE_GUARD_MS * 3;
-      const pendingAvailabilityStillFresh =
-        !!pendingAvailabilitySync &&
-        Date.now() - pendingAvailabilitySync.at < PORTAL_REMOTE_OVERRIDE_GUARD_MS * 3;
-      const shouldRespectPendingWorkspace =
-        hasRecentLocalWorkspaceMutation && pendingWorkspaceStillFresh;
-      const shouldRespectPendingAvailability =
-        hasRecentLocalAvailabilityMutation && pendingAvailabilityStillFresh;
-      const remoteWorkspaceMatchesPending =
-        !!pendingWorkspaceSync && pendingWorkspaceSync.signature === remoteWorkspaceSignature;
-      const remoteAvailabilityMatchesPending =
-        !!pendingAvailabilitySync &&
-        pendingAvailabilitySync.signature === remoteAvailabilitySignature;
-      const remoteAutoAcceptTimestampWins =
-        parseIsoTimestampToMs(refreshedWorkspace.autoAcceptBookingRequestsUpdatedAt) >
-        parseIsoTimestampToMs(currentWorkspace.autoAcceptBookingRequestsUpdatedAt);
-      const remoteGuidedTimestampWins =
-        parseIsoTimestampToMs(normalizedRemoteAvailabilitySettings.guidedSlotsUpdatedAt) >
-        parseIsoTimestampToMs(currentAvailabilitySettings.guidedSlotsUpdatedAt);
-      const shouldApplyRemoteWorkspace =
-        (!shouldRespectPendingWorkspace ||
-          remoteWorkspaceMatchesPending ||
-          remoteAutoAcceptTimestampWins) &&
-        (!hasRecentLocalWorkspaceMutation ||
-          remoteAutoAcceptTimestampWins ||
-          !localWorkspaceUpdatedAtMs ||
-          !remoteWorkspaceUpdatedAtMs ||
-          remoteWorkspaceUpdatedAtMs >= localWorkspaceUpdatedAtMs);
-      const shouldApplyRemoteAvailability = !!lightweightSettings || (
-        (!shouldRespectPendingAvailability ||
-          remoteAvailabilityMatchesPending ||
-          remoteGuidedTimestampWins) &&
-        (shouldApplyRemoteWorkspace ||
-          remoteGuidedTimestampWins ||
-          !hasRecentLocalAvailabilityMutation ||
-          (remoteWorkspaceUpdatedAtMs > 0 && remoteWorkspaceUpdatedAtMs >= localWorkspaceUpdatedAtMs))
-      );
-
-      if (remoteWorkspaceMatchesPending || !pendingWorkspaceStillFresh) {
-        pendingWorkspaceSyncRef.current = null;
-      }
-      if (remoteAvailabilityMatchesPending || !pendingAvailabilityStillFresh) {
-        pendingAvailabilitySyncRef.current = null;
-      }
-
-      if (shouldApplyRemoteWorkspace) {
-        suppressAutoPortalPublishUntilRef.current =
-          Date.now() + PORTAL_REMOTE_REHYDRATION_SUPPRESS_PUBLISH_MS;
-        latestSalonWorkspaceRef.current = refreshedWorkspace;
-        setSalonWorkspace((current) =>
-          JSON.stringify(current) === JSON.stringify(refreshedWorkspace)
-            ? current
-            : refreshedWorkspace
+        const normalizedRemoteAppointments = normalizeAppuntamenti(
+          remoteSnapshot.appuntamenti as Appuntamento[]
         );
-      }
-      setClienti((current) =>
-        filterRecentlyDeletedCustomers(
-          enrichClientiWithFrontendRequestSignals(
-            mergeClientiCollections(current, remoteSnapshot.clienti as Cliente[]),
-            normalizedRemoteRequests
+        const refreshedWorkspace = mergeWorkspacePreservingLocalProfile({
+          localWorkspace: salonWorkspace,
+          remoteWorkspace: remoteSnapshot.workspace,
+          email: salonWorkspace.ownerEmail,
+        });
+        setSalonWorkspace(refreshedWorkspace);
+        setClienti((current) =>
+          filterRecentlyDeletedCustomers(
+            mergeClientiCollections(current, remoteSnapshot.clienti as Cliente[])
           )
-        )
-      );
-      setAppuntamenti((current) =>
-        filterRecentlyDeletedAppointments(
-          normalizeAppuntamenti(
-            mergeAppuntamentiCollections(current, normalizedRemoteAppointments, {
-              preserveLocalCompositeKeys: getRecentlyCreatedAppointmentCompositeKeys(),
-              preserveLocalIds: getRecentlyMovedAppointmentIds(),
-            })
+        );
+        setAppuntamenti((current) =>
+          filterRecentlyDeletedAppointments(
+            normalizeAppuntamenti(
+              mergeAppuntamentiCollections(current, normalizedRemoteAppointments, {
+                preserveLocalCompositeKeys: getRecentlyCreatedAppointmentCompositeKeys(),
+                preserveLocalIds: getRecentlyMovedAppointmentIds(),
+              })
+            )
           )
-        )
-      );
-      setServizi((current) =>
-        normalizeServizi(
-          mergeServiziCollections(current, remoteSnapshot.servizi as Servizio[])
-        )
-      );
-      setOperatori((current) =>
-        preferNonEmptyOperatoriSnapshot(
-          current,
-          remoteSnapshot.operatori as Operatore[]
-        )
-      );
-      setRichiestePrenotazione(normalizedRemoteRequests);
-      if (shouldApplyRemoteAvailability) {
-        applyRemoteAvailabilitySettings(normalizedRemoteAvailabilitySettings);
-      }
-      setServiceCardColorOverrides((current) =>
-        mergeServiceColorOverrideMaps({
-          remoteOverrides: remoteSnapshot.serviceCardColorOverrides ?? {},
-          localOverrides: current,
-          services: normalizeServizi(
-            mergeServiziCollections(servizi, remoteSnapshot.servizi as Servizio[])
-          ),
-        })
-      );
-      setRoleCardColorOverrides((current) =>
-        mergeRoleColorOverrideMaps({
-          remoteOverrides: remoteSnapshot.roleCardColorOverrides ?? {},
-          localOverrides: current,
-        })
-      );
-      ownerPortalBootstrapReadyRef.current = true;
-    };
+        );
+        setServizi((current) =>
+          normalizeServizi(
+            mergeServiziCollections(
+              mergeServiziCollections(current, remoteSnapshot.servizi as Servizio[]),
+              privateServerState?.ownerSnapshot?.servizi ?? []
+            )
+          )
+        );
+        setOperatori(
+          privateServerState?.ownerSnapshot?.operatori?.length
+            ? normalizeOperatori(privateServerState.ownerSnapshot.operatori)
+            : normalizeOperatori(remoteSnapshot.operatori as Operatore[])
+        );
+        if (privateServerState?.ownerSnapshot?.macchinari) {
+          setMacchinari(normalizeMacchinari(privateServerState.ownerSnapshot.macchinari));
+        }
+        if (privateServerState?.movimenti) {
+          setMovimenti(privateServerState.movimenti);
+        }
+        if (privateServerState?.carteCollegate) {
+          setCarteCollegate(privateServerState.carteCollegate);
+        }
+        if (privateServerState?.eventi) {
+          setEventi(privateServerState.eventi);
+        }
+        setRichiestePrenotazione(
+          normalizeRichiestePrenotazione(
+            mergeRichiesteCollections(
+              remoteSnapshot.richiestePrenotazione as RichiestaPrenotazione[],
+              privateServerState?.ownerSnapshot?.richiestePrenotazione ?? []
+            )
+          )
+        );
+        setAvailabilitySettings(
+          privateServerState?.ownerSnapshot?.availabilitySettings
+            ? normalizeAvailabilitySettings(privateServerState.ownerSnapshot.availabilitySettings)
+            : normalizeAvailabilitySettings(remoteSnapshot.availabilitySettings)
+        );
+        if (privateServerState?.messaggioEventoTemplate) {
+          setMessaggioEventoTemplate(privateServerState.messaggioEventoTemplate);
+        }
+        setServiceCardColorOverrides((current) =>
+          mergeServiceColorOverrideMaps({
+            remoteOverrides: remoteSnapshot.serviceCardColorOverrides ?? {},
+            localOverrides:
+              privateServerState?.ownerSnapshot?.serviceCardColorOverrides ?? current,
+            services: normalizeServizi(
+              mergeServiziCollections(
+                mergeServiziCollections(servizi, remoteSnapshot.servizi as Servizio[]),
+                privateServerState?.ownerSnapshot?.servizi ?? []
+              )
+            ),
+          })
+        );
+        setRoleCardColorOverrides((current) =>
+          mergeRoleColorOverrideMaps({
+            remoteOverrides: remoteSnapshot.roleCardColorOverrides ?? {},
+            localOverrides: privateServerState?.ownerSnapshot?.roleCardColorOverrides ?? current,
+          })
+        );
+      } catch (error) {
+        if (isSupabaseSchemaCacheLookupError(error)) {
+          console.log('Refresh owner da portale saltato per schema cache Supabase:', error);
+          return;
+        }
 
-    void refreshOwnerFromPortal();
+        console.log('Errore refresh owner da portale live:', error);
+      }
+    };
 
     const channel = supabase
       .channel(`owner-portal-live:${normalizedSalonCode}`)
@@ -5315,39 +8267,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           void refreshOwnerFromPortal();
         }
       )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'booking_requests',
-          filter: isUuidValue(ownerWorkspaceId) ? `workspace_id=eq.${ownerWorkspaceId}` : 'workspace_id=is.null',
-        },
-        () => {
-          void refreshOwnerFromPortal();
-        }
-      )
-      .subscribe((status) => {
-        if (status === 'SUBSCRIBED') {
-          void refreshOwnerFromPortal();
-          return;
-        }
-
-        if (
-          isExpoGoRuntime &&
-          (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED')
-        ) {
-          void refreshOwnerFromPortal();
-        }
-      });
-
-    const expoGoFallbackInterval = isExpoGoRuntime
-      ? setInterval(() => {
-          if (AppState.currentState === 'active') {
-            void refreshOwnerFromPortal();
-          }
-        }, EXPO_GO_OWNER_LIVE_REFRESH_INTERVAL_MS)
-      : null;
+      .subscribe();
 
     const subscription = AppState.addEventListener('change', (nextState) => {
       if (nextState === 'active') {
@@ -5357,25 +8277,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     return () => {
       cancelled = true;
-      if (expoGoFallbackInterval) {
-        clearInterval(expoGoFallbackInterval);
-      }
       subscription.remove();
       void supabase.removeChannel(channel);
     };
-    }, [
-    applyRemoteAvailabilitySettings,
+  }, [
     fetchPortalSnapshotWithRetry,
-    fetchPortalAvailabilitySettingsWithRetry,
     filterRecentlyDeletedAppointments,
     filterRecentlyDeletedCustomers,
     hasInitializedAuth,
     isAuthenticated,
-    isExpoGoRuntime,
+    loadOwnerPrivateServerState,
     salonAccountEmail,
+    salonWorkspace.id,
     salonWorkspace.ownerEmail,
     salonWorkspace.salonCode,
-    salonWorkspace.id,
+    salonWorkspace.cashSectionDisabled,
+    salonWorkspace.autoAcceptBookingRequests,
+    servizi,
   ]);
 
   const upsertFrontendCustomerForSalon = async ({
@@ -5395,16 +8313,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     | {
         ok: false;
         reason: 'duplicate_email' | 'duplicate_phone' | 'duplicate_email_phone' | 'save_failed';
+        detail?: string;
       }
   > => {
     const normalizedCode = normalizeSalonCode(salonCode);
 
     try {
-      const resolved = await resolveSalonByCode(normalizedCode);
-      if (!resolved) {
-        return { ok: false, reason: 'save_failed' };
-      }
-
       const normalizedProfile = {
         nome: formatCustomerNamePart(profile.nome),
         cognome: formatCustomerNamePart(profile.cognome),
@@ -5415,29 +8329,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const customerName = formatCustomerFullNameValue(
         `${normalizedProfile.nome} ${normalizedProfile.cognome}`
       );
-      const existingCustomer = resolved.clienti.find((item) => {
-        const samePhone = item.telefono.trim() === normalizedProfile.telefono;
-        const sameEmail = item.email?.trim().toLowerCase() === normalizedProfile.email;
-        return samePhone || sameEmail;
-      });
 
-      if (existingCustomer) {
-        const duplicatePhone = existingCustomer.telefono.trim() === normalizedProfile.telefono;
-        const duplicateEmail =
-          existingCustomer.email?.trim().toLowerCase() === normalizedProfile.email;
-
-        return {
-          ok: false,
-          reason:
-            duplicateEmail && duplicatePhone
-              ? 'duplicate_email_phone'
-              : duplicateEmail
-                ? 'duplicate_email'
-                : 'duplicate_phone',
-        };
-      }
-
-      const { data: registeredCustomer, error: registerCustomerError } = await supabase.rpc(
+      const { data: registeredCustomer, error: registerCustomerError } = await invokeRpcWithSchemaRetry(
         'register_public_customer',
         {
           p_salon_code: normalizedCode,
@@ -5449,7 +8342,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
       );
 
       if (registerCustomerError) {
-        const errorText = String(registerCustomerError.message ?? '').trim().toLowerCase();
+        const errorText = [
+          registerCustomerError.code,
+          registerCustomerError.message,
+          registerCustomerError.details,
+          registerCustomerError.hint,
+        ]
+          .filter(Boolean)
+          .join(' | ')
+          .trim()
+          .toLowerCase();
         if (errorText.includes('duplicate_email_phone')) {
           return { ok: false, reason: 'duplicate_email_phone' };
         }
@@ -5461,7 +8363,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
 
         console.log('Errore registrazione cliente pubblico persistente:', registerCustomerError);
-        return { ok: false, reason: 'save_failed' };
+        return { ok: false, reason: 'save_failed', detail: errorText || 'save_failed' };
       }
 
       const persistedCustomerId =
@@ -5473,58 +8375,62 @@ export function AppProvider({ children }: { children: ReactNode }) {
           ? registeredCustomer.customerId.trim()
           : `cliente-front-${Date.now()}`;
 
-      void flushQueuedPushNotifications();
+      await flushQueuedPushNotifications().catch((error) => {
+        console.log('Flush push nuova richiesta frontend non riuscito:', error);
+      });
       scheduleDelayedPushFlush();
 
-      const nextCustomers = [
-        {
-          id: persistedCustomerId,
-          nome: customerName,
-          telefono: normalizedProfile.telefono,
-          email: normalizedProfile.email,
-          instagram: normalizedProfile.instagram,
-          nota: '',
-          fonte: 'frontend' as const,
-          viewedBySalon: false,
-          annullamentiCount: 0,
-          inibito: false,
-          maxFutureAppointments: 4,
-          maxFutureAppointmentsMode: 'monthly' as const,
-          maxDailyAppointments: 1,
-        },
-        ...resolved.clienti,
-      ];
-
-      let workspaceId: string | null = null;
       try {
-        workspaceId = await enqueuePortalPublish({
-          workspace: resolved.workspace,
-          clienti: nextCustomers as unknown as Array<Record<string, unknown>>,
-          appuntamenti: resolved.appuntamenti as unknown as Array<Record<string, unknown>>,
-          servizi: resolved.servizi as unknown as Array<Record<string, unknown>>,
-          operatori: resolved.operatori as unknown as Array<Record<string, unknown>>,
-          richiestePrenotazione:
-            resolved.richiestePrenotazione as unknown as Array<Record<string, unknown>>,
-          availabilitySettings: resolved.availabilitySettings,
-        });
-      } catch (portalPublishError) {
-        console.log(
-          'Pubblicazione portale cliente non riuscita dopo registrazione frontend, ma cliente creato correttamente:',
-          portalPublishError
-        );
-      }
+        const resolvedAfterRegister = await resolveSalonByCode(normalizedCode);
 
-      if (normalizedCode === salonWorkspace.salonCode && resolved.workspace.ownerEmail === salonAccountEmail) {
-        setClienti(nextCustomers);
-        if (workspaceId && workspaceId !== salonWorkspace.id) {
-          setSalonWorkspace((current) => ({ ...current, id: workspaceId }));
+        if (resolvedAfterRegister) {
+          const nextCustomers = [
+            {
+              id: persistedCustomerId,
+              nome: customerName,
+              telefono: normalizedProfile.telefono,
+              email: normalizedProfile.email,
+              instagram: normalizedProfile.instagram,
+              nota: '',
+              fonte: 'frontend' as const,
+              viewedBySalon: false,
+            },
+            ...resolvedAfterRegister.clienti,
+          ];
+
+          const workspaceId = await enqueuePortalPublish({
+            workspace: resolvedAfterRegister.workspace,
+            clienti: nextCustomers as unknown as Array<Record<string, unknown>>,
+            appuntamenti: resolvedAfterRegister.appuntamenti as unknown as Array<Record<string, unknown>>,
+            servizi: resolvedAfterRegister.servizi as unknown as Array<Record<string, unknown>>,
+            operatori: resolvedAfterRegister.operatori as unknown as Array<Record<string, unknown>>,
+            richiestePrenotazione:
+              resolvedAfterRegister.richiestePrenotazione as unknown as Array<Record<string, unknown>>,
+            availabilitySettings: resolvedAfterRegister.availabilitySettings,
+          });
+
+          if (
+            normalizedCode === salonWorkspace.salonCode &&
+            resolvedAfterRegister.workspace.ownerEmail === salonAccountEmail
+          ) {
+            setClienti(nextCustomers);
+            if (workspaceId && workspaceId !== salonWorkspace.id) {
+              setSalonWorkspace((current) => ({ ...current, id: workspaceId }));
+            }
+          }
         }
+      } catch (postRegisterError) {
+        console.log('Post-registrazione cliente frontend non riuscita, ma cliente creato:', postRegisterError);
       }
 
       return { ok: true };
     } catch (error) {
       console.log('Errore salvataggio cliente frontend:', error);
-      return { ok: false, reason: 'save_failed' };
+      return {
+        ok: false,
+        reason: 'save_failed',
+        detail: error instanceof Error ? error.message.trim().toLowerCase() : 'save_failed',
+      };
     }
   };
 
@@ -5555,9 +8461,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
 
     try {
-      const { data: createdBookingRequest, error: createBookingRequestError } = await supabase.rpc(
-        'create_public_booking_request',
-        {
+      const { data: createdBookingRequest, error: createBookingRequestError } =
+        await invokeCreatePublicBookingRequestRpcCompat({
           p_salon_code: normalizedCode,
           p_requested_service_name: request.servizio,
           p_requested_price: request.prezzo,
@@ -5570,13 +8475,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
           p_customer_phone: request.telefono,
           p_customer_instagram: request.instagram ?? null,
           p_notes: request.note ?? null,
+          p_required_role: request.mestiereRichiesto?.trim() || null,
           p_operator_id: request.operatoreId ?? null,
           p_operator_name: request.operatoreNome ?? null,
-        }
-      );
+        });
 
       if (createBookingRequestError) {
-        console.log('Errore creazione booking_request reale:', createBookingRequestError);
+        if (!shouldSilenceTransientSyncError(createBookingRequestError)) {
+          console.log('Errore creazione booking_request reale:', createBookingRequestError);
+        }
         const errorText = toErrorText(createBookingRequestError);
         const detail = errorText || 'save_failed';
         if (errorText.includes('slot_unavailable') || errorText.includes('slot_already_requested')) {
@@ -5595,9 +8502,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (errorText.includes('max_future_appointments_reached')) {
           return { ok: false, error: 'max_future_appointments_reached', detail };
         }
-        if (errorText.includes('max_daily_appointments_reached')) {
-          return { ok: false, error: 'max_daily_appointments_reached', detail };
-        }
         if (errorText.includes('service_name_required')) {
           return { ok: false, error: 'service_required', detail };
         }
@@ -5610,8 +8514,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const createdRow = Array.isArray(createdBookingRequest)
         ? createdBookingRequest[0]
         : createdBookingRequest;
+      const createdRequestId =
+        typeof createdRow?.id === 'string' && createdRow.id.trim()
+          ? createdRow.id
+          : request.id;
+      const createdRequestCreatedAt =
+        typeof createdRow?.created_at === 'string' && createdRow.created_at.trim()
+          ? createdRow.created_at
+          : request.createdAt;
       const workspaceId =
         typeof createdRow?.workspace_id === 'string' ? createdRow.workspace_id : null;
+      const nextFrontendRequest = {
+        ...request,
+        id: createdRequestId,
+        createdAt: createdRequestCreatedAt,
+        origine: 'frontend' as const,
+        viewedBySalon: false,
+      };
 
       if (
         normalizedCode === salonWorkspace.salonCode &&
@@ -5623,17 +8542,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
         setRichiestePrenotazione((current) =>
           normalizeRichiestePrenotazione([
-            {
-              ...request,
-              id:
-                typeof createdRow?.id === 'string' && createdRow.id.trim()
-                  ? createdRow.id
-                  : request.id,
-              createdAt:
-                typeof createdRow?.created_at === 'string' && createdRow.created_at.trim()
-                  ? createdRow.created_at
-                  : request.createdAt,
-            },
+            nextFrontendRequest,
             ...current.filter(
               (item) =>
                 !(
@@ -5649,7 +8558,64 @@ export function AppProvider({ children }: { children: ReactNode }) {
         );
       }
 
-      void flushQueuedPushNotifications();
+      try {
+        const resolvedAfterCreate = await resolveSalonByCode(normalizedCode);
+
+        if (resolvedAfterCreate) {
+          const nextRequests = normalizeRichiestePrenotazione([
+            nextFrontendRequest,
+            ...resolvedAfterCreate.richiestePrenotazione.filter((item) => item.id !== createdRequestId),
+          ]);
+
+          const nextCustomers = normalizeClienti(
+            resolvedAfterCreate.clienti.map((item) => {
+              const samePhone =
+                normalizePhoneForIdentity(item.telefono) ===
+                normalizePhoneForIdentity(request.telefono);
+              const sameEmail =
+                normalizeIdentityText(item.email) === normalizeIdentityText(request.email);
+
+              return samePhone || sameEmail
+                ? {
+                    ...item,
+                    viewedBySalon: false,
+                  }
+                : item;
+            })
+          );
+
+          const publishedWorkspaceId = await enqueuePortalPublish({
+            workspace: resolvedAfterCreate.workspace,
+            clienti: nextCustomers as unknown as Array<Record<string, unknown>>,
+            appuntamenti: resolvedAfterCreate.appuntamenti as unknown as Array<Record<string, unknown>>,
+            servizi: resolvedAfterCreate.servizi as unknown as Array<Record<string, unknown>>,
+            operatori: resolvedAfterCreate.operatori as unknown as Array<Record<string, unknown>>,
+            richiestePrenotazione: nextRequests as unknown as Array<Record<string, unknown>>,
+            availabilitySettings: resolvedAfterCreate.availabilitySettings,
+            serviceCardColorOverrides: resolvedAfterCreate.serviceCardColorOverrides,
+            roleCardColorOverrides: resolvedAfterCreate.roleCardColorOverrides,
+          });
+
+          if (
+            normalizedCode === salonWorkspace.salonCode &&
+            resolvedAfterCreate.workspace.ownerEmail === salonAccountEmail
+          ) {
+            setRichiestePrenotazione(nextRequests);
+            setClienti(nextCustomers);
+            if (publishedWorkspaceId && publishedWorkspaceId !== salonWorkspace.id) {
+              setSalonWorkspace((current) => ({ ...current, id: publishedWorkspaceId }));
+            }
+          }
+        }
+      } catch (publishError) {
+        console.log('Pubblicazione snapshot nuova richiesta frontend non riuscita:', publishError);
+      }
+
+      // Owner push for new frontend booking requests is already queued by backend triggers.
+      // Avoid sending a second app-side notification with older/shorter copy.
+      await flushQueuedPushNotifications().catch((error) => {
+        console.log('Flush push nuova richiesta frontend non riuscito:', error);
+      });
       scheduleDelayedPushFlush();
 
       return { ok: true };
@@ -5754,10 +8720,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
         const normalizedCustomerName = customerName.trim();
         const normalizedServiceName = serviceName.trim();
-        const persistedServiceRole =
-          resolved.servizi.find(
-            (item) => item.nome.trim().toLowerCase() === normalizedServiceName.toLowerCase()
-          )?.mestiereRichiesto?.trim() ?? '';
         const normalizedOperatorName = operatorName?.trim() ?? '';
         unmarkRecentlyDeletedAppointment({
           date: dateValue,
@@ -5776,7 +8738,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
             servizio: normalizedServiceName,
             prezzo: priceValue,
             durataMinuti: durationMinutes,
-            mestiereRichiesto: persistedServiceRole,
             operatoreId: operatorId?.trim() ?? '',
             operatoreNome: normalizedOperatorName,
             macchinarioIds: machineryIds ?? [],
@@ -5818,7 +8779,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
                   servizio: normalizedServiceName,
                   prezzo: priceValue,
                   durataMinuti: durationMinutes,
-                  mestiereRichiesto: persistedServiceRole,
                   operatoreId: operatorId?.trim() ?? '',
                   operatoreNome: normalizedOperatorName,
                   nome: normalizedCustomerName.split(' ')[0] || normalizedCustomerName,
@@ -5868,7 +8828,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             workspaceId: workspaceId ?? resolved.workspace.id,
             eventType: 'custom',
             title: 'Nuovo appuntamento confermato',
-            body: `${formatPushCustomerName(normalizedCustomerName)} - ${normalizedServiceName} il ${dateValue} alle ${timeValue}`,
+            body: `${normalizedServiceName} il ${dateValue} alle ${timeValue}`,
             audience: 'public',
             payload: {
               type: 'appointment_created',
@@ -5981,13 +8941,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
       if (createAppointmentError) {
         console.log('Errore creazione appointment reale owner:', createAppointmentError);
-        const createAppointmentErrorText = toErrorText(createAppointmentError);
         return {
           ok: false,
           error:
-            createAppointmentErrorText.includes('customer_time_overlap')
-              ? 'Questo cliente ha gia un altro appuntamento che si accavalla nello stesso giorno.'
-              : createAppointmentError.message?.trim() ||
+            createAppointmentError.message?.trim() ||
             'Non sono riuscito a salvare l’appuntamento.',
         };
       }
@@ -6032,10 +8989,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
       const normalizedCustomerName = customerName.trim();
       const normalizedServiceName = serviceName.trim();
-      const persistedServiceRole =
-        resolved.servizi.find(
-          (item) => item.nome.trim().toLowerCase() === normalizedServiceName.toLowerCase()
-        )?.mestiereRichiesto?.trim() ?? '';
       const normalizedOperatorName = operatorName?.trim() ?? '';
       const shouldUseLocalStateAsBase = isCurrentSalonWorkspace && isCurrentOwnerWorkspace;
       unmarkRecentlyDeletedAppointment({
@@ -6064,7 +9017,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
           servizio: normalizedServiceName,
           prezzo: priceValue,
           durataMinuti: durationMinutes,
-          mestiereRichiesto: persistedServiceRole,
           operatoreId: operatorId ?? '',
           operatoreNome: operatorName ?? '',
           macchinarioIds: normalizeStringIdArray(machineryIds),
@@ -6129,9 +9081,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
                     viewedBySalon: true,
                     annullamentiCount: 0,
                     inibito: false,
-                    maxFutureAppointments: 4,
-                    maxFutureAppointmentsMode: 'monthly' as const,
-                    maxDailyAppointments: 1,
                   },
                   ...baseCustomers,
                 ];
@@ -6141,15 +9090,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
       const nextRequests =
         createBookingRequest && bookingRequestId
-          ? normalizeRichiestePrenotazione([
-              {
+          ? (() => {
+              const acceptedMirror = {
                 id: bookingRequestId,
                 data: dateValue,
                 ora: timeValue,
                 servizio: normalizedServiceName,
                 prezzo: priceValue,
                 durataMinuti: durationMinutes,
-                mestiereRichiesto: persistedServiceRole,
                 operatoreId: operatorId ?? '',
                 operatoreNome: operatorName ?? '',
                 nome: normalizedCustomerName.split(' ')[0] ?? normalizedCustomerName,
@@ -6158,14 +9106,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
                 telefono: customerPhone?.trim() ?? '',
                 instagram: customerInstagram?.trim() ?? '',
                 note: customerNote?.trim() ?? '',
-                origine: 'backoffice',
-                stato: 'Accettata',
+                origine: 'backoffice' as const,
+                stato: 'Accettata' as const,
                 createdAt: new Date().toISOString(),
                 viewedByCliente: false,
                 viewedBySalon: true,
-              },
-              ...baseRequests.filter((item) => item.id !== bookingRequestId),
-            ])
+              };
+              const acceptedMirrorKey = buildRichiestaMergeKey(acceptedMirror);
+
+              return normalizeRichiestePrenotazione([
+                acceptedMirror,
+                ...baseRequests.filter(
+                  (item) =>
+                    item.id !== bookingRequestId && buildRichiestaMergeKey(item) !== acceptedMirrorKey
+                ),
+              ]);
+            })()
           : baseRequests;
 
       const workspaceId = await enqueuePortalPublish({
@@ -6195,11 +9151,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         workspaceId: workspaceId ?? resolved.workspace.id,
         eventType: 'custom',
         title: 'Nuovo appuntamento confermato',
-        body: `Cliente: ${formatPushCustomerName(normalizedCustomerName)}. Servizio: ${normalizedServiceName}.${
-          persistedServiceRole?.trim()
-            ? ` Mestiere: ${persistedServiceRole.trim()}.`
-            : ''
-        } Data: ${formatPushDateLabel(
+        body: `Servizio: ${normalizedServiceName}. Data: ${formatPushDateLabel(
           dateValue
         )}. Ora: ${timeValue}.${
           normalizedOperatorName ? ` Operatore: ${normalizedOperatorName}.` : ''
@@ -6233,26 +9185,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     telefono: string
   ) => {
     const normalizedCode = normalizeSalonCode(salonCode);
-    const normalizedEmail = email.trim().toLowerCase();
-    const normalizedPhone = normalizePhoneForIdentity(telefono);
 
     try {
       const resolved = await resolveSalonByCode(normalizedCode);
       if (!resolved) return;
 
-      const { error: markViewedError } = await supabase.rpc('mark_public_booking_requests_viewed', {
-        p_salon_code: normalizedCode,
-        p_customer_email: normalizedEmail || null,
-        p_customer_phone: normalizedPhone || null,
-      });
-
-      if (markViewedError) {
-        console.log('Errore aggiornamento booking_requests lette cliente:', markViewedError);
-      }
-
       const nextRequests = resolved.richiestePrenotazione.map((item: RichiestaPrenotazione) =>
-        ((item.email.trim().toLowerCase() === normalizedEmail && normalizedEmail.length > 0) ||
-          (normalizePhoneForIdentity(item.telefono) === normalizedPhone && normalizedPhone.length > 0)) &&
+        item.email.trim().toLowerCase() === email.trim().toLowerCase() &&
+        item.telefono.trim() === telefono.trim() &&
         item.stato !== 'In attesa'
           ? { ...item, viewedByCliente: true }
           : item
@@ -6294,298 +9234,319 @@ export function AppProvider({ children }: { children: ReactNode }) {
     requestSnapshot?: RichiestaPrenotazione;
   }) => {
     const normalizedCode = normalizeSalonCode(salonCode);
+    const normalizedEmail = email.trim().toLowerCase();
+    const normalizedPhone = normalizePhoneForIdentity(telefono);
 
     try {
+      const resolved = await resolveSalonByCode(normalizedCode);
+      if (!resolved) {
+        const fallbackPersistRequestId = isUuid(requestId) ? requestId : null;
+        const fallbackSnapshotRequestId =
+          requestSnapshot && isUuid(requestSnapshot.id) ? requestSnapshot.id : null;
+        const fallbackRequestId = fallbackPersistRequestId ?? fallbackSnapshotRequestId;
+
+        if (!fallbackRequestId) {
+          return { ok: false, error: 'Salone non trovato.' };
+        }
+
+        const { error: fallbackCancelError } = await supabase.rpc('cancel_public_booking_request', {
+          p_salon_code: normalizedCode,
+          p_request_id: fallbackRequestId,
+          p_customer_email: normalizedEmail,
+          p_customer_phone: normalizedPhone,
+        });
+        const fallbackCancelErrorText = [
+          fallbackCancelError?.message,
+          fallbackCancelError?.details,
+          fallbackCancelError?.hint,
+        ]
+          .filter(Boolean)
+          .join(' ');
+
+        if (
+          fallbackCancelError &&
+          !/booking_request_not_found/i.test(fallbackCancelErrorText)
+        ) {
+          console.log(
+            'Errore annullamento booking_request cliente in fallback senza snapshot:',
+            fallbackCancelError
+          );
+          return { ok: false, error: 'Non sono riuscito ad annullare la prenotazione.' };
+        }
+
+        return { ok: true };
+      }
+
+      const normalizedSnapshotEmail = requestSnapshot?.email?.trim().toLowerCase() ?? '';
+      const normalizedSnapshotPhone = normalizePhoneForIdentity(requestSnapshot?.telefono);
+      const requestSnapshotMergeKey = requestSnapshot ? buildRichiestaMergeKey(requestSnapshot) : '';
+      const requestSnapshotResolutionKey = requestSnapshot
+        ? [
+            requestSnapshot.data.trim(),
+            normalizeTimeIdentity(requestSnapshot.ora),
+            normalizeIdentityText(requestSnapshot.servizio),
+            normalizeIdentityText(`${requestSnapshot.nome} ${requestSnapshot.cognome}`),
+            normalizeIdentityText(requestSnapshot.operatoreId),
+            normalizeIdentityText(requestSnapshot.operatoreNome),
+          ].join('|')
+        : '';
       const requestToCancel =
-        requestSnapshot ??
-        (await resolveSalonByCode(normalizedCode))?.richiestePrenotazione.find((item) => item.id === requestId);
-      if (!requestToCancel) {
+        resolved.richiestePrenotazione.find((item) => item.id === requestId) ??
+        (requestSnapshot
+          ? resolved.richiestePrenotazione.find((item) => {
+              const sameMergeKey = buildRichiestaMergeKey(item) === requestSnapshotMergeKey;
+              const sameResolutionKey =
+                [
+                  item.data.trim(),
+                  normalizeTimeIdentity(item.ora),
+                  normalizeIdentityText(item.servizio),
+                  normalizeIdentityText(`${item.nome} ${item.cognome}`),
+                  normalizeIdentityText(item.operatoreId),
+                  normalizeIdentityText(item.operatoreNome),
+                ].join('|') === requestSnapshotResolutionKey;
+              const sameEmail = item.email.trim().toLowerCase() === normalizedSnapshotEmail;
+              const samePhone =
+                normalizePhoneForIdentity(item.telefono) === normalizedSnapshotPhone;
+              return sameMergeKey || sameResolutionKey || (sameEmail && samePhone);
+            })
+          : undefined);
+      const effectiveRequestToCancel = requestToCancel ?? requestSnapshot ?? null;
+      if (!effectiveRequestToCancel) {
         return { ok: false, error: 'Prenotazione non trovata.' };
       }
 
-      if (requestToCancel.stato === 'Rifiutata' || requestToCancel.stato === 'Annullata') {
+      if (effectiveRequestToCancel.stato === 'Rifiutata' || effectiveRequestToCancel.stato === 'Annullata') {
         return { ok: false, error: 'Questa prenotazione risulta gia chiusa.' };
       }
 
-      const normalizedEmail = email.trim().toLowerCase();
-      const normalizedPhone = normalizePhoneForIdentity(telefono);
-      const requestEmail = requestToCancel.email.trim().toLowerCase();
-      const requestPhone = normalizePhoneForIdentity(requestToCancel.telefono);
-      const matchesEmail =
-        normalizedEmail.length > 0 &&
-        requestEmail.length > 0 &&
-        requestEmail === normalizedEmail;
-      const matchesPhone =
-        normalizedPhone.length > 0 &&
-        requestPhone.length > 0 &&
-        requestPhone === normalizedPhone;
-
-      if (!matchesEmail && !matchesPhone) {
+      if (
+        effectiveRequestToCancel.email.trim().toLowerCase() !== normalizedEmail ||
+        normalizePhoneForIdentity(effectiveRequestToCancel.telefono) !== normalizedPhone
+      ) {
         return { ok: false, error: 'Questa prenotazione non appartiene al profilo cliente attivo.' };
       }
 
-      const normalizedFullName = `${requestToCancel.nome} ${requestToCancel.cognome}`.trim().toLowerCase();
-      const shouldPersistRealStatus = isUuid(requestId);
-      const cancelRpcTask = shouldPersistRealStatus
-        ? Promise.resolve(
-            supabase.rpc('cancel_public_booking_request', {
-              p_salon_code: normalizedCode,
-              p_request_id: requestId,
-              p_customer_email: normalizedEmail,
-              p_customer_phone: normalizedPhone,
-            })
-          )
-        : Promise.resolve({ error: null });
-      const cancelTimeoutTask = new Promise<{
-        data: null;
-        error: { message: string; details?: string | null; hint?: string | null; code?: string | null };
-      }>((resolve) => {
-        const timer = setTimeout(() => {
-          resolve({
-            data: null,
-            error: {
-              message: 'cancel_public_booking_request_timeout',
-              details: 'timeout',
-              hint: 'optimistic-fallback',
-              code: 'TIMEOUT',
-            },
-          });
-        }, 8000);
-
-        cancelRpcTask.finally(() => clearTimeout(timer)).catch(() => undefined);
+      const normalizedFullName = `${effectiveRequestToCancel.nome} ${effectiveRequestToCancel.cognome}`.trim().toLowerCase();
+      const cancelledRequestCompositeKey = buildRichiestaMergeKeyFromValues({
+        data: effectiveRequestToCancel.data,
+        ora: effectiveRequestToCancel.ora,
+        servizio: effectiveRequestToCancel.servizio,
+        fullName: `${effectiveRequestToCancel.nome} ${effectiveRequestToCancel.cognome}`.trim(),
       });
+      const isSameCancelledRequestComposite = (item: RichiestaPrenotazione) =>
+        buildRichiestaMergeKey(item) === cancelledRequestCompositeKey;
+      const persistRequestId = isUuid(effectiveRequestToCancel.id) ? effectiveRequestToCancel.id : requestId;
+      const shouldPersistRealStatus = isUuid(persistRequestId);
       const { error: cancelError } = shouldPersistRealStatus
-        ? await Promise.race([cancelRpcTask, cancelTimeoutTask])
+        ? await supabase.rpc('cancel_public_booking_request', {
+            p_salon_code: normalizedCode,
+            p_request_id: persistRequestId,
+            p_customer_email: normalizedEmail,
+            p_customer_phone: normalizedPhone,
+          })
         : { error: null };
-      const cancelErrorText = [cancelError?.message, cancelError?.details, cancelError?.hint, cancelError?.code]
+      const cancelErrorText = [cancelError?.message, cancelError?.details, cancelError?.hint]
         .filter(Boolean)
-        .join(' ')
-        .toLowerCase();
-      const isDefinitelyLocalOnlyRequest =
+        .join(' ');
+      const isLegacySnapshotOnlyRequest =
         !shouldPersistRealStatus ||
         /booking_request_not_found/i.test(cancelErrorText);
-      const canContinueOptimistically =
-        isDefinitelyLocalOnlyRequest ||
-        /timeout|timed out|failed to fetch|network|fetch|deadlock|40p01/i.test(cancelErrorText) ||
-        isDeadlockError(cancelError);
 
-      if (cancelError && !canContinueOptimistically) {
+      if (cancelError && !isLegacySnapshotOnlyRequest) {
         console.log('Errore annullamento booking_request reale cliente:', cancelError);
-        return {
-          ok: false,
-          error:
-            cancelErrorText.trim() ||
-            cancelError?.message ||
-            'Non sono riuscito ad annullare la prenotazione.',
-        };
+        return { ok: false, error: 'Non sono riuscito ad annullare la prenotazione.' };
       }
 
-      const optimisticCancelledRequest: RichiestaPrenotazione = {
-        ...requestToCancel,
-        stato: 'Annullata',
-        viewedByCliente: true,
-        viewedBySalon: false,
-        cancellationSource: 'cliente',
-      };
-
-      let resolved: Awaited<ReturnType<typeof resolveSalonByCode>> | null = null;
       try {
-        resolved = await resolveSalonByCode(normalizedCode);
-      } catch (resolveError) {
-        console.log('Errore risoluzione salone per annullamento cliente, continuo in modalita ottimistica:', resolveError);
-      }
-      const sourceRequests = resolved?.richiestePrenotazione ?? [requestToCancel];
-      const sourceAppointments = resolved?.appuntamenti ?? [];
-      const sourceCustomers = resolved?.clienti ?? [];
-      const sourceWorkspace =
-        resolved?.workspace ??
-        ({
-          ...salonWorkspace,
-          salonCode: normalizedCode,
-        } as SalonWorkspace);
-      const sourceServices = resolved?.servizi ?? servizi;
-      const sourceOperators = resolved?.operatori ?? operatori;
-      const sourceAvailabilitySettings =
-        resolved?.availabilitySettings ?? availabilitySettings;
-
-      const legacyNextRequests = normalizeRichiestePrenotazione(
-        sourceRequests.map((item) => (item.id === requestId ? optimisticCancelledRequest : item))
-      );
-
-      const shouldRemoveAcceptedAppointment = requestToCancel.stato === 'Accettata';
-      const matchesCancelledClientAppointment = (item: Appuntamento) => {
-        const itemDate = item.data ?? getTodayDateString();
-        return (
-          shouldRemoveAcceptedAppointment &&
-          itemDate === requestToCancel.data &&
-          normalizeTimeIdentity(item.ora) === normalizeTimeIdentity(requestToCancel.ora) &&
-          normalizeIdentityText(item.servizio) ===
-            normalizeIdentityText(requestToCancel.servizio) &&
-          matchesCustomerDisplayName(item.cliente, normalizedFullName) &&
-          !item.completato &&
-          !item.incassato &&
-          !item.nonEffettuato
+        const legacyNextRequests = normalizeRichiestePrenotazione(
+          resolved.richiestePrenotazione.map((item) =>
+            item.id === effectiveRequestToCancel.id || isSameCancelledRequestComposite(item)
+              ? {
+                  ...item,
+                  stato: 'Annullata',
+                  viewedByCliente: true,
+                  viewedBySalon: false,
+                  cancellationSource: 'cliente',
+                }
+              : item
+          )
         );
-      };
-      const acceptedAppointmentsToRemove = shouldRemoveAcceptedAppointment
-        ? sourceAppointments.filter((item) => matchesCancelledClientAppointment(item))
-        : [];
-      if (shouldRemoveAcceptedAppointment) {
-        if (acceptedAppointmentsToRemove.length > 0) {
-          acceptedAppointmentsToRemove.forEach((item) => {
-            markRecentlyDeletedAppointment({
-              date: item.data ?? requestToCancel.data,
-              time: item.ora,
-              customerName: item.cliente,
-              serviceName: item.servizio,
-              operatorId: item.operatoreId,
-              operatorName: item.operatoreNome,
+
+        const shouldRemoveAcceptedAppointment = effectiveRequestToCancel.stato === 'Accettata';
+        const matchesCancelledClientAppointment = (item: Appuntamento) => {
+          const itemDate = item.data ?? getTodayDateString();
+          return (
+            shouldRemoveAcceptedAppointment &&
+            itemDate === effectiveRequestToCancel.data &&
+            normalizeTimeIdentity(item.ora) === normalizeTimeIdentity(effectiveRequestToCancel.ora) &&
+            normalizeIdentityText(item.servizio) ===
+              normalizeIdentityText(effectiveRequestToCancel.servizio) &&
+            matchesCustomerDisplayName(item.cliente, normalizedFullName) &&
+            !item.completato &&
+            !item.incassato &&
+            !item.nonEffettuato
+          );
+        };
+        const acceptedAppointmentsToRemove = shouldRemoveAcceptedAppointment
+          ? resolved.appuntamenti.filter((item) => matchesCancelledClientAppointment(item))
+          : [];
+        if (shouldRemoveAcceptedAppointment) {
+          if (acceptedAppointmentsToRemove.length > 0) {
+            acceptedAppointmentsToRemove.forEach((item) => {
+              markRecentlyDeletedAppointment({
+                date: item.data ?? effectiveRequestToCancel.data,
+                time: item.ora,
+                customerName: item.cliente,
+                serviceName: item.servizio,
+                operatorId: item.operatoreId,
+                operatorName: item.operatoreNome,
+              });
             });
-          });
-        } else {
-          markRecentlyDeletedAppointment({
-            date: requestToCancel.data,
-            time: requestToCancel.ora,
-            customerName: `${requestToCancel.nome} ${requestToCancel.cognome}`.trim(),
-            serviceName: requestToCancel.servizio,
-            operatorId: requestToCancel.operatoreId,
-            operatorName: requestToCancel.operatoreNome,
-          });
+          } else {
+            markRecentlyDeletedAppointment({
+              date: effectiveRequestToCancel.data,
+              time: effectiveRequestToCancel.ora,
+              customerName: `${effectiveRequestToCancel.nome} ${effectiveRequestToCancel.cognome}`.trim(),
+              serviceName: effectiveRequestToCancel.servizio,
+              operatorId: effectiveRequestToCancel.operatoreId,
+              operatorName: effectiveRequestToCancel.operatoreNome,
+            });
+          }
         }
-      }
-      const legacyNextAppointments = sourceAppointments.filter(
-        (item) => !matchesCancelledClientAppointment(item)
-      );
+        const legacyNextAppointments = resolved.appuntamenti.filter(
+          (item) => !matchesCancelledClientAppointment(item)
+        );
 
-      const nextCustomers = normalizeClienti(
-        sourceCustomers.map((item) => {
-          const matchesByPhone = normalizePhoneForIdentity(item.telefono) === normalizedPhone;
-          const matchesByEmail = (item.email ?? '').trim().toLowerCase() === normalizedEmail;
-          if (!matchesByPhone && !matchesByEmail) return item;
+        const nextCustomers = normalizeClienti(
+          resolved.clienti.map((item) => {
+            const matchesByPhone = item.telefono.trim() === normalizedPhone;
+            const matchesByEmail = (item.email ?? '').trim().toLowerCase() === normalizedEmail;
+            if (!matchesByPhone && !matchesByEmail) return item;
 
-          return {
-            ...item,
-            annullamentiCount: (item.annullamentiCount ?? 0) + 1,
-            viewedBySalon: false,
-          };
-        })
-      );
+            return {
+              ...item,
+              annullamentiCount: (item.annullamentiCount ?? 0) + 1,
+              viewedBySalon: false,
+            };
+          })
+        );
 
-      const finalNextRequests: RichiestaPrenotazione[] = legacyNextRequests;
-      const finalNextAppointments: Appuntamento[] = legacyNextAppointments;
-      let workspaceId: string | null = sourceWorkspace.id;
+        let latestResolved = null;
+        if (!isLegacySnapshotOnlyRequest) {
+          try {
+            latestResolved = await resolveSalonByCode(normalizedCode);
+          } catch (refreshError) {
+            console.log('Refresh salone dopo annullamento cliente non riuscito, continuo in modalita ottimistica:', refreshError);
+          }
+        }
+        const latestNextRequests = latestResolved
+          ? normalizeRichiestePrenotazione(
+              latestResolved.richiestePrenotazione.map((item) =>
+                item.id === effectiveRequestToCancel.id || isSameCancelledRequestComposite(item)
+                  ? {
+                      ...item,
+                      stato: 'Annullata',
+                      viewedByCliente: true,
+                      viewedBySalon: false,
+                      cancellationSource: 'cliente',
+                    }
+                  : item
+              )
+            )
+          : null;
+        const latestNextAppointments = latestResolved
+          ? normalizeAppuntamenti(
+              latestResolved.appuntamenti.filter((item) => !matchesCancelledClientAppointment(item))
+            )
+          : null;
 
-      if (normalizedCode === salonWorkspace.salonCode && sourceWorkspace.ownerEmail === salonAccountEmail) {
-        setRichiestePrenotazione(finalNextRequests);
-        setAppuntamenti(filterRecentlyDeletedAppointments(finalNextAppointments));
-        setClienti(nextCustomers);
-      }
-
-      void (async () => {
+        let workspaceId: string | null = null;
         try {
-          const latestResolved = cancelError ? null : await resolveSalonByCode(normalizedCode);
-          const latestNextRequests = latestResolved
-            ? normalizeRichiestePrenotazione(
-                latestResolved.richiestePrenotazione.map((item) =>
-                  item.id === requestId
-                    ? {
-                        ...item,
-                        stato: 'Annullata',
-                        viewedByCliente: true,
-                        viewedBySalon: false,
-                        cancellationSource: 'cliente',
-                      }
-                    : item
-                )
-              )
-            : null;
-          const resolvedCancelledRequest =
-            latestNextRequests?.find((item) => item.id === requestId) ?? null;
-          const syncedNextRequests: RichiestaPrenotazione[] =
-            resolvedCancelledRequest &&
-            resolvedCancelledRequest.stato === 'Annullata' &&
-            resolvedCancelledRequest.cancellationSource === 'cliente'
-              ? latestNextRequests ?? finalNextRequests
-              : finalNextRequests;
-          const latestNextAppointments = latestResolved
-            ? normalizeAppuntamenti(
-                latestResolved.appuntamenti.filter((item) => !matchesCancelledClientAppointment(item))
-              )
-            : null;
-          const syncedNextAppointments: Appuntamento[] = latestNextAppointments ?? finalNextAppointments;
-
           workspaceId = await enqueuePortalPublish({
-            workspace: sourceWorkspace,
+            workspace: resolved.workspace,
             clienti: nextCustomers as unknown as Array<Record<string, unknown>>,
             appuntamenti:
-              syncedNextAppointments as unknown as Array<Record<string, unknown>>,
-            servizi: (latestResolved?.servizi ?? sourceServices) as unknown as Array<Record<string, unknown>>,
+              (latestNextAppointments ?? legacyNextAppointments) as unknown as Array<Record<string, unknown>>,
+            servizi: (latestResolved?.servizi ?? resolved.servizi) as unknown as Array<Record<string, unknown>>,
             operatori:
-              (latestResolved?.operatori ?? sourceOperators) as unknown as Array<Record<string, unknown>>,
+              (latestResolved?.operatori ?? resolved.operatori) as unknown as Array<Record<string, unknown>>,
             richiestePrenotazione:
-              syncedNextRequests as unknown as Array<Record<string, unknown>>,
-            availabilitySettings: latestResolved?.availabilitySettings ?? sourceAvailabilitySettings,
+              (latestNextRequests ?? legacyNextRequests) as unknown as Array<Record<string, unknown>>,
+            availabilitySettings: latestResolved?.availabilitySettings ?? resolved.availabilitySettings,
           });
-
-          if (normalizedCode === salonWorkspace.salonCode && sourceWorkspace.ownerEmail === salonAccountEmail) {
-            setRichiestePrenotazione(syncedNextRequests);
-            setAppuntamenti(filterRecentlyDeletedAppointments(syncedNextAppointments));
-            setClienti(nextCustomers);
-            const resolvedWorkspaceId = workspaceId;
-            if (resolvedWorkspaceId && resolvedWorkspaceId !== salonWorkspace.id) {
-              setSalonWorkspace((current) => ({ ...current, id: resolvedWorkspaceId }));
-            }
-          }
-        } catch (error) {
-          console.log('Errore sync post annullamento cliente:', error);
+        } catch (publishError) {
+          console.log('Pubblicazione snapshot annullamento cliente non riuscita, continuo in modalita ottimistica:', publishError);
         }
-      })();
 
-      if (cancelError && canContinueOptimistically) {
-        void (async () => {
-          try {
-            await queueWorkspacePushNotification({
-              workspaceId: workspaceId ?? sourceWorkspace.id,
-              eventType: 'appointment_cancelled',
-              title:
-                requestToCancel.stato === 'In attesa'
-                  ? 'Richiesta annullata dal cliente'
-                  : 'Prenotazione annullata dal cliente',
-            body: `${formatPushCustomerName(
-              `${requestToCancel.nome} ${requestToCancel.cognome}`
-            )}. Servizio: ${requestToCancel.servizio}.${
-              requestToCancel.mestiereRichiesto?.trim()
-                ? ` Mestiere: ${requestToCancel.mestiereRichiesto.trim()}.`
-                : ''
-            } Data: ${formatPushDateTimeLabel(requestToCancel.data, requestToCancel.ora)}.`,
-              audience: 'auth',
-              payload: {
-                type: 'appointment_cancelled',
-                bookingRequestId: requestToCancel.id,
-                appointmentDate: requestToCancel.data,
-                appointmentTime: requestToCancel.ora,
-                customerName: `${requestToCancel.nome} ${requestToCancel.cognome}`.trim(),
-                serviceName: requestToCancel.servizio,
-                previousStatus: requestToCancel.stato,
-              },
-            });
-          } catch (error) {
-            console.log('Errore push annullamento cliente:', error);
+        if (normalizedCode === salonWorkspace.salonCode && resolved.workspace.ownerEmail === salonAccountEmail) {
+          setRichiestePrenotazione(latestNextRequests ?? legacyNextRequests);
+          setAppuntamenti(filterRecentlyDeletedAppointments(latestNextAppointments ?? legacyNextAppointments));
+          setClienti(nextCustomers);
+          if (workspaceId && workspaceId !== salonWorkspace.id) {
+            setSalonWorkspace((current) => ({ ...current, id: workspaceId }));
           }
-        })();
+        }
+
+        const finalWorkspaceId = workspaceId ?? resolved.workspace.id;
+
+        const postCancelResults = await Promise.allSettled([
+          queueWorkspacePushNotification({
+            workspaceId: finalWorkspaceId,
+            eventType: 'appointment_cancelled',
+            title:
+              effectiveRequestToCancel.stato === 'In attesa'
+                ? 'Richiesta annullata dal cliente'
+                : 'Prenotazione annullata dal cliente',
+            body: `${formatPushCustomerName(
+              `${effectiveRequestToCancel.nome} ${effectiveRequestToCancel.cognome}`
+            )} - ${effectiveRequestToCancel.servizio} il ${formatAppointmentDateTimeLabel(
+              effectiveRequestToCancel.data,
+              effectiveRequestToCancel.ora
+            )}`,
+            audience: 'auth',
+            payload: {
+              type: 'appointment_cancelled',
+              bookingRequestId: effectiveRequestToCancel.id,
+              appointmentDate: effectiveRequestToCancel.data,
+              appointmentTime: effectiveRequestToCancel.ora,
+              customerName: `${effectiveRequestToCancel.nome} ${effectiveRequestToCancel.cognome}`.trim(),
+              serviceName: effectiveRequestToCancel.servizio,
+              previousStatus: effectiveRequestToCancel.stato,
+            },
+          }),
+          processPublicSlotWaitlistAndFlush({
+            workspaceId: finalWorkspaceId,
+            appointmentDate: effectiveRequestToCancel.data,
+            appointmentTime: effectiveRequestToCancel.ora,
+          }),
+        ]);
+
+        postCancelResults.forEach((result, index) => {
+          if (result.status === 'rejected') {
+            console.log('Post-annullamento cliente non completato:', result.reason);
+            return;
+          }
+
+          if (result.value === false) {
+            console.log(
+              index === 0
+                ? 'Push annullamento cliente non accodata correttamente.'
+                : 'Processazione waitlist pubblica non completata dopo annullamento cliente.'
+            );
+          }
+        });
+
+        await flushQueuedPushNotifications().catch((error) => {
+          console.log('Flush push annullamento cliente non riuscito:', error);
+        });
+      } catch (postCancelError) {
+        console.log('Post-annullamento cliente non allineato perfettamente, ma annullamento persistito:', postCancelError);
       }
-      // On successful server-side cancellations, the RPC already queues the owner push
-      // and processes related waitlist side effects atomically. Triggering extra flushes
-      // here can race the first sender and duplicate the owner's cancellation push.
 
       return { ok: true };
     } catch (error) {
       console.log('Errore annullamento prenotazione cliente:', error);
-      const message =
-        error instanceof Error && error.message.trim()
-          ? error.message.trim()
-          : 'Non sono riuscito ad annullare la prenotazione.';
-      return { ok: false, error: message };
+      return { ok: false, error: 'Non sono riuscito ad annullare la prenotazione.' };
     }
   };
 
@@ -6672,6 +9633,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
           normalizeIdentityText(item.servizio) === normalizeIdentityText(serviceName) &&
           matchesCustomerDisplayName(`${item.nome} ${item.cognome}`, customerName)
       );
+      const linkedRequestCompositeKey = buildRichiestaMergeKeyFromValues({
+        data: appointmentDate,
+        ora: appointmentTime,
+        servizio: serviceName,
+        fullName: customerName,
+      });
+      const isSameLinkedRequestComposite = (item: RichiestaPrenotazione) =>
+        buildRichiestaMergeKey(item) === linkedRequestCompositeKey;
 
       const customerNameLower = customerName.trim().toLowerCase();
       const matchedCustomer = currentClienti.find(
@@ -6687,7 +9656,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const nextRequests = linkedRequest
         ? normalizeRichiestePrenotazione(
             currentRichieste.map((item) =>
-              item.id === linkedRequest.id
+              item.id === linkedRequest.id || isSameLinkedRequestComposite(item)
                 ? {
                     ...item,
                     stato: 'Annullata',
@@ -6706,7 +9675,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
               servizio: serviceName,
               prezzo: cancelledAppointment?.prezzo ?? 0,
               durataMinuti: cancelledAppointment?.durataMinuti,
-              mestiereRichiesto: cancelledAppointment?.mestiereRichiesto ?? '',
               operatoreId: cancelledAppointment?.operatoreId ?? '',
               operatoreNome: cancelledAppointment?.operatoreNome ?? '',
               nome: syntheticNome,
@@ -6720,7 +9688,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
               viewedBySalon: true,
               viewedByCliente: false,
             },
-            ...currentRichieste,
+            ...currentRichieste.filter((item) => !isSameLinkedRequestComposite(item)),
           ]);
 
       const nextClienti = normalizeClienti(
@@ -6791,6 +9759,84 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
       if (isCurrentSalonWorkspace && workspaceId && workspaceId !== salonWorkspace.id) {
         setSalonWorkspace((current) => ({ ...current, id: workspaceId }));
+      }
+
+      const requestForNotification = nextRequests.find(
+        (item) =>
+          item.stato === 'Annullata' &&
+          normalizeIdentityText(item.data) === normalizeIdentityText(appointmentDate) &&
+          normalizeTimeIdentity(item.ora) === normalizeTimeIdentity(appointmentTime) &&
+          normalizeIdentityText(item.servizio) === normalizeIdentityText(serviceName) &&
+          matchesCustomerDisplayName(`${item.nome} ${item.cognome}`, customerName)
+      );
+
+      if (requestForNotification) {
+        const linkedCustomerName = `${requestForNotification.nome} ${requestForNotification.cognome}`.trim();
+        const notificationCopy = buildBookingRequestStatusPushCopy({
+          status: 'Annullata',
+          serviceName: requestForNotification.servizio,
+          appointmentDate: requestForNotification.data,
+          appointmentTime: requestForNotification.ora,
+          operatorName: requestForNotification.operatoreNome,
+        });
+        void queueWorkspacePushNotification({
+          workspaceId: workspaceId ?? salonWorkspace.id,
+          eventType: 'booking_request_status_changed',
+          title: notificationCopy.title,
+          body: notificationCopy.body,
+          audience: 'public',
+          customerEmail: requestForNotification.email?.trim().toLowerCase() ?? '',
+          customerPhone: requestForNotification.telefono?.trim() ?? '',
+          payload: {
+            type: 'booking_request_status_changed',
+            bookingRequestId: requestForNotification.id,
+            status: notificationCopy.statusLabel,
+            statusCode: 'cancelled',
+            appointmentDate: requestForNotification.data,
+            appointmentTime: requestForNotification.ora,
+            customerName: linkedCustomerName,
+            serviceName: requestForNotification.servizio,
+            operatorName: requestForNotification.operatoreNome?.trim() ?? '',
+            source: 'owner',
+          },
+        });
+        void flushQueuedPushNotifications();
+      } else {
+        const fallbackCustomerEmail =
+          matchedCustomer?.email?.trim().toLowerCase() ??
+          '';
+        const fallbackCustomerPhone =
+          matchedCustomer?.telefono?.trim() ??
+          linkedPhone;
+
+        if (fallbackCustomerEmail || fallbackCustomerPhone) {
+          void queueWorkspacePushNotification({
+            workspaceId: workspaceId ?? salonWorkspace.id,
+            eventType: 'appointment_cancelled',
+            title: 'Appuntamento annullato dal salone',
+            body: `Servizio: ${serviceName}. Data: ${formatPushDateLabel(
+              appointmentDate
+            )}. Ora: ${appointmentTime}.${
+              (cancelledAppointment?.operatoreNome ?? operatorName)?.trim()
+                ? ` Operatore: ${(cancelledAppointment?.operatoreNome ?? operatorName)?.trim()}.`
+                : ''
+            }`,
+            audience: 'public',
+            customerEmail: fallbackCustomerEmail,
+            customerPhone: fallbackCustomerPhone,
+            payload: {
+              type: 'appointment_cancelled',
+              appointmentDate,
+              appointmentTime,
+              appointmentId: cancelledAppointment?.id ?? appointmentId ?? '',
+              customerName,
+              serviceName,
+              operatorName: (cancelledAppointment?.operatoreNome ?? operatorName)?.trim() ?? '',
+              source: 'owner',
+            },
+          });
+          void flushQueuedPushNotifications();
+        }
       }
 
       await processPublicSlotWaitlistAndFlush({
@@ -7073,7 +10119,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (linkedRequest) {
           return currentRequests.map((item) =>
             item.id !== linkedRequest.id
-                ? item
+              ? item
               : {
                   ...item,
                   data: toDate,
@@ -7081,7 +10127,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
                   servizio: appointment.servizio,
                   prezzo: appointment.prezzo,
                   durataMinuti: appointment.durataMinuti,
-                  mestiereRichiesto: appointment.mestiereRichiesto ?? item.mestiereRichiesto,
                   operatoreId: appointment.operatoreId ?? item.operatoreId,
                   operatoreNome: appointment.operatoreNome ?? item.operatoreNome,
                   viewedByCliente: false,
@@ -7103,7 +10148,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
             servizio: appointment.servizio,
             prezzo: appointment.prezzo,
             durataMinuti: appointment.durataMinuti,
-            mestiereRichiesto: appointment.mestiereRichiesto ?? '',
             operatoreId: appointment.operatoreId ?? '',
             operatoreNome: appointment.operatoreNome ?? '',
             nome: customerFirstName,
@@ -7175,7 +10219,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           entry.appointment,
           entry.fromDate,
           entry.fromTime,
-          nextRequests
+          resolved.richiestePrenotazione
         ),
       }));
 
@@ -7237,14 +10281,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
             workspaceId: workspaceId ?? resolved.workspace.id,
             eventType: 'custom',
             title: 'Appuntamento spostato dal salone',
-            body: `Cliente: ${formatPushCustomerName(entry.appointment.cliente)}. Servizio: ${entry.appointment.servizio}. Prima: ${formatPushDateTimeLabel(
+            body: `Servizio: ${entry.appointment.servizio}. Prima: ${formatPushDateTimeLabel(
               entry.fromDate,
               entry.fromTime
-            )}.${
-              entry.appointment.mestiereRichiesto?.trim()
-                ? ` Mestiere: ${entry.appointment.mestiereRichiesto.trim()}.`
-                : ''
-            } Nuova data: ${formatPushDateLabel(entry.toDate)}. Nuovo orario: ${entry.toTime}.${
+            )}. Nuova data: ${formatPushDateLabel(entry.toDate)}. Nuovo orario: ${entry.toTime}.${
               entry.appointment.operatoreNome?.trim()
                 ? ` Operatore: ${entry.appointment.operatoreNome.trim()}.`
                 : ''
@@ -7277,7 +10317,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         await processPublicSlotWaitlistAndFlush({
           workspaceId: workspaceId ?? resolved.workspace.id,
           appointmentDate: currentDate,
-          appointmentTime: null,
+          appointmentTime: currentTime,
         });
       }
 
@@ -7365,48 +10405,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
             return false;
           }
 
-	          if (useOperatorSchedulingForRequest) {
-	            const existingOperatorId = item.operatoreId?.trim() ?? '';
-	            const existingOperatorNameKey = item.operatoreNome?.trim().toLowerCase() ?? '';
-	            const existingHasExplicitOperator = !!(existingOperatorId || existingOperatorNameKey);
-	            const existingUsesOperatorScheduling =
-	              resolved.operatori.length > 0 &&
-	              doesServiceUseOperators(item.servizio, resolved.servizi);
-	            const matchesRequestedOperator =
-	              (existingOperatorId && requestedOperatorId && existingOperatorId === requestedOperatorId) ||
-	              (existingOperatorNameKey &&
-	                requestedOperatorNameKey &&
-	                existingOperatorNameKey === requestedOperatorNameKey);
+          if (useOperatorSchedulingForRequest) {
+            const existingOperatorId = item.operatoreId?.trim() ?? '';
+            const existingOperatorNameKey = item.operatoreNome?.trim().toLowerCase() ?? '';
+            const existingHasExplicitOperator = !!(existingOperatorId || existingOperatorNameKey);
+            const matchesRequestedOperator =
+              (existingOperatorId && requestedOperatorId && existingOperatorId === requestedOperatorId) ||
+              (existingOperatorNameKey &&
+                requestedOperatorNameKey &&
+                existingOperatorNameKey === requestedOperatorNameKey);
 
-	            if (existingHasExplicitOperator && !matchesRequestedOperator) {
-	              return false;
-	            }
-
-	            if (!existingHasExplicitOperator) {
-	              if (existingUsesOperatorScheduling) {
-	                return false;
-	              }
-
-	              const existingSalonCapacityId =
-	                item.operatoreId?.trim() || buildSalonCapacityOperatorId(item.servizio, resolved.servizi);
-
-	              if (
-	                requestedSalonCapacityId &&
-	                existingSalonCapacityId &&
-	                requestedSalonCapacityId !== existingSalonCapacityId
-	              ) {
-	                return false;
-	              }
-	            }
-	          } else {
+            if (existingHasExplicitOperator && !matchesRequestedOperator) {
+              return false;
+            }
+          } else {
             const existingUsesOperatorScheduling =
               resolved.operatori.length > 0 &&
               doesServiceUseOperators(item.servizio, resolved.servizi) &&
               !!((item.operatoreId?.trim() ?? '') || (item.operatoreNome?.trim() ?? ''));
-
-            if (existingUsesOperatorScheduling) {
-              return false;
-            }
 
             if (!existingUsesOperatorScheduling) {
               const existingSalonCapacityId =
@@ -7450,7 +10466,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
           services: resolved.servizi,
           operators: resolved.operatori,
           settings: resolved.availabilitySettings,
-          preserveExplicitOperatorAssignments: true,
         });
 
         const legacyAnonymousConflicts = resolved.appuntamenti.filter((item) => {
@@ -7565,19 +10580,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
       }
 
-      const dbStatus = normalizeBookingRequestDbStatus(status);
-      if (!dbStatus) {
-        return {
-          ok: false,
-          error: 'Stato richiesta non valido. Riapri la richiesta e riprova.',
-        };
-      }
+      const dbStatus =
+        status === 'Accettata'
+          ? 'accepted'
+          : status === 'Rifiutata'
+            ? 'rejected'
+            : 'cancelled';
       const shouldPersistRealStatus = isUuid(requestId);
       let updateData: Record<string, unknown> | null = null;
       let updateError: { message?: string; details?: string; hint?: string } | null = null;
       let updateErrorText = '';
       let updateErrorContext = '';
       let ownerSessionEmailForRequestStatus = '';
+      let usedDirectAcceptStatusFallback = false;
+      let deferredAcceptStatusRetryScheduled = false;
 
       if (shouldPersistRealStatus) {
         const ownerSessionResult = await ensureRealtimeOwnerSession();
@@ -7610,8 +10626,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
             .limit(1);
 
           if (requestLinkedAppointmentsError) {
-            updateErrorContext = 'find_existing_request_link';
-            updateError = requestLinkedAppointmentsError;
+            if (isSupabaseSchemaCacheLookupError(requestLinkedAppointmentsError)) {
+              console.log(
+                'Lookup collegamento richiesta esistente saltato per schema cache Supabase:',
+                requestLinkedAppointmentsError
+              );
+            } else {
+              updateErrorContext = 'find_existing_request_link';
+              updateError = requestLinkedAppointmentsError;
+            }
           } else {
             const alreadyLinkedAppointment =
               (requestLinkedAppointments ?? []).find((item) => String(item.id ?? '').trim()) ?? null;
@@ -7633,8 +10656,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
               .eq('appointment_time', requestToUpdate.ora);
 
             if (existingAppointmentsError) {
-              updateErrorContext = 'find_existing_same_slot_appointments';
-              updateError = existingAppointmentsError;
+              if (isSupabaseSchemaCacheLookupError(existingAppointmentsError)) {
+                console.log(
+                  'Lookup appuntamenti stesso slot saltato per schema cache Supabase:',
+                  existingAppointmentsError
+                );
+              } else {
+                updateErrorContext = 'find_existing_same_slot_appointments';
+                updateError = existingAppointmentsError;
+              }
             } else {
               existingAppointments = (existingAppointmentsData ?? []) as ExistingAppointmentLinkRow[];
 
@@ -7753,14 +10783,105 @@ export function AppProvider({ children }: { children: ReactNode }) {
                   p_status: dbStatus,
                 };
 
-          const { data: persistedStatusUpdate, error: persistedStatusUpdateError } = await supabase.rpc(
-            actionRpcName,
-            actionRpcPayload
-          );
+          const { data: persistedStatusUpdate, error: persistedStatusUpdateError } =
+            await invokeBookingRequestStatusRpcWithSchemaRetry(
+              actionRpcName,
+              actionRpcPayload
+            );
 
           if (persistedStatusUpdateError) {
-            updateErrorContext = actionRpcName;
-            updateError = persistedStatusUpdateError;
+            if (
+              status === 'Accettata' &&
+              isSupabaseSchemaCacheLookupError(persistedStatusUpdateError)
+            ) {
+              console.log(
+                'Fallback diretto booking_requests dopo schema cache sulla RPC di accettazione:',
+                persistedStatusUpdateError
+              );
+
+              const directAcceptPayload: Record<string, unknown> = {
+                status: 'accepted',
+                cancellation_source: null,
+                viewed_by_customer: false,
+                viewed_by_salon: true,
+                updated_at: new Date().toISOString(),
+              };
+
+              if (persistedCustomerIdFromAccept) {
+                directAcceptPayload.customer_id = persistedCustomerIdFromAccept;
+              }
+
+              const {
+                data: directAcceptStatusUpdate,
+                error: directAcceptStatusUpdateError,
+              } = await supabase
+                .from('booking_requests')
+                .update(directAcceptPayload)
+                .eq('id', requestId)
+                .eq('workspace_id', resolved.workspace.id)
+                .select('id, customer_id')
+                .maybeSingle();
+
+              if (directAcceptStatusUpdateError) {
+                if (isSupabaseSchemaCacheLookupError(directAcceptStatusUpdateError)) {
+                  console.log(
+                    'Fallback diretto booking_requests ancora in schema cache: continuo in ottimistico e ritento in background.',
+                    directAcceptStatusUpdateError
+                  );
+
+                  deferredAcceptStatusRetryScheduled = true;
+                  updateData = {
+                    appointmentId: persistedAppointmentIdFromAccept,
+                    customerId: persistedCustomerIdFromAccept,
+                    workspaceId: resolved.workspace.id,
+                  };
+
+                  setTimeout(() => {
+                    void supabase
+                      .from('booking_requests')
+                      .update(directAcceptPayload)
+                      .eq('id', requestId)
+                      .eq('workspace_id', resolved.workspace.id)
+                      .select('id')
+                      .maybeSingle()
+                      .then(({ error }) => {
+                        if (error) {
+                          console.log(
+                            'Retry background update booking_requests dopo schema cache ancora fallito:',
+                            error
+                          );
+                        }
+                      }, (error: unknown) => {
+                        console.log(
+                          'Retry background update booking_requests dopo schema cache errore inatteso:',
+                          error
+                        );
+                      })
+                      ;
+                  }, 1800);
+                } else {
+                  updateErrorContext = `${actionRpcName}_fallback`;
+                  updateError = directAcceptStatusUpdateError;
+                }
+              } else if (!directAcceptStatusUpdate) {
+                updateErrorContext = `${actionRpcName}_fallback`;
+                updateError = { message: 'booking_request_not_found' };
+              } else {
+                usedDirectAcceptStatusFallback = true;
+                updateData = {
+                  appointmentId: persistedAppointmentIdFromAccept,
+                  customerId:
+                    typeof directAcceptStatusUpdate.customer_id === 'string' &&
+                    directAcceptStatusUpdate.customer_id.trim()
+                      ? directAcceptStatusUpdate.customer_id
+                      : persistedCustomerIdFromAccept,
+                  workspaceId: resolved.workspace.id,
+                };
+              }
+            } else {
+              updateErrorContext = actionRpcName;
+              updateError = persistedStatusUpdateError;
+            }
           } else {
             const persistedPayload =
               persistedStatusUpdate &&
@@ -7792,6 +10913,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
         updateErrorText = [updateError?.message, updateError?.details, updateError?.hint]
           .filter(Boolean)
           .join(' ');
+
+        if (
+          status === 'Accettata' &&
+          updateError &&
+          isSupabaseSchemaCacheLookupError(updateError)
+        ) {
+          console.log(
+            'Accettazione richiesta: errore schema cache residuo convertito in successo ottimistico.',
+            updateError
+          );
+          updateError = null;
+          updateErrorContext = '';
+          updateErrorText = '';
+          updateData = {
+            appointmentId: persistedAppointmentIdFromAccept,
+            customerId: persistedCustomerIdFromAccept,
+            workspaceId: resolved.workspace.id,
+          };
+        }
       }
       const isLegacySnapshotOnlyRequest =
         !shouldPersistRealStatus ||
@@ -7851,23 +10991,41 @@ export function AppProvider({ children }: { children: ReactNode }) {
           ? updatePayload.appointmentId
           : null;
 
+      const requestCompositeKey = buildRichiestaMergeKeyFromValues({
+        data: requestToUpdate.data,
+        ora: requestToUpdate.ora,
+        servizio: requestToUpdate.servizio,
+        fullName: requestCustomerName,
+      });
       const nextRequests = normalizeRichiestePrenotazione(
-        resolved.richiestePrenotazione.map((item) =>
-          item.id === requestId
-            ? {
-                ...item,
-                stato: status,
-                viewedByCliente: false,
-                viewedBySalon: true,
-                cancellationSource:
-                  status === 'Annullata'
-                    ? 'salone'
-                    : status === 'Rifiutata'
-                      ? undefined
-                      : item.cancellationSource,
-              }
-            : item
-        )
+        resolved.richiestePrenotazione
+          .map((item) =>
+            item.id === requestId
+              ? {
+                  ...item,
+                  stato: status,
+                  viewedByCliente: false,
+                  viewedBySalon: true,
+                  cancellationSource:
+                    status === 'Annullata'
+                      ? 'salone'
+                      : status === 'Rifiutata'
+                        ? undefined
+                        : item.cancellationSource,
+                }
+              : item
+          )
+          .filter((item) => {
+            if (item.id === requestId) {
+              return true;
+            }
+
+            if (status !== 'Accettata') {
+              return true;
+            }
+
+            return buildRichiestaMergeKey(item) !== requestCompositeKey;
+          })
       );
 
       const nextCustomers =
@@ -8001,35 +11159,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setSalonWorkspace((current) => ({ ...current, id: workspaceId }));
       }
 
-      const notificationCustomer =
-        nextCustomers.find((item) => {
-          const samePhone =
-            requestToUpdate.telefono?.trim() &&
-            item.telefono.trim() === requestToUpdate.telefono.trim();
-          const sameName = matchesCustomerDisplayName(
-            item.nome,
-            `${requestToUpdate.nome} ${requestToUpdate.cognome}`.trim()
-          );
-          return !!samePhone || sameName;
-        }) ?? null;
-      const notificationCustomerEmail =
-        requestToUpdate.email?.trim().toLowerCase() ??
-        notificationCustomer?.email?.trim().toLowerCase() ??
-        '';
-      const notificationCustomerPhone =
-        requestToUpdate.telefono?.trim() ?? notificationCustomer?.telefono?.trim() ?? '';
-
       const pushPromise =
-        status === 'Rifiutata'
+        usedDirectAcceptStatusFallback || deferredAcceptStatusRetryScheduled
+          ? Promise.resolve(false)
+          : status === 'Annullata' || status === 'Rifiutata'
           ? (() => {
             const notificationCopy = buildBookingRequestStatusPushCopy({
               status,
               serviceName: requestToUpdate.servizio,
-              roleName: requestToUpdate.mestiereRichiesto,
               appointmentDate: requestToUpdate.data,
               appointmentTime: requestToUpdate.ora,
               operatorName: requestToUpdate.operatoreNome,
-              customerName: requestCustomerName,
             });
             return queueWorkspacePushNotification({
             workspaceId: workspaceId ?? resolved.workspace.id,
@@ -8037,8 +11177,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
             title: notificationCopy.title,
             body: notificationCopy.body,
             audience: 'public',
-            customerEmail: notificationCustomerEmail,
-            customerPhone: notificationCustomerPhone,
+            customerEmail: requestToUpdate.email?.trim().toLowerCase() ?? '',
+            customerPhone: requestToUpdate.telefono?.trim() ?? '',
             payload: {
               type: 'booking_request_status_changed',
               bookingRequestId: requestId,
@@ -8057,11 +11197,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
             const notificationCopy = buildBookingRequestStatusPushCopy({
               status,
               serviceName: requestToUpdate.servizio,
-              roleName: requestToUpdate.mestiereRichiesto,
               appointmentDate: requestToUpdate.data,
               appointmentTime: requestToUpdate.ora,
               operatorName: requestToUpdate.operatoreNome,
-              customerName: requestCustomerName,
             });
             return queueWorkspacePushNotification({
               workspaceId: workspaceId ?? resolved.workspace.id,
@@ -8069,40 +11207,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
               title: notificationCopy.title,
               body: notificationCopy.body,
               audience: 'public',
-              customerEmail: notificationCustomerEmail,
-              customerPhone: notificationCustomerPhone,
-              payload: {
-                type: 'booking_request_status_changed',
-                bookingRequestId: requestId,
-                status: notificationCopy.statusLabel,
-                statusCode: dbStatus,
-                appointmentDate: requestToUpdate.data,
-                appointmentTime: requestToUpdate.ora,
-                customerName: requestCustomerName,
-                serviceName: requestToUpdate.servizio,
-                operatorName: requestToUpdate.operatoreNome?.trim() ?? '',
-              },
-            });
-          })()
-          : status === 'Annullata'
-          ? (() => {
-            const notificationCopy = buildBookingRequestStatusPushCopy({
-              status,
-              serviceName: requestToUpdate.servizio,
-              roleName: requestToUpdate.mestiereRichiesto,
-              appointmentDate: requestToUpdate.data,
-              appointmentTime: requestToUpdate.ora,
-              operatorName: requestToUpdate.operatoreNome,
-              customerName: requestCustomerName,
-            });
-            return queueWorkspacePushNotification({
-              workspaceId: workspaceId ?? resolved.workspace.id,
-              eventType: 'booking_request_status_changed',
-              title: notificationCopy.title,
-              body: notificationCopy.body,
-              audience: 'public',
-              customerEmail: notificationCustomerEmail,
-              customerPhone: notificationCustomerPhone,
+              customerEmail: requestToUpdate.email?.trim().toLowerCase() ?? '',
+              customerPhone: requestToUpdate.telefono?.trim() ?? '',
               payload: {
                 type: 'booking_request_status_changed',
                 bookingRequestId: requestId,
@@ -8118,7 +11224,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           })()
           : Promise.resolve(false);
 
-      if (status === 'Rifiutata' || status === 'Accettata' || status === 'Annullata') {
+      if (status === 'Annullata' || status === 'Rifiutata' || status === 'Accettata') {
         void pushPromise.then(() => flushQueuedPushNotifications());
       }
 
@@ -8153,9 +11259,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
         toggleBiometricEnabled,
         authenticateBiometricIdentity,
         hasCompletedOnboarding,
+        onboardingPending,
         showOnboarding,
+        setOnboardingReady,
         completeOnboarding,
         reopenOnboarding,
+        ownerProfileNeedsCompletion,
+        consumeOwnerProfileNeedsCompletion,
         unlockOwnerAccountWithBiometric,
         loginOwnerAccount,
         registerOwnerAccount,
@@ -8174,8 +11284,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         workspaceAccessAllowed,
         clienti,
         setClienti,
+        createClientePersisted,
         updateClientePersisted,
         deleteClientePersisted,
+        createMovimentoPersisted,
+        updateMovimentoPersisted,
         appuntamenti,
         setAppuntamenti,
         movimenti,
@@ -8188,6 +11301,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setMacchinari,
         carteCollegate,
         setCarteCollegate,
+        createCartaPersisted,
+        setDefaultCartaPersisted,
+        deleteCartaPersisted,
         eventi,
         setEventi,
         richiestePrenotazione,

@@ -1,157 +1,164 @@
-import { router, useLocalSearchParams } from 'expo-router';
-import { useMemo, useState } from 'react';
-import { Linking, Platform, StyleSheet, Text, View } from 'react-native';
-import { WebImmediateTouchableOpacity as TouchableOpacity } from '../../components/ui/web-immediate-touchable-opacity';
-import { normalizeSalonCode } from '../../src/lib/platform';
+import { Redirect, useLocalSearchParams, useRouter, type Href } from 'expo-router';
+import React, { useEffect, useMemo, useState } from 'react';
+import {
+  ActivityIndicator,
+  Linking,
+  Platform,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+import { AppWordmark } from '../../components/app-wordmark';
 
 const IOS_APP_STORE_URL = 'https://apps.apple.com/app/id6760840153';
 const ANDROID_PLAY_STORE_URL =
   'https://play.google.com/store/apps/details?id=com.marzix91.salonmanager';
-const ANDROID_MARKET_URL = 'market://details?id=com.marzix91.salonmanager';
 
-export default function JoinSalonScreen() {
-  const params = useLocalSearchParams<{ code?: string | string[] }>();
-  const rawCode = Array.isArray(params.code) ? params.code[0] ?? '' : params.code ?? '';
-  const normalizedCode = useMemo(() => normalizeSalonCode(rawCode), [rawCode]);
-  const [openingApp, setOpeningApp] = useState(false);
+const isMobileBrowserUserAgent = () => {
+  if (typeof navigator === 'undefined') {
+    return false;
+  }
 
-  const openWebBooking = () => {
-    router.replace({
-      pathname: '/cliente-screen',
-      params: { salon: normalizedCode },
-    });
-  };
+  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+    navigator.userAgent
+  );
+};
 
-  const openNativeApp = async () => {
-    if (!normalizedCode) {
+const isAndroidBrowserUserAgent = () => {
+  if (typeof navigator === 'undefined') {
+    return false;
+  }
+
+  return /Android/i.test(navigator.userAgent);
+};
+
+const attemptOpenSalonProAppFromWeb = (url: string) => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  window.location.assign(url);
+};
+
+export default function JoinSalonRedirectScreen() {
+  const router = useRouter();
+  const params = useLocalSearchParams<{
+    code?: string | string[];
+    salon?: string | string[];
+  }>();
+
+  const codeParam = Array.isArray(params.code) ? params.code[0] : params.code;
+  const salonParam = Array.isArray(params.salon) ? params.salon[0] : params.salon;
+  const salonCode = (codeParam || salonParam || '').trim();
+  const isWeb = Platform.OS === 'web';
+  const isMobileWeb = isWeb && isMobileBrowserUserAgent();
+  const [webJoinGate, setWebJoinGate] = useState<'probing' | 'chooser'>('probing');
+
+  const nativeClientHref = useMemo(
+    () =>
+      ({
+        pathname: '/cliente',
+        params: { salon: salonCode, mode: 'booking' },
+      }) as Href,
+    [salonCode]
+  );
+
+  useEffect(() => {
+    if (!isWeb || !isMobileWeb || !salonCode || typeof window === 'undefined') {
       return;
     }
 
-    const deepLink = `salonmanager://cliente?salon=${encodeURIComponent(normalizedCode)}&mode=booking`;
-    const isWeb = Platform.OS === 'web';
+    setWebJoinGate('probing');
 
-    try {
-      setOpeningApp(true);
-      if (!isWeb) {
-        await Linking.openURL(deepLink);
-        return;
+    let didHidePage = false;
+    const markHidden = () => {
+      didHidePage = true;
+    };
+
+    const appDeepLinkUrl = `salonmanager://join/${salonCode}?mode=booking`;
+    const fallbackTimer = window.setTimeout(() => {
+      if (!didHidePage) {
+        setWebJoinGate('chooser');
       }
+    }, 1600);
+    const launchTimer = window.setTimeout(() => {
+      attemptOpenSalonProAppFromWeb(appDeepLinkUrl);
+    }, 120);
 
-      const userAgent =
-        typeof navigator !== 'undefined' ? navigator.userAgent.toLowerCase() : '';
-      const isAndroid = /android/.test(userAgent);
-      const isIos = /iphone|ipad|ipod/.test(userAgent);
-      const fallbackUrl = isAndroid
-        ? ANDROID_PLAY_STORE_URL
-        : isIos
-          ? IOS_APP_STORE_URL
-          : IOS_APP_STORE_URL;
+    document.addEventListener('visibilitychange', markHidden);
+    window.addEventListener('pagehide', markHidden);
+    window.addEventListener('blur', markHidden);
 
-      let fallbackTriggered = false;
-      let visibilityHandler: (() => void) | null = null;
-      let fallbackTimeout: ReturnType<typeof setTimeout> | null = null;
+    return () => {
+      window.clearTimeout(fallbackTimer);
+      window.clearTimeout(launchTimer);
+      document.removeEventListener('visibilitychange', markHidden);
+      window.removeEventListener('pagehide', markHidden);
+      window.removeEventListener('blur', markHidden);
+    };
+  }, [isMobileWeb, isWeb, salonCode]);
 
-      if (typeof document !== 'undefined') {
-        visibilityHandler = () => {
-          if (document.hidden && fallbackTimeout) {
-            clearTimeout(fallbackTimeout);
-            fallbackTimeout = null;
-          }
-        };
-        document.addEventListener('visibilitychange', visibilityHandler);
-      }
+  if (!salonCode) {
+    return <Redirect href={'/' as Href} />;
+  }
 
-      fallbackTimeout = setTimeout(() => {
-        fallbackTriggered = true;
-        if (isAndroid && typeof window !== 'undefined') {
-          window.location.href = ANDROID_MARKET_URL;
-          setTimeout(() => {
-            if (typeof document === 'undefined' || !document.hidden) {
-              window.location.href = ANDROID_PLAY_STORE_URL;
-            }
-          }, 900);
-          return;
-        }
+  if (!isWeb) {
+    return <Redirect href={nativeClientHref} />;
+  }
 
-        if (typeof window !== 'undefined') {
-          window.location.href = fallbackUrl;
-        }
-      }, 1200);
+  if (!isMobileWeb) {
+    return <Redirect href={nativeClientHref} />;
+  }
 
-      if (typeof window !== 'undefined') {
-        window.location.href = deepLink;
-      } else {
-        await Linking.openURL(deepLink);
-      }
+  const handleDownloadApp = () => {
+    const storeUrl = isAndroidBrowserUserAgent() ? ANDROID_PLAY_STORE_URL : IOS_APP_STORE_URL;
 
-      setTimeout(() => {
-        if (visibilityHandler && typeof document !== 'undefined') {
-          document.removeEventListener('visibilitychange', visibilityHandler);
-        }
-        if (!fallbackTriggered && fallbackTimeout) {
-          clearTimeout(fallbackTimeout);
-        }
-      }, 2500);
-    } catch (error) {
-      console.log('Errore apertura deep link cliente:', error);
-    } finally {
-      setOpeningApp(false);
+    if (typeof window !== 'undefined') {
+      window.location.assign(storeUrl);
+      return;
     }
+
+    Linking.openURL(storeUrl).catch(() => null);
   };
 
-  if (normalizedCode) {
-    return (
-      <View style={styles.screen}>
-        <View style={styles.backgroundGlowTop} />
-        <View style={styles.backgroundGlowBottom} />
-        <View style={styles.card}>
-          <View style={styles.inlineBadge}>
-            <Text style={styles.inlineBadgeText}>Area cliente</Text>
-          </View>
-          <Text style={styles.loadingTitle}>Scegli come aprire il salone</Text>
-          <Text style={styles.subtitle}>
-            Se hai gia installato l'app puoi aprirla direttamente. In alternativa puoi
-            continuare subito dal web senza scaricare nulla.
-          </Text>
-          <View style={styles.ctaRow}>
-            <TouchableOpacity style={styles.primaryButton} onPress={openNativeApp} activeOpacity={0.9}>
-              <Text style={styles.primaryButtonText}>
-                {openingApp ? 'Sto aprendo APP SalonPro...' : 'Apri in APP SalonPro'}
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.secondaryButton} onPress={openWebBooking} activeOpacity={0.9}>
-              <Text style={styles.secondaryButtonText}>Continua sul web</Text>
-            </TouchableOpacity>
-          </View>
-          <Text style={styles.note}>
-            Se l'app non e installata, usa il web. Se preferisci l'app, puoi scaricarla e poi
-            tornare qui per aprirla dal pulsante sopra.
-          </Text>
-        </View>
-      </View>
-    );
-  }
+  const handleContinueOnWeb = () => {
+    router.replace(nativeClientHref);
+  };
 
   return (
     <View style={styles.screen}>
-      <View style={styles.backgroundGlowTop} />
-      <View style={styles.backgroundGlowBottom} />
-
       <View style={styles.card}>
-        <View style={styles.inlineBadge}>
-          <Text style={styles.inlineBadgeText}>Area cliente</Text>
-        </View>
-        <Text style={styles.error}>Codice salone non valido o mancante</Text>
-        <Text style={styles.note}>
-          Controlla il link ricevuto dal salone oppure torna all&apos;area cliente per inserire un codice valido.
+        <AppWordmark />
+        <Text style={styles.eyebrow}>ACCESSO DA LINK O QR</Text>
+        <Text style={styles.title}>
+          {webJoinGate === 'probing' ? 'Sto aprendo SalonPro' : 'Apri SalonPro o continua sul Web'}
         </Text>
-        <TouchableOpacity
-          style={styles.primaryButton}
-          onPress={() => router.replace('/cliente-screen')}
-          activeOpacity={0.9}
-        >
-          <Text style={styles.primaryButtonText}>Torna all&apos;area cliente</Text>
-        </TouchableOpacity>
+        <Text style={styles.subtitle}>
+          {webJoinGate === 'probing'
+            ? 'Se l’app e installata sul dispositivo, la apro direttamente.'
+            : 'Se non trovi l’app installata, puoi scaricarla oppure continuare nel browser.'}
+        </Text>
+
+        {webJoinGate === 'probing' ? (
+          <View style={styles.loaderRow}>
+            <ActivityIndicator size="small" color="#111827" />
+            <Text style={styles.loaderText}>Controllo app in corso...</Text>
+          </View>
+        ) : (
+          <View style={styles.actions}>
+            <TouchableOpacity activeOpacity={0.85} onPress={handleDownloadApp} style={styles.primaryButton}>
+              <Text style={styles.primaryButtonText}>Scarica APP</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={handleContinueOnWeb}
+              style={styles.secondaryButton}
+            >
+              <Text style={styles.secondaryButtonText}>Continua sul Web</Text>
+            </TouchableOpacity>
+          </View>
+        )}
       </View>
     </View>
   );
@@ -160,155 +167,94 @@ export default function JoinSalonScreen() {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
+    backgroundColor: '#f4f7fb',
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 24,
-    backgroundColor: '#e6edf3',
-  },
-  backgroundGlowTop: {
-    position: 'absolute',
-    top: -120,
-    right: -60,
-    width: 280,
-    height: 280,
-    borderRadius: 280,
-    backgroundColor: 'rgba(59, 130, 246, 0.12)',
-  },
-  backgroundGlowBottom: {
-    position: 'absolute',
-    bottom: -140,
-    left: -70,
-    width: 320,
-    height: 320,
-    borderRadius: 320,
-    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+    paddingHorizontal: 24,
   },
   card: {
     width: '100%',
-    maxWidth: 760,
+    maxWidth: 460,
     backgroundColor: '#ffffff',
-    borderRadius: 34,
-    paddingHorizontal: 28,
-    paddingVertical: 34,
+    borderRadius: 32,
+    paddingHorizontal: 24,
+    paddingVertical: 32,
     alignItems: 'center',
     shadowColor: '#0f172a',
-    shadowOpacity: 0.16,
-    shadowRadius: 22,
+    shadowOpacity: 0.08,
+    shadowRadius: 26,
     shadowOffset: { width: 0, height: 14 },
-    elevation: 8,
-    borderWidth: 1,
-    borderColor: '#b9cadd',
+    elevation: 6,
   },
-  loadingTitle: {
-    fontSize: 28,
-    lineHeight: 34,
+  eyebrow: {
+    marginTop: 18,
+    fontSize: 12,
+    lineHeight: 16,
     fontWeight: '800',
+    letterSpacing: 1.4,
+    color: '#6b7280',
+    textAlign: 'center',
+  },
+  title: {
+    marginTop: 14,
+    fontSize: 30,
+    lineHeight: 36,
+    fontWeight: '900',
     color: '#0f172a',
     textAlign: 'center',
-    marginBottom: 12,
   },
   subtitle: {
     marginTop: 12,
-    fontSize: 16,
-    color: '#334155',
+    fontSize: 17,
+    lineHeight: 25,
+    color: '#475569',
     textAlign: 'center',
-    lineHeight: 24,
-    maxWidth: 620,
   },
-  success: {
-    fontSize: 36,
-    lineHeight: 42,
-    fontWeight: '800',
-    color: '#0f172a',
-    textAlign: 'center',
-    maxWidth: 680,
-  },
-  error: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#b91c1c',
-    textAlign: 'center',
-    maxWidth: 620,
-  },
-  note: {
-    marginTop: 18,
-    fontSize: 14,
-    lineHeight: 21,
-    color: '#64748b',
-    textAlign: 'center',
-    maxWidth: 640,
-  },
-  inlineBadge: {
-    backgroundColor: '#eff6ff',
-    borderWidth: 1,
-    borderColor: '#bfdbfe',
-    borderRadius: 999,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    marginBottom: 18,
-  },
-  inlineBadgeText: {
-    color: '#1d4ed8',
-    fontSize: 12,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-  },
-  ctaRow: {
+  loaderRow: {
+    marginTop: 28,
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'center',
+    alignItems: 'center',
     gap: 12,
-    marginTop: 22,
+  },
+  loaderText: {
+    fontSize: 15,
+    lineHeight: 20,
+    fontWeight: '700',
+    color: '#0f172a',
+  },
+  actions: {
+    width: '100%',
+    marginTop: 28,
+    gap: 12,
   },
   primaryButton: {
-    minWidth: 210,
-    backgroundColor: '#0f172a',
+    minHeight: 54,
     borderRadius: 18,
-    paddingHorizontal: 24,
-    paddingVertical: 15,
-    alignItems: 'center',
+    backgroundColor: '#101828',
     justifyContent: 'center',
-    shadowColor: '#0f172a',
-    shadowOpacity: 0.18,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 8 },
+    alignItems: 'center',
+    paddingHorizontal: 20,
   },
   primaryButtonText: {
-    color: '#fff',
-    fontSize: 15,
-    fontWeight: '700',
+    fontSize: 17,
+    lineHeight: 22,
+    fontWeight: '900',
+    color: '#ffffff',
   },
   secondaryButton: {
-    minWidth: 210,
-    backgroundColor: '#ffffff',
+    minHeight: 54,
     borderRadius: 18,
-    paddingHorizontal: 24,
-    paddingVertical: 15,
-    alignItems: 'center',
+    backgroundColor: '#eef2ff',
     justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 20,
     borderWidth: 1,
-    borderColor: '#d7e2ea',
+    borderColor: '#c7d2fe',
   },
   secondaryButtonText: {
-    color: '#0f172a',
-    fontSize: 15,
-    fontWeight: '800',
-  },
-  saloonChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginTop: 20,
-    borderRadius: 999,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    backgroundColor: '#f8fafc',
-    borderWidth: 1,
-    borderColor: '#dbe4ec',
-  },
-  saloonChipText: {
-    color: '#0f172a',
-    fontSize: 14,
-    fontWeight: '700',
+    fontSize: 17,
+    lineHeight: 22,
+    fontWeight: '900',
+    color: '#1e3a8a',
   },
 });

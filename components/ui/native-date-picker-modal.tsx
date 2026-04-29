@@ -8,6 +8,7 @@ import { haptic } from '../../src/lib/haptics';
 import { HapticTouchable } from './haptic-touchable';
 
 const IS_ANDROID = Platform.OS === 'android';
+const IS_WEB = Platform.OS === 'web';
 const ANDROID_SHEET_EXTRA_LIFT = 25;
 const pad2 = (value: number) => String(value).padStart(2, '0');
 const MONTH_LABELS = ['gen', 'feb', 'mar', 'apr', 'mag', 'giu', 'lug', 'ago', 'set', 'ott', 'nov', 'dic'];
@@ -99,7 +100,7 @@ export function NativeDatePickerModal({
 }) {
   const initialDate = useMemo(() => parseIsoDateValue(initialValue), [initialValue]);
   const [draftDate, setDraftDate] = useState(initialDate);
-  const [showCalendarGrid, setShowCalendarGrid] = useState(false);
+  const [showCalendarGrid, setShowCalendarGrid] = useState(IS_WEB);
   const [calendarMonth, setCalendarMonth] = useState(
     new Date(initialDate.getFullYear(), initialDate.getMonth(), 1)
   );
@@ -110,7 +111,7 @@ export function NativeDatePickerModal({
     const next = parseIsoDateValue(initialValue);
     setDraftDate(next);
     setCalendarMonth(new Date(next.getFullYear(), next.getMonth(), 1));
-    setShowCalendarGrid(false);
+    setShowCalendarGrid(IS_WEB);
   }, [initialValue, visible]);
 
   useEffect(() => {
@@ -191,20 +192,22 @@ export function NativeDatePickerModal({
             >
               {title}
             </Text>
-            <HapticTouchable
-              style={styles.toggleViewButton}
-              onPress={() => setShowCalendarGrid((current) => !current)}
-              activeOpacity={0.9}
-            >
-              <Text
-                numberOfLines={1}
-                adjustsFontSizeToFit
-                minimumFontScale={0.8}
-                style={styles.toggleViewButtonText}
+            {!IS_WEB ? (
+              <HapticTouchable
+                style={styles.toggleViewButton}
+                onPress={() => setShowCalendarGrid((current) => !current)}
+                activeOpacity={0.9}
               >
-                {showCalendarGrid ? 'Rotella' : 'Calendario'}
-              </Text>
-            </HapticTouchable>
+                <Text
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.8}
+                  style={styles.toggleViewButtonText}
+                >
+                  {showCalendarGrid ? 'Rotella' : 'Calendario'}
+                </Text>
+              </HapticTouchable>
+            ) : null}
           </View>
 
           <Text
@@ -245,8 +248,8 @@ export function NativeDatePickerModal({
               </View>
 
               <View style={styles.weekdayRow}>
-                {WEEKDAY_LABELS.map((label) => (
-                  <Text key={label} style={styles.weekdayText}>
+                {WEEKDAY_LABELS.map((label, index) => (
+                  <Text key={`weekday-${label}-${index}`} style={styles.weekdayText}>
                     {label}
                   </Text>
                 ))}

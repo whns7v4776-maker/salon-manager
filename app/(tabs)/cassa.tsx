@@ -97,11 +97,14 @@ export default function CassaScreen() {
   const responsive = useResponsiveLayout();
   const {
     movimenti,
-    setMovimenti,
     servizi,
     clienti,
     carteCollegate,
-    setCarteCollegate,
+    createMovimentoPersisted,
+    updateMovimentoPersisted,
+    createCartaPersisted,
+    setDefaultCartaPersisted,
+    deleteCartaPersisted,
     serviceCardColorOverrides,
     roleCardColorOverrides,
     salonWorkspace,
@@ -115,6 +118,7 @@ export default function CassaScreen() {
   const [metodoPagamento, setMetodoPagamento] = useState<MetodoPagamento>('Contanti');
   const [cartaSelezionataId, setCartaSelezionataId] = useState<string | null>(null);
   const [showAmountPicker, setShowAmountPicker] = useState(false);
+  const [isCashSectionTogglePending, setIsCashSectionTogglePending] = useState(false);
   const [nomeCarta, setNomeCarta] = useState('');
   const [circuitoCarta, setCircuitoCarta] = useState('');
   const [ultime4, setUltime4] = useState('');
@@ -126,9 +130,20 @@ export default function CassaScreen() {
   const incomeDescriptionRef = useRef<TextInput | null>(null);
   const searchMovementRef = useRef<TextInput | null>(null);
   const { focusField, scrollToField } = useKeyboardAwareScroll(listRef, {
-    topOffset: responsive.isDesktop ? 44 : 28,
+    topOffset: responsive.isDesktop ? 72 : 168,
   });
   const handleKeyboardNext = useCallback(() => {
+    const focusedInput = (
+      TextInput.State as unknown as {
+        currentlyFocusedInput?: () => TextInput | null;
+      }
+    ).currentlyFocusedInput?.();
+
+    if (focusedInput === incomeDescriptionRef.current) {
+      setShowAmountPicker(true);
+      return;
+    }
+
     focusNextInput(
       [cardNameRef, cardCircuitRef, cardLast4Ref, incomeDescriptionRef, searchMovementRef],
       focusField
@@ -285,67 +300,69 @@ export default function CassaScreen() {
     }, [closeActiveSuggestions])
   );
 
-  const aggiungiMovimento = () => {
+  const aggiungiMovimento = async () => {
     if (!canAdd) return;
 
     const valore = Number(importo.replace(',', '.'));
     if (Number.isNaN(valore)) return;
 
-    const nuovoMovimento = {
-      id: Date.now().toString(),
+    const result = await createMovimentoPersisted({
       descrizione: descrizione.trim(),
       importo: valore,
       metodo: metodoPagamento,
       cartaLabel: metodoPagamento === 'Carta' ? cartaAttiva?.nome : undefined,
       createdAt: new Date().toISOString(),
-    };
+    });
 
-    setMovimenti([nuovoMovimento, ...movimenti]);
+    if (!result.ok) {
+      Alert.alert('Salvataggio non riuscito', result.error ?? 'Non sono riuscito a registrare il movimento.');
+      return;
+    }
+
     setDescrizione('');
     setImporto('');
     setCampoAttivo(null);
   };
 
-  const salvaCarta = () => {
+  const salvaCarta = async () => {
     if (!canSaveCard) return;
 
-    const nuovaCarta = {
-      id: Date.now().toString(),
+    const result = await createCartaPersisted({
       nome: nomeCarta.trim(),
       circuito: circuitoCarta.trim(),
       ultime4: ultime4.trim(),
       predefinita: carteCollegate.length === 0,
-    };
+    });
 
-    setCarteCollegate([nuovaCarta, ...carteCollegate.map((item) => ({ ...item, predefinita: false }))]);
-    setCartaSelezionataId(nuovaCarta.id);
+    if (!result.ok) {
+      Alert.alert('Salvataggio non riuscito', result.error ?? 'Non sono riuscito a collegare la carta.');
+      return;
+    }
+
+    setCartaSelezionataId(result.cardId ?? null);
     setNomeCarta('');
     setCircuitoCarta('');
     setUltime4('');
   };
 
-  const impostaCartaPredefinita = (id: string) => {
-    setCarteCollegate(
-      carteCollegate.map((item) => ({
-        ...item,
-        predefinita: item.id === id,
-      }))
-    );
+  const impostaCartaPredefinita = async (id: string) => {
+    const result = await setDefaultCartaPersisted(id);
+    if (!result.ok) {
+      Alert.alert('Aggiornamento non riuscito', result.error ?? 'Non sono riuscito ad aggiornare la carta.');
+      return;
+    }
     setCartaSelezionataId(id);
   };
 
-  const eliminaCarta = (id: string) => {
-    const restante = carteCollegate.filter((item) => item.id !== id);
-    const primaRestante = restante[0];
-
-    setCarteCollegate(
-      restante.map((item) => ({
-        ...item,
-        predefinita: primaRestante ? item.id === primaRestante.id : false,
-      }))
-    );
+  const eliminaCarta = async (id: string) => {
+    const result = await deleteCartaPersisted(id);
+    if (!result.ok) {
+      Alert.alert('Eliminazione non riuscita', result.error ?? 'Non sono riuscito a eliminare la carta.');
+      return;
+    }
 
     if (cartaSelezionataId === id) {
+      const primaRestante = carteCollegate.find((item) => item.id !== id);
       setCartaSelezionataId(primaRestante?.id ?? null);
     }
   };
@@ -363,18 +380,15 @@ export default function CassaScreen() {
     setCampoAttivo(null);
   };
 
-  const assegnaMetodoMovimento = (id: string, metodo: MetodoPagamento) => {
-    setMovimenti(
-      movimenti.map((item) =>
-        item.id === id
-          ? {
-              ...item,
-              metodo,
-              cartaLabel: metodo === 'Carta' ? cartaAttiva?.nome : undefined,
-            }
-          : item
-      )
-    );
+  const assegnaMetodoMovimento = async (id: string, metodo: MetodoPagamento) => {
+    const result = await updateMovimentoPersisted(id, {
+      metodo,
+      cartaLabel: metodo === 'Carta' ? cartaAttiva?.nome : undefined,
+    });
+
+    if (!result.ok) {
+      Alert.alert('Aggiornamento non riuscito', result.error ?? 'Non sono riuscito ad aggiornare il movimento.');
+    }
   };
 
   const getMovementTitle = useCallback((description: string) => {
@@ -386,6 +400,10 @@ export default function CassaScreen() {
   }, []);
 
   const handleCashSectionToggle = useCallback(() => {
+    if (isCashSectionTogglePending) {
+      return;
+    }
+
     const confirmToggle = (
       title: string,
       body: string,
@@ -394,7 +412,10 @@ export default function CassaScreen() {
       if (IS_WEB && typeof window !== 'undefined') {
         const confirmed = window.confirm(`${title}\n\n${body}`);
         if (!confirmed) return;
-        void onConfirm();
+        setIsCashSectionTogglePending(true);
+        void Promise.resolve(onConfirm()).finally(() => {
+          setIsCashSectionTogglePending(false);
+        });
         return;
       }
 
@@ -404,7 +425,10 @@ export default function CassaScreen() {
           text: title.toLowerCase().includes('disabilita') ? 'Disabilita Cassa' : 'Riabilita Cassa',
           style: title.toLowerCase().includes('disabilita') ? 'destructive' : 'default',
           onPress: () => {
-            void onConfirm();
+            setIsCashSectionTogglePending(true);
+            void Promise.resolve(onConfirm()).finally(() => {
+              setIsCashSectionTogglePending(false);
+            });
           },
         },
       ]);
@@ -434,7 +458,11 @@ export default function CassaScreen() {
         }));
       }
     );
-  }, [salonWorkspace.cashSectionDisabled, updateSalonWorkspacePersisted]);
+  }, [
+    isCashSectionTogglePending,
+    salonWorkspace.cashSectionDisabled,
+    updateSalonWorkspacePersisted,
+  ]);
 
   return (
     <View style={styles.container}>
@@ -560,8 +588,10 @@ export default function CassaScreen() {
                 style={[
                   styles.cashDisableButton,
                   salonWorkspace.cashSectionDisabled && styles.cashDisableButtonActive,
+                  isCashSectionTogglePending && styles.cashDisableButtonDisabled,
                 ]}
                 onPress={handleCashSectionToggle}
+                disabled={isCashSectionTogglePending}
                 pressScale={0.975}
                 pressOpacity={0.98}
               >
@@ -571,7 +601,11 @@ export default function CassaScreen() {
                     salonWorkspace.cashSectionDisabled && styles.cashDisableButtonTextActive,
                   ]}
                 >
-                  {salonWorkspace.cashSectionDisabled ? 'Riabilita Cassa' : 'Disabilita Cassa'}
+                  {isCashSectionTogglePending
+                    ? 'Aggiornamento...'
+                    : salonWorkspace.cashSectionDisabled
+                      ? 'Riabilita Cassa'
+                      : 'Disabilita Cassa'}
                 </Text>
               </HapticTouchable>
             </View>
@@ -1367,6 +1401,9 @@ const styles = StyleSheet.create({
     shadowRadius: 16,
     shadowOffset: { width: 0, height: 8 },
     elevation: 5,
+  },
+  cashDisableButtonDisabled: {
+    opacity: 0.7,
   },
   cashDisableButtonText: {
     color: '#ffffff',

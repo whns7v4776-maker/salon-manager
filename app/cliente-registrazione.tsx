@@ -1,5 +1,5 @@
-import ClienteFrontendScreen from './cliente-screen';
+import { Redirect } from 'expo-router';
 
 export default function ClienteRegistrationScreen() {
-  return <ClienteFrontendScreen />;
+  return <Redirect href="/cliente" />;
 }
