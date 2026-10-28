@@ -36,7 +36,7 @@ export function nativeRequestsStyles<T extends Record<string,any>>(base:T,p:Pale
  const glass=p.night?'rgba(38,41,43,.82)':'rgba(255,253,250,.68)';
  patch('container',{backgroundColor:'transparent'});
  patch('content',{paddingTop:Platform.OS==='web'?18:undefined,paddingBottom:Platform.OS==='web'?24:152});
- patch('heroCard',{backgroundColor:'transparent',borderWidth:0,padding:0,shadowOpacity:0,elevation:0});
+ patch('heroCard',{backgroundColor:'transparent',borderWidth:0,padding:0,paddingHorizontal:0,paddingBottom:0,shadowOpacity:0,elevation:0});
  if(Platform.OS==='web'){
   patch('heroStatsGrid',{display:'grid',gridTemplateColumns:'repeat(4,minmax(0,1fr))',gap:10});
   patch('heroStatsColumn',{display:'contents'});
@@ -164,7 +164,7 @@ export function nativeRequestsStyles<T extends Record<string,any>>(base:T,p:Pale
  const lift=p.night?'rgba(46,49,50,.92)':'rgba(255,253,250,.92)';
  patch('autoAcceptCard',{alignItems:'stretch',backgroundColor:lift,borderWidth:1,borderColor:p.border,borderRadius:19,paddingHorizontal:16,paddingVertical:16,marginBottom:12,shadowColor:'#000',shadowOpacity:p.night?.3:.08,shadowRadius:12,shadowOffset:{width:0,height:5},elevation:3});
  patch('autoAcceptHeaderRow',{flexDirection:'row',alignItems:'flex-start',justifyContent:'flex-start',gap:12,paddingRight:64});
- patch('autoAcceptHeaderTextWrap',{flex:1,width:undefined,alignItems:'flex-start',paddingRight:0,gap:2});
+ patch('autoAcceptHeaderTextWrap',{flexGrow:1,flexShrink:1,flexBasis:0,minWidth:0,width:undefined,alignItems:'flex-start',paddingRight:0,gap:2});
  patch('autoAcceptTitle',{textAlign:'left',paddingHorizontal:0,marginBottom:0,fontSize:16,lineHeight:22});
  patch('autoAcceptHint',{textAlign:'left',fontWeight:'400',color:p.muted,fontSize:12,lineHeight:18});
  patch('autoAcceptLiveRow',{alignSelf:'flex-start',marginTop:6});

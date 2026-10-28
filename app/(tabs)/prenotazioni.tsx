@@ -5492,9 +5492,6 @@ export default function PrenotazioniScreen() {
                     </View>
                   ) : null}
                 </View>
-              {bookingSettingsHelpOpen === "auto_accept" ? (
-                <BookingSettingsHowItWorks section="auto_accept" onClose={() => setBookingSettingsHelpOpen(null)} />
-              ) : null}
                 <View
                   style={[
                     styles.autoAcceptBadge,
@@ -5622,6 +5619,9 @@ export default function PrenotazioniScreen() {
               >
                 {autoAcceptSaving ? <ActivityIndicator size="small" color={premiumRequestsPalette.ink} /> : <View style={{width:24,height:24,borderRadius:12,backgroundColor:displayedAutoAcceptBookingRequests?"#F4EFE6":premiumRequestsPalette.muted,alignSelf:displayedAutoAcceptBookingRequests?"flex-end":"flex-start",shadowColor:"#000",shadowOpacity:.25,shadowRadius:3,shadowOffset:{width:0,height:1}}} />}
               </HapticTouchable>
+              {bookingSettingsHelpOpen === "auto_accept" ? (
+                <View style={{marginTop:14}}><BookingSettingsHowItWorks section="auto_accept" onClose={() => setBookingSettingsHelpOpen(null)} /></View>
+              ) : null}
             </View>
 
             <View style={styles.autoAcceptCard}>
@@ -5655,9 +5655,6 @@ export default function PrenotazioniScreen() {
                     servizi lunghi e inserisce meglio quelli brevi.
                   </Text>
                 </View>
-              {bookingSettingsHelpOpen === "guided_slots" ? (
-                <BookingSettingsHowItWorks section="guided_slots" onClose={() => setBookingSettingsHelpOpen(null)} />
-              ) : null}
                 <View
                   style={[
                     styles.autoAcceptBadge,
@@ -5715,6 +5712,9 @@ export default function PrenotazioniScreen() {
               >
                 {guidedSaving ? <ActivityIndicator size="small" color={premiumRequestsPalette.ink} /> : <View style={{width:24,height:24,borderRadius:12,backgroundColor:displayedGuidedSlotsEnabled?"#F4EFE6":premiumRequestsPalette.muted,alignSelf:displayedGuidedSlotsEnabled?"flex-end":"flex-start",shadowColor:"#000",shadowOpacity:.25,shadowRadius:3,shadowOffset:{width:0,height:1}}} />}
               </HapticTouchable>
+              {bookingSettingsHelpOpen === "guided_slots" ? (
+                <View style={{marginTop:14}}><BookingSettingsHowItWorks section="guided_slots" onClose={() => setBookingSettingsHelpOpen(null)} /></View>
+              ) : null}
 
               {(() => {
                 // Two configuration panels as icon tiles: one row per panel on wide web, a compact list in the app.

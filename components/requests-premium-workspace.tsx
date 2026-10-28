@@ -40,7 +40,7 @@ export function RequestsPremiumWorkspace({navigation,renderContent,rules,autoAcc
    {tab('Prenotazioni','calendar-outline',!rulesInline,()=>setRulesOpen(false))}
    {tab('Regole','options-outline',rulesInline,()=>setRulesOpen(true))}
   </View>
-  {rulesInline?<View style={[surface,{padding:wide?18:12,gap:16}]}>{rules}</View>:
+  {rulesInline?<View style={[wide?surface:null,{padding:wide?18:0,gap:wide?16:12}]}>{rules}</View>:
   <View style={{flexDirection:wide?'row':'column',gap:14,alignItems:'stretch'}}>
    {/* Wide web: both panes stretch to the same height. */}
    <View style={[surface,{width:wide?320:'100%',overflow:'visible',padding:6,alignSelf:'stretch',justifyContent:'center'}]}>{navigation}</View>
