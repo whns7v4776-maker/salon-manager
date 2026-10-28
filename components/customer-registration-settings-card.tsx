@@ -1,3 +1,5 @@
+import { NativeMedal } from './owner-premium-native-home';
+import { useAccessAppearance } from './access-premium';
 import {NativeReadableText as Text, NativePremiumIcon as Ionicons} from './owner-native-premium';
 import { useSettingsWebStyles } from './settings-web-styles';
 
@@ -8,6 +10,7 @@ import { HapticTouchable } from './ui/haptic-touchable';
 
 export function CustomerRegistrationSettingsCard() {
  const styles=useSettingsWebStyles(baseRegistrationStyles);
+ const {palette:p}=useAccessAppearance();
   const {
     availabilitySettings,
     updateAvailabilitySettingsPersisted,
@@ -47,12 +50,9 @@ export function CustomerRegistrationSettingsCard() {
     }
   };
 
+  const on = p.night ? '#9C8461' : '#7A6446';
   return (
-    <View style={styles.card}>
-      <View style={styles.heading}>
-        <View style={styles.icon}><Ionicons name="people-outline" size={22} color="#315C8A" /></View>
-        <Text style={styles.title}>Registrazione clienti</Text>
-      </View>
+    <View style={{ borderRadius: 18, borderWidth: 1, borderColor: p.night ? p.border : 'rgba(122,100,70,.2)', backgroundColor: p.night ? 'rgba(38,41,43,.92)' : 'rgba(255,253,250,.9)', padding: 16, gap: 12 }}>
       <HapticTouchable
         onPress={() => void toggle()}
         disabled={disabled}
@@ -61,24 +61,24 @@ export function CustomerRegistrationSettingsCard() {
         accessibilityState={{ checked: enabled, disabled, busy }}
         aria-checked={enabled}
         aria-busy={busy}
-        style={styles.row}
+        style={{ flexDirection: 'row', alignItems: 'center', gap: 14, minHeight: 54 }}
       >
-        <View style={styles.copy}>
-          <Text style={styles.label}>Approva nuovi clienti</Text>
-          <Text style={styles.description}>
+        <NativeMedal icon="people-outline" size={40} iconSize={18} accent={p.night ? '#BFA6D4' : '#7A5C8E'} />
+        <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
+          <Text style={{ fontSize: 15, fontWeight: '600', color: p.ink }}>Approva nuovi clienti</Text>
+          <Text style={{ fontSize: 13, lineHeight: 19, color: p.muted }}>
             {enabled
               ? 'I nuovi clienti possono prenotare dopo la tua approvazione.'
               : 'I nuovi clienti si registrano e possono prenotare subito.'}
           </Text>
         </View>
-        {busy ? <ActivityIndicator color="#2563EB" style={styles.spinner} /> : (
-          <View style={[styles.toggle, enabled && styles.toggleEnabled, disabled && styles.disabled]}>
-            <View style={[styles.thumb, enabled && styles.thumbEnabled]} />
-            <Text style={[styles.toggleText, enabled && styles.toggleTextEnabled]}>{enabled ? 'ON' : 'OFF'}</Text>
+        {busy ? <ActivityIndicator color={on} style={{ width: 44 }} /> : (
+          <View style={{ width: 44, height: 26, borderRadius: 13, padding: 3, justifyContent: 'center', backgroundColor: enabled ? on : (p.night ? '#3A3D3E' : '#D8CFC2'), opacity: disabled ? .5 : 1 }}>
+            <View style={{ width: 20, height: 20, borderRadius: 10, backgroundColor: '#FFFDF8', alignSelf: enabled ? 'flex-end' : 'flex-start' }} />
           </View>
         )}
       </HapticTouchable>
-      <Text style={styles.hint}>
+      <Text style={{ fontSize: 12, lineHeight: 18, color: p.muted, borderTopWidth: 1, borderTopColor: p.line, paddingTop: 10 }}>
         {enabled
           ? 'Gestisci Approva e Rifiuta nelle schede da approvare in Clienti.'
           : 'Attivala se vuoi scegliere chi può prenotare nel tuo salone.'}

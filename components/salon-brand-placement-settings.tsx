@@ -1,4 +1,5 @@
-import { PremiumSectionHeading } from './ui/premium-section-heading';
+import { NativeMedal } from './owner-premium-native-home';
+import { ShopSwitch } from './shop/shop-switch';
 import { popupGlass } from './premium-web-surfaces';
 import React, { useEffect, useState } from 'react';
 import { Platform, Pressable, Switch, Text, View } from 'react-native';
@@ -16,10 +17,10 @@ export function SalonBrandPlacementSettings({workspaceId,disabled=false}:{worksp
  const changed=!!value&&(owner!==value.ownerEnabled||frontend!==value.frontendEnabled);
  const row=(title:string,description:string,checked:boolean,onChange:(next:boolean)=>void)=><View style={{flexDirection:'row',alignItems:'center',gap:16,paddingVertical:12}}>
   <View style={{flex:1}}><Text style={{color:p.ink,fontSize:14,fontWeight:'500'}}>{title}</Text><Text style={{color:p.muted,fontSize:12,lineHeight:18,marginTop:3}}>{description}</Text></View>
-  <Switch accessibilityLabel={title} value={checked} onValueChange={onChange} disabled={disabled||busy||!value||(!value.eligible&&!checked)} trackColor={{false:'#AAA7A1',true:'#B7A281'}} thumbColor="#F7F4EE"/>
+  <ShopSwitch accessibilityLabel={title} value={checked} onValueChange={onChange} disabled={disabled||busy||!value||(!value.eligible&&!checked)}/>
  </View>;
- return <View style={{borderWidth:1,borderColor:p.border,borderRadius:16,padding:16,gap:8,marginTop:16,backgroundColor:p.night?'rgba(218,207,188,.04)':'rgba(218,211,200,.22)',...(Platform.OS==='web'?popupGlass(p,'panel'):{})}}>
-  <PremiumSectionHeading tone={0} style={{color:p.ink,fontSize:16,fontWeight:'500'}}>Dove mostrare la targhetta IA</PremiumSectionHeading>
+ return <View style={{borderWidth:1,borderColor:p.night?p.border:'rgba(122,100,70,.2)',borderRadius:18,padding:16,gap:8,marginTop:16,backgroundColor:p.night?'rgba(38,41,43,.92)':'rgba(255,253,250,.9)'}}>
+  <View style={{flexDirection:'row',alignItems:'center',gap:12,marginBottom:4}}><NativeMedal icon="sparkles-outline" size={36} iconSize={16} accent={p.night?'#BFA6D4':'#7A5C8E'}/><Text accessibilityRole="header" style={{flex:1,color:p.ink,fontSize:16,fontWeight:'600'}}>Dove mostrare la targhetta IA</Text></View>
   <Text style={{color:p.muted,fontSize:12,lineHeight:18}}>Il nome del salone resta nella sua posizione. Solo una targhetta IA approvata può sostituire il marchio originale, con la firma “Powered by Salon Pro”.</Text>
   {value&&!value.eligible?<Text style={{color:p.muted,fontSize:12,lineHeight:18}}>Crea e approva una targhetta IA nella sezione qui sopra. Senza targhetta attiva viene mostrato Salon Pro.</Text>:null}
   {row('Back office del salone','Mostra la targhetta nell’intestazione del gestionale.',owner,setOwner)}
