@@ -1,3 +1,4 @@
+import { NativeMedal } from '../../components/owner-premium-native-home';
 import {HistoricalAppointmentOutcome} from '../../components/historical-appointment-outcome';
 import {doesOperatorHaveServiceCapability} from '../../src/lib/booking';
 import {AgendaSlotFeedbackContext} from '../../components/agenda-slot-feedback';
@@ -45209,228 +45210,119 @@ export default function AgendaScreen() {
           : appointmentKind === 'combo'
             ? ('link-outline' as const)
             : ('git-branch-outline' as const);
+    // Card appuntamento rifatta: vetro come Cassa e Richieste, ora a sinistra,
+    // servizio a puntino, stati a puntino e azioni compatte in una sola riga.
+    const apptNight = availabilityPalette.night;
+    const apptBronze = apptNight ? '#9C8461' : '#7A6446';
+    const apptDone = item.completato && !item.nonEffettuato;
+    const apptNoShowDisabled =
+      item.completato ||
+      item.nonEffettuato ||
+      isFutureAppointment ||
+      weekAppointmentNoShowPendingId !== null;
+    const apptStates: [string, string][] = [
+      [
+        item.nonEffettuato
+          ? tApp(appLanguage, 'agenda_status_not_done')
+          : item.completato
+            ? tApp(appLanguage, 'agenda_status_completed')
+            : tApp(appLanguage, 'agenda_status_to_complete'),
+        item.nonEffettuato ? '#C9827A' : item.completato ? (apptNight ? '#86C2BE' : '#3E7C7A') : '#C9A35A',
+      ],
+      [
+        item.nonEffettuato
+          ? tApp(appLanguage, 'agenda_status_no_income')
+          : item.incassato ? 'Incassato' : item.prezzo === 0 ? 'Nessun saldo da incassare' : 'Da incassare',
+        item.nonEffettuato ? availabilityPalette.muted : item.incassato || item.prezzo === 0 ? (apptNight ? '#86C2BE' : '#3E7C7A') : '#C9A35A',
+      ],
+    ];
+    const apptButton = {
+      minHeight: 40,
+      paddingHorizontal: 14,
+      paddingVertical: 9,
+      borderRadius: 12,
+      borderWidth: 1,
+      flexDirection: 'row' as const,
+      alignItems: 'center' as const,
+      justifyContent: 'center' as const,
+      gap: 7,
+    };
     const card = (
       <Reanimated.View
         key={`appointment-card-${appointmentRenderKey}`}
-        {...(IS_WEB ? { dataSet: { agendaTimelineCard: 'true' } } : {})}
+        {...(IS_WEB ? { dataSet: { agendaApptCard: 'true' } } : {})}
         layout={LinearTransition.duration(180).easing(Easing.out(Easing.cubic))}
         entering={FadeIn.duration(145).easing(Easing.out(Easing.cubic))}
-        // Safari + Reanimated web: quando il salvataggio passa alla vista
-        // settimanale, FlatList smonta insieme sezione e card. Un FadeOut web
-        // annidato crea un clone DOM che il callback prova poi a rimuovere una
-        // seconda volta (NotFoundError / "The object can not be found here").
-        // Native conserva integralmente l'animazione di uscita.
+        // Safari + Reanimated web: niente FadeOut annidato (vedi nota storica:
+        // il clone DOM veniva rimosso due volte). Native conserva l'uscita.
         exiting={
           IS_WEB
             ? undefined
             : FadeOut.duration(120).easing(Easing.out(Easing.cubic))
         }
-        style={[styles.timelineCard, compact && styles.timelineCardCompact]}
+        style={{
+          borderRadius: 18,
+          borderWidth: 1,
+          borderColor: apptNight ? availabilityPalette.border : 'rgba(122,100,70,.2)',
+          backgroundColor: apptNight ? 'rgba(38,41,43,.92)' : 'rgba(255,253,250,.9)',
+          padding: compact ? 13 : 16,
+          gap: 14,
+          marginBottom: 10,
+        }}
       >
-        <View pointerEvents="none" style={styles.timelineCardTopSheen} />
-        <View pointerEvents="none" style={styles.timelineCardInnerStroke} />
-        <View
-          {...(IS_WEB ? { dataSet: { agendaTimelinePart: 'top' } } : {})}
-          style={[styles.timelineTop, compact && styles.timelineTopCompact]}
-        >
-          <View style={styles.timelineHourPill}>
-            <Text style={styles.timelineHourText}>{item.ora}</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 14 }}>
+          <View style={{ width: 58, alignItems: 'center', paddingVertical: 8, borderRadius: 14, borderWidth: 1, borderColor: apptNight ? 'rgba(216,194,155,.28)' : 'rgba(122,100,70,.24)', backgroundColor: apptNight ? 'rgba(156,132,97,.10)' : 'rgba(122,100,70,.06)', flexShrink: 0 }}>
+            <Text style={{ fontSize: 15, lineHeight: 19, fontWeight: '600', color: availabilityPalette.ink, fontVariant: ['tabular-nums'] }}>{item.ora}</Text>
+            <Text style={{ fontSize: 11, lineHeight: 15, color: availabilityPalette.muted, fontVariant: ['tabular-nums'] }}>{getAppointmentEndTime(item)}</Text>
           </View>
-
-          <View style={styles.timelineMain}>
-            <View style={styles.timelineTitleRow}>
-              <Text
-                style={[
-                  styles.timelineClient,
-                  compact && styles.timelineClientCompact,
-                ]}
-                
-              >
-                {item.cliente}
-              </Text>
-              <Reanimated.View
-                style={[
-                  styles.timelineServicePill,
-                  {
-                    backgroundColor: accent.glassColor,
-                    borderColor: accent.borderColor,
-                    shadowColor: accent.shadowColor,
-                  },
-                ]}
-                entering={FadeIn.duration(130).easing(Easing.out(Easing.cubic))}
-                layout={LinearTransition.duration(150).easing(
-                  Easing.out(Easing.cubic),
-                )}
-              >
-                <Text
-                  style={[
-                    styles.timelineServicePillText,
-                    { color: accent.textColor },
-                  ]}
-                  
-                >
-                  {item.servizio}
-                </Text>
-              </Reanimated.View>
-            </View>
-
-            <View style={styles.timelineMetaRow}>
+          <View style={{ flex: 1, minWidth: 0, gap: 5 }}>
+            <Text numberOfLines={1} style={{ fontSize: 16, lineHeight: 21, fontWeight: '600', color: availabilityPalette.ink }}>{item.cliente}</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
+              <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: accent.borderColor }} />
+              <Text numberOfLines={1} style={{ fontSize: 14, lineHeight: 19, color: availabilityPalette.ink, flexShrink: 1 }}>{item.servizio}</Text>
               {appointmentKind ? (
-                <View style={styles.timelineAppointmentKindBadge}>
-                  <Ionicons
-                    name={appointmentKindIcon}
-                    size={12}
-                    color={availabilityPalette.ink}
-                  />
-                  <Text style={styles.timelineAppointmentKindBadgeText}>
-                    {appointmentKindLabel}
-                  </Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 7, paddingVertical: 2, borderRadius: 999, borderWidth: 1, borderColor: availabilityPalette.line }}>
+                  <Ionicons name={appointmentKindIcon} size={11} color={availabilityPalette.muted} />
+                  <Text style={{ fontSize: 11, lineHeight: 15, color: availabilityPalette.muted }}>{appointmentKindLabel}</Text>
                 </View>
               ) : null}
-              {item.operatoreNome ? (
-                <Text
-                  style={[
-                    styles.timelineOperator,
-                    compact && styles.timelineOperatorCompact,
-                  ]}
-                  numberOfLines={1}
-                >
-                  Operatore: {item.operatoreNome}
-                </Text>
-              ) : null}
-              <Text
-                style={[
-                  styles.timelineMeta,
-                  compact && styles.timelineMetaCompact,
-                ]}
-              >
-                {item.ora} - {getAppointmentEndTime(item)} · €{' '}
-                {item.prezzo.toFixed(2)}
-              </Text>
             </View>
+            <Text numberOfLines={1} style={{ fontSize: 12, lineHeight: 17, color: availabilityPalette.muted }}>
+              {[item.operatoreNome, `€ ${item.prezzo.toFixed(2)}`].filter(Boolean).join(' · ')}
+            </Text>
+          </View>
+          <View style={{ alignItems: 'flex-end', gap: 6, flexShrink: 0, paddingTop: 2 }}>
+            {apptStates.map(([label, color]) => (
+              <View key={label} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: color }} />
+                <Text style={{ fontSize: 12, lineHeight: 16, fontWeight: '600', color: availabilityPalette.ink }}>{label}</Text>
+              </View>
+            ))}
           </View>
         </View>
 
-        <View {...(IS_WEB ? { dataSet: { agendaTimelinePart: 'status' } } : {})} style={[styles.statusRow, compact && styles.statusRowCompact, isDesktopWebLayout && styles.timelineBodyInsetWeb]}>
-          <Reanimated.View
-            style={[
-              styles.statusBadge,
-              item.nonEffettuato
-                ? styles.statusBadgeCancelled
-                : item.completato
-                  ? styles.statusBadgeDone
-                  : styles.statusBadgePending,
-            ]}
-            entering={FadeIn.duration(130).easing(Easing.out(Easing.cubic))}
-            layout={LinearTransition.duration(150).easing(
-              Easing.out(Easing.cubic),
-            )}
-          >
-            <Text
-              style={[
-                styles.statusBadgeText,
-                item.nonEffettuato
-                  ? styles.statusBadgeTextCancelled
-                  : item.completato
-                    ? styles.statusBadgeTextDone
-                    : styles.statusBadgeTextPending,
-              ]}
-            >
-              {item.nonEffettuato
-                ? tApp(appLanguage, 'agenda_status_not_done')
-                : item.completato
-                  ? tApp(appLanguage, 'agenda_status_completed')
-                  : tApp(appLanguage, 'agenda_status_to_complete')}
-            </Text>
-          </Reanimated.View>
-
-          <Reanimated.View
-            style={[
-              styles.statusBadge,
-              item.nonEffettuato
-                ? styles.statusBadgePending
-                : styles.statusBadgeDone,
-            ]}
-            entering={FadeIn.duration(130).easing(Easing.out(Easing.cubic))}
-            layout={LinearTransition.duration(150).easing(
-              Easing.out(Easing.cubic),
-            )}
-          >
-            <Text
-              style={[
-                styles.statusBadgeText,
-                item.nonEffettuato
-                  ? styles.statusBadgeTextPending
-                  : styles.statusBadgeTextDone,
-              ]}
-            >
-              {item.nonEffettuato
-                ? tApp(appLanguage, 'agenda_status_no_income')
-                : item.incassato ? 'Incassato' : item.prezzo === 0 ? 'Nessun saldo da incassare' : 'Da incassare'}
-            </Text>
-          </Reanimated.View>
-        </View>
-
-        {!item.nonEffettuato && !item.incassato && item.prezzo>0 && appointmentDate<=todayDate ? <View {...(IS_WEB ? { dataSet: { agendaTimelinePart: 'checkout' } } : {})} style={[{marginBottom:10}, isDesktopWebLayout && styles.timelineBodyInsetWeb]}><OwnerAppointmentCheckout appointmentId={item.id} workspaceId={salonWorkspace.id} onCompleted={()=>{void completeCheckoutDetailsRefresh(item.id);}}/></View> : null}
-        <View {...(IS_WEB ? { dataSet: { agendaTimelinePart: 'actions' } } : {})} style={[styles.actionsRow, compact && styles.actionsRowCompact, IS_WEB && styles.timelineActionsWeb, isDesktopWebLayout && styles.timelineBodyInsetWeb]}>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8, paddingTop: 12, borderTopWidth: 1, borderTopColor: availabilityPalette.line }}>
+          {!item.nonEffettuato && !item.incassato && item.prezzo>0 && appointmentDate<=todayDate ? <View style={{ flexGrow: 1, flexBasis: 220, minWidth: 0 }}><OwnerAppointmentCheckout appointmentId={item.id} workspaceId={salonWorkspace.id} onCompleted={()=>{void completeCheckoutDetailsRefresh(item.id);}}/></View> : null}
           <HapticTouchable
-            style={[
-              styles.darkButton,
-              isCompletatoDisabled && styles.darkButtonDisabled,
-              styles.appointmentCompletionButton,
-              item.completato && styles.appointmentCompletionButtonDone,
-              isDesktopWebLayout && styles.timelineActionButtonWeb,
-            ]}
+            style={[apptButton, { borderColor: apptDone ? apptBronze : (apptNight ? availabilityPalette.border : 'rgba(122,100,70,.22)'), backgroundColor: apptDone ? (apptNight ? 'rgba(156,132,97,.14)' : 'rgba(122,100,70,.08)') : 'transparent', opacity: isCompletatoDisabled && !apptDone ? .5 : 1 }]}
             onPress={() => completaAppuntamento(item.id)}
             disabled={isCompletatoDisabled}
             pressScale={0.975}
             pressOpacity={0.98}
           >
-            <Ionicons name="checkmark-circle-outline" size={19} color={item.completato ? (availabilityPalette.night?'#B9E2C1':'#2E6340') : availabilityPalette.ink} />
-            <Text
-              style={[
-                styles.darkButtonText,
-                styles.appointmentActionText,
-                isCompletatoDisabled && styles.darkButtonTextDisabled,
-                {color:item.completato ? (availabilityPalette.night?'#B9E2C1':'#2E6340') : availabilityPalette.ink},
-              ]}
-            >
+            <Ionicons name={apptDone ? 'checkmark-circle' : 'checkmark-circle-outline'} size={17} color={apptDone ? (apptNight ? '#C9AE82' : '#7A6446') : availabilityPalette.ink} />
+            <Text style={{ fontSize: 13, fontWeight: '600', color: availabilityPalette.ink }}>
               {completionPendingId===item.id ? 'Salvataggio…' : item.completato ? 'Completato' : 'Segna completato'}
             </Text>
           </HapticTouchable>
-
           <HapticTouchable
-            style={[
-              styles.secondaryButton,
-              styles.appointmentSecondaryAction,
-              isDesktopWebLayout && styles.timelineActionButtonWeb,
-              (item.completato ||
-                item.nonEffettuato ||
-                isFutureAppointment ||
-                weekAppointmentNoShowPendingId !== null) &&
-                styles.secondaryButtonDisabled,
-            ]}
+            style={[apptButton, { borderColor: 'transparent', backgroundColor: 'transparent', opacity: apptNoShowDisabled ? .45 : 1 }]}
             onPress={() => segnaNonEffettuato(item.id)}
-            disabled={
-              item.completato ||
-              item.nonEffettuato ||
-              isFutureAppointment ||
-              weekAppointmentNoShowPendingId !== null
-            }
+            disabled={apptNoShowDisabled}
             pressScale={0.975}
             pressOpacity={0.98}
           >
-            <Text
-              style={[
-                styles.secondaryButtonText,
-                styles.appointmentActionText,
-                (item.completato ||
-                  item.nonEffettuato ||
-                  isFutureAppointment ||
-                  weekAppointmentNoShowPendingId !== null) &&
-                  styles.secondaryButtonTextDisabled,
-              ]}
-            >
+            <Text style={{ fontSize: 13, color: availabilityPalette.muted }}>
               {weekAppointmentNoShowPendingId === item.id
                 ? 'Salvataggio...'
                 : tApp(appLanguage, 'agenda_status_not_done')}
@@ -49376,31 +49268,30 @@ null
       <View style={[styles.agendaViewGrid,{flexDirection:isDesktopWebLayout?'row':'column'}]}>
         {agendaNavigatorCards.map((card) => {
           const selected=agendaView===card.key;
-          const tone=availabilityPalette.night?{
-            today:{bg:'#343026',accent:'#D8BE8B',icon:'today-outline' as const},
-            upcoming:{bg:'#2B3530',accent:'#A7CDB8',icon:'calendar-outline' as const},
-            recent:{bg:'#2E3031',accent:'#C9C2B4',icon:'archive-outline' as const},
-            week:{bg:'#2E3031',accent:'#C9C2B4',icon:'grid-outline' as const},
-          }[card.key]:{
-            today:{bg:'#F5ECDB',accent:'#80683E',icon:'today-outline' as const},
-            upcoming:{bg:'#E9F0E8',accent:'#48715A',icon:'calendar-outline' as const},
-            recent:{bg:'#F1ECE4',accent:'#6E6556',icon:'archive-outline' as const},
-            week:{bg:'#F1ECE4',accent:'#6E6556',icon:'grid-outline' as const},
+          const night=availabilityPalette.night;
+          // Stessa grammatica di Richieste e Cassa: vetro, medaglione per sezione, selezione bronzo.
+          const tone={
+            today:{accent:night?'#D6B27A':'#8C6A35',icon:'today-outline' as const},
+            upcoming:{accent:night?'#9DBAD6':'#4D6E8F',icon:'calendar-outline' as const},
+            recent:{accent:night?'#C9AA8C':'#7E6247',icon:'archive-outline' as const},
+            week:{accent:night?'#BFA6D4':'#7A5C8E',icon:'grid-outline' as const},
           }[card.key];
+          const bronze=night?'#9C8461':'#7A6446';
           return <HapticTouchable key={card.key} accessibilityRole="button" accessibilityLabel={`Apri elenco ${card.title}`} accessibilityState={{expanded:selected}}
-            style={[styles.agendaViewCard,{flex:isDesktopWebLayout?1:undefined,minWidth:0,backgroundColor:tone.bg,borderColor:selected?tone.accent:availabilityPalette.border,borderWidth:selected?1.5:1}]}
+            {...(IS_WEB?{dataSet:{premiumHoverCard:'true'}}:{})}
+            style={[styles.agendaViewCard,{flex:isDesktopWebLayout?1:undefined,minWidth:0,borderRadius:18,backgroundColor:selected?(night?'rgba(156,132,97,.12)':'rgba(122,100,70,.07)'):(night?'rgba(38,41,43,.92)':'rgba(255,253,250,.9)'),borderColor:selected?bronze:(night?availabilityPalette.border:'rgba(122,100,70,.2)'),borderWidth:1}]}
             onPress={()=>handleAgendaViewSelect(card.key)} pressScale={0.98} pressOpacity={0.98}>
-            <View style={{width:40,height:40,borderRadius:20,backgroundColor:availabilityPalette.night?'#3A352C':'#F3E7D3',borderWidth:1,borderColor:availabilityPalette.night?'rgba(216,194,155,.32)':'rgba(150,118,72,.3)',alignItems:'center',justifyContent:'center',marginRight:12,flexShrink:0}}><Ionicons name={tone.icon} size={20} color={tone.accent}/></View>
+            <View style={{marginRight:12,flexShrink:0}}><NativeMedal icon={tone.icon} size={42} iconSize={19} accent={tone.accent}/></View>
             <View style={styles.agendaViewCardTextWrap}>
-              <Text style={[styles.agendaViewEyebrow,{color:tone.accent}]}>{card.eyebrow}</Text>
+              <Text style={[styles.agendaViewEyebrow,{color:availabilityPalette.muted}]}>{card.eyebrow}</Text>
               <Text style={[styles.agendaViewTitle,{color:availabilityPalette.ink}]}>{card.title}</Text>
               <Text style={[styles.agendaViewMeta,{color:availabilityPalette.muted}]}>{card.note}</Text>
             </View>
             <View style={styles.agendaViewCardRight}>
-              <View style={[styles.agendaViewCountBadge,{backgroundColor:selected?tone.accent:availabilityPalette.field,borderColor:'transparent'}]}>
-                <Text style={[styles.agendaViewCountText,{color:selected?(availabilityPalette.night?'#252822':'#FFFFFF'):tone.accent}]}>{card.count}</Text>
+              <View style={[styles.agendaViewCountBadge,{backgroundColor:selected?(night?'rgba(156,132,97,.22)':'rgba(122,100,70,.12)'):availabilityPalette.field,borderColor:selected?bronze:'transparent',borderWidth:1}]}>
+                <Text style={[styles.agendaViewCountText,{color:availabilityPalette.ink}]}>{card.count}</Text>
               </View>
-              <AnimatedChevron expanded={selected} size={15} color={tone.accent} collapsedDeg={-90} expandedDeg={0}/>
+              <AnimatedChevron expanded={selected} size={15} color={availabilityPalette.muted} collapsedDeg={-90} expandedDeg={0}/>
             </View>
           </HapticTouchable>;
         })}
