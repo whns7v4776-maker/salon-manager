@@ -17,7 +17,7 @@ export const DEFAULT_AGENDA_DENSITY_ID_BY_SURFACE: Readonly<
   Record<AgendaDensitySurface, AgendaDensityId>
 > = {
   app: 'massima',
-  web: 'normale',
+  web: 'compatta',
 };
 
 export const getDefaultAgendaDensityId = (

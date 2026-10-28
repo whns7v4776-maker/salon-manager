@@ -41,8 +41,8 @@ const assertMatches = (source, pattern, label) => {
 
 assertIncludes(
   preferenceTypes,
-  "app: 'massima',\n  web: 'normale'",
-  'app deve partire da 58% e web dallo storico 100% solo senza preferenza remota',
+  "app: 'massima',\n  web: 'compatta'",
+  'app deve partire da 58% e web da Compatta (82%) solo senza preferenza remota',
 );
 assertIncludes(
   agenda,
