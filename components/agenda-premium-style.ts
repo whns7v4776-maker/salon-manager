@@ -138,7 +138,11 @@ export function createAgendaPremiumStyles<T extends Record<string,any>>(base:T,t
  patch('statusBadgeDone',{backgroundColor:p.night?'rgba(112,160,139,.13)':'rgba(221,235,226,.7)'});
  patch('statusBadgeTextDone',{color:p.night?'#A7CDB8':'#48715A'});
  patch('statusBadgeText',{fontSize:11,lineHeight:16,fontWeight:'500'});
- patch('appointmentCompletionButton',{borderRadius:12,minHeight:44,paddingVertical:11});
+ patch('appointmentCompletionButton',{borderRadius:12,minHeight:44,paddingVertical:11,backgroundColor:p.field,borderWidth:1,borderColor:p.line,flexDirection:'row',justifyContent:'center',gap:8});
+ // Completion is a secondary step next to "Incassa e completa": light fill, readable ink, sage when done.
+ patch('darkButtonDisabled',{backgroundColor:p.field,opacity:.55});
+ patch('darkButtonTextDisabled',{color:p.ink});
+ patch('appointmentCompletionButtonDone',{backgroundColor:p.night?'#2B3530':'#E9F0E8',borderColor:p.night?'#4F6959':'#B5C9B8',opacity:1});
  patch('appointmentSecondaryAction',{borderRadius:12,minHeight:44,paddingVertical:11,backgroundColor:p.field,borderColor:p.line});
  patch('appointmentActionText',{fontSize:13,lineHeight:19,fontWeight:'500'});
  patch('searchCard',{borderRadius:20,borderColor:p.border,borderWidth:1,backgroundColor:p.surface});
@@ -313,8 +317,8 @@ export function createAgendaPremiumStyles<T extends Record<string,any>>(base:T,t
  for(const key of ['weekPhasedTimeEditIcon','weekPhasedTimeEditIconWeb'])patch(key,{backgroundColor:p.night?'rgba(130,165,191,.15)':'#E7EDF2',borderRadius:11});
  for(const key of ['weekReorganizationOpenTitle','weekPhasedTimeEditTitle'])patch(key,{fontSize:14,lineHeight:20,fontWeight:'600'});
  for(const key of ['weekReorganizationOpenText','weekPhasedTimeEditHint'])patch(key,{fontSize:12,lineHeight:17,fontWeight:'400',color:p.muted});
- patch('appointmentCompletionButton',{backgroundColor:p.action,borderColor:p.action});
- patch('appointmentCompletionButtonDone',{backgroundColor:p.night?'rgba(91,144,113,.15)':'#E9F6EF',borderColor:p.night?'rgba(147,192,166,.3)':'#BDDCCB'});
+ patch('appointmentCompletionButton',{backgroundColor:p.field,borderColor:p.line,borderWidth:1});
+ patch('appointmentCompletionButtonDone',{backgroundColor:p.night?'#2B3530':'#E9F0E8',borderColor:p.night?'#4F6959':'#B5C9B8',opacity:1});
  patch('weekAppointmentDetailsPrimaryButton',{backgroundColor:p.field,borderColor:p.border,borderWidth:1,alignSelf:'center',minWidth:100,minHeight:44,paddingHorizontal:22,borderRadius:12});
  patch('weekAppointmentDetailsPrimaryButtonText',{color:p.ink,fontWeight:'500'});
  patch('weekPhasedTimeRow',{backgroundColor:p.field,borderColor:p.line,borderRadius:14});

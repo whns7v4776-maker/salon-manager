@@ -89,6 +89,11 @@ export function AgendaPremiumHeader({date,time,review,onAvailability}:{date:stri
   <View style={{flexDirection:'row',alignItems:'center',flexWrap:compact?'nowrap':'wrap',justifyContent:wide?'flex-end':'space-between',gap:10,flex:wide?1:undefined,paddingTop:wide?6:0}}>{review}<Pressable accessibilityRole="button" accessibilityLabel="Apri disponibilità e orari" onPress={onAvailability} style={{minHeight:40,flexDirection:'row',alignItems:'center',gap:7,borderWidth:1,borderColor:p.border,backgroundColor:p.field,borderRadius:12,paddingHorizontal:12,paddingVertical:9}}><Ionicons name="time-outline" size={18} color={p.ink}/>{!compact?<Text style={{fontSize:13,color:p.ink}}>Orari e disponibilità</Text>:null}</Pressable></View>
  </View>;
 }
+/** Native wraps the day rail with side arrows; web renders the rail unchanged. */
+function DayRailFrame({native,before,after,children}:{native:boolean;before:React.ReactNode;after:React.ReactNode;children:React.ReactNode}){
+ if(!native)return <>{children}</>;
+ return <View style={{flexDirection:'row',alignItems:'stretch',width:'100%'}}>{before}{children}{after}</View>;
+}
 export function AgendaPremiumDateStrip({days,selected,month,onMonth,onToday,onPrevious,onNext,onSelect,onDayMenu,onHelp,dayCountControl,onEarlierDates}:{days:Day[];selected:string;month:string;onMonth:()=>void;onToday:()=>void;onPrevious:()=>void;onNext:()=>void;onSelect:(id:string)=>void;onDayMenu:(id:string)=>void;onHelp:()=>void;dayCountControl?:React.ReactNode;onEarlierDates?:()=>void}){
  const p=useSolidAgendaPalette();const {width}=useWindowDimensions();const {setDisableParentSwipe}=useTabSwipeLock();
  const compact=width<600,inline=web&&width>=900;
@@ -120,10 +125,14 @@ export function AgendaPremiumDateStrip({days,selected,month,onMonth,onToday,onPr
  // Paired controls read as one segmented group: shared border, inner corners squared.
  const button=(label:string,icon:React.ComponentProps<typeof Ionicons>['name']|null,press:()=>void,segment?:'first'|'last')=><Pressable accessibilityRole="button" accessibilityLabel={label} onPress={press} style={{minHeight:compactWeb?36:42,width:compactWeb&&icon?(tightWeb?28:32):undefined,borderWidth:1,borderColor:p.border,backgroundColor:p.field,borderRadius:compactWeb?10:12,...(segment==='first'?{borderTopRightRadius:0,borderBottomRightRadius:0}:segment==='last'?{borderTopLeftRadius:0,borderBottomLeftRadius:0,borderLeftWidth:0}:{}),paddingHorizontal:compactWeb?(icon?0:tightWeb?6:8):compact?(icon?8:10):(icon?12:16),flexDirection:'row',alignItems:'center',justifyContent:'center',gap:8,flexShrink:0}}>{icon?<Ionicons name={icon} size={compactWeb?16:18} color={p.ink}/>:<Text style={{fontSize:tightWeb?11:compactWeb?12:13,fontWeight:'600',color:p.ink}}>{label}</Text>}</Pressable>;
  const leading=<View style={{flexDirection:'row',alignItems:'center',flexShrink:0,gap:compactWeb?3:compact?4:8}}><View style={{flexDirection:'row'}}>{button(month,null,onMonth,'first')}{button('Oggi',null,()=>{onToday();requestRecenter(value=>value+1);},'last')}</View>{dayCountControl}</View>;
- const trailing=<View style={{flexDirection:'row',alignItems:'center',flexShrink:0,gap:compactWeb?3:compact?4:8}}><View style={{flexDirection:'row'}}>{button('Giorno precedente','chevron-back',onPrevious,'first')}{button('Giorno successivo','chevron-forward',onNext,'last')}</View><InfoButton size={tightWeb?28:compact?32:42} hitSlop={compactWeb?0:5} accessibilityLabel="Come funziona la scelta del giorno" onPress={onHelp}/></View>;
+ const help=<InfoButton size={tightWeb?28:compact?32:42} hitSlop={compactWeb?0:5} accessibilityLabel="Come funziona l’Agenda" onPress={onHelp}/>;
+ const trailing=<View style={{flexDirection:'row',alignItems:'center',flexShrink:0,gap:compactWeb?3:compact?4:8}}><View style={{flexDirection:'row'}}>{button('Giorno precedente','chevron-back',onPrevious,'first')}{button('Giorno successivo','chevron-forward',onNext,'last')}</View>{help}</View>;
+ // App: one strip of days with the arrows on its sides; month, today, view and help above it.
+ const sideArrow=(label:string,icon:'chevron-back'|'chevron-forward',press:()=>void)=><Pressable accessibilityRole="button" accessibilityLabel={label} onPress={press} hitSlop={6} style={{width:30,alignSelf:'stretch',alignItems:'center',justifyContent:'center',flexShrink:0}}><Ionicons name={icon} size={20} color={p.ink}/></Pressable>;
  return <View {...(web?{dataSet:{agendaDateStrip:'true'}}:{})} style={{borderWidth:1,borderColor:p.border,borderRadius:18,backgroundColor:p.surface,padding:compact?8:10,gap:inline?14:10,marginBottom:web?10:6,flexDirection:inline?'row':'column',alignItems:inline?'center':'stretch'}}>
-  {inline?leading:<View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',flexWrap:'nowrap',gap:compact?4:8}}>{leading}{trailing}</View>}
-  <View {...(web?{dataSet:{agendaDayScroll:'true'}}:{})} style={{width:inline?undefined:'100%',flex:inline?1:undefined,minWidth:0,position:'relative'}}>
+  {inline?leading:<View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',flexWrap:'nowrap',gap:compact?4:8}}>{leading}{web?trailing:help}</View>}
+  <DayRailFrame native={!web} before={!web?sideArrow('Giorno precedente','chevron-back',onPrevious):null} after={!web?sideArrow('Giorno successivo','chevron-forward',onNext):null}>
+  <View {...(web?{dataSet:{agendaDayScroll:'true'}}:{})} style={{width:inline||!web?undefined:'100%',flex:inline||!web?1:undefined,minWidth:0,position:'relative'}}>
    {web?React.createElement('style',null,`
     [data-agenda-day-scroll] [data-horizontal-rail] {position:absolute!important;left:8px;right:8px;bottom:-12px;width:auto!important;padding:0!important;z-index:2;}
     [data-agenda-day-scroll] [role="scrollbar"] {height:16px!important;background:transparent!important;border-radius:8px!important;}
@@ -137,7 +146,7 @@ export function AgendaPremiumDateStrip({days,selected,month,onMonth,onToday,onPr
    </View></Pressable></React.Fragment>;})}
   </ScrollView>
   {web?<WebHorizontalScrollRail hostRef={rail} label="Scorri i giorni"/>:null}
-  </View>
+  </View></DayRailFrame>
   {inline?trailing:null}
  </View>;
 }
@@ -178,6 +187,7 @@ export function AgendaPremiumSlotCss(){
  [data-agenda-timeline-part="top"] > div:nth-child(2) > div:first-child {flex-direction:row!important;flex-wrap:wrap;align-items:center!important;gap:5px 10px!important;}
  [data-agenda-timeline-part="status"] {margin-bottom:8px!important;}
  [data-agenda-timeline-part="actions"] > div {min-height:36px!important;padding:7px 12px!important;}
+ [data-agenda-timeline-part="actions"] [dir="auto"] {white-space:nowrap;}
  @media(min-width:760px){
   [data-agenda-timeline-card="true"] {display:grid!important;grid-template-columns:64px minmax(0,1fr) minmax(0,1fr) 176px;column-gap:18px;row-gap:6px;align-items:center;}
   [data-agenda-timeline-part="top"], [data-agenda-timeline-part="top"] > div:nth-child(2) {display:contents!important;}

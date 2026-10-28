@@ -46350,7 +46350,6 @@ export default function AgendaScreen() {
           {!IS_WEB?<View style={{flex:1,minWidth:0,overflow:'hidden'}}><AgendaPremiumOperatorFilters inline operators={operatori} selected={agendaFilteredOperators} locked={agendaVisibleOperatorCount>1}
             onAll={()=>setAgendaOperatorFilter(null)} onToggle={id=>setAgendaOperatorFilter(current=>toggleAgendaOperator(current,id,operatori.map(op=>op.id)))}/></View>:null}
           {IS_WEB?<View {...{dataSet:{agendaSearchHost:'true'}}} style={{flex:1,minWidth:120,zIndex:100}}>{agendaSearchPanel}</View>:<HapticTouchable accessibilityRole="button" accessibilityLabel="Cerca appuntamento" onPress={()=>{setNativeAgendaSearchExpanded(true);setCampoAttivo('ricerca');}} style={{minWidth:40,minHeight:44,justifyContent:'center',alignItems:'center',borderRadius:12,borderWidth:1,borderColor:availabilityPalette.border,backgroundColor:availabilityPalette.field}}><Ionicons name="search-outline" size={20} color={availabilityPalette.ink}/></HapticTouchable>}
-          <InfoButton size={IS_WEB?42:40} accessibilityLabel="Come funziona l’Agenda" onPress={()=>setWeekAgendaGuideOpen(value=>!value)}/>
         </View>
         <View
           ref={weekPlannerOverlayHostRef}
@@ -49371,20 +49370,20 @@ null
         {agendaNavigatorCards.map((card) => {
           const selected=agendaView===card.key;
           const tone=availabilityPalette.night?{
-            today:{bg:'rgba(194,164,110,.13)',accent:'#D8BE8B',icon:'today-outline' as const},
-            upcoming:{bg:'rgba(112,160,139,.13)',accent:'#A7CDB8',icon:'calendar-outline' as const},
-            recent:{bg:'rgba(165,136,157,.13)',accent:'#CBB3C5',icon:'archive-outline' as const},
-            week:{bg:'rgba(130,153,178,.13)',accent:'#B8C9DD',icon:'grid-outline' as const},
+            today:{bg:'#343026',accent:'#D8BE8B',icon:'today-outline' as const},
+            upcoming:{bg:'#2B3530',accent:'#A7CDB8',icon:'calendar-outline' as const},
+            recent:{bg:'#2E3031',accent:'#C9C2B4',icon:'archive-outline' as const},
+            week:{bg:'#2E3031',accent:'#C9C2B4',icon:'grid-outline' as const},
           }[card.key]:{
-            today:{bg:'rgba(241,229,205,.65)',accent:'#80683E',icon:'today-outline' as const},
-            upcoming:{bg:'rgba(221,235,226,.65)',accent:'#48715A',icon:'calendar-outline' as const},
-            recent:{bg:'rgba(234,224,232,.65)',accent:'#806779',icon:'archive-outline' as const},
-            week:{bg:'rgba(223,231,240,.65)',accent:'#566C86',icon:'grid-outline' as const},
+            today:{bg:'#F5ECDB',accent:'#80683E',icon:'today-outline' as const},
+            upcoming:{bg:'#E9F0E8',accent:'#48715A',icon:'calendar-outline' as const},
+            recent:{bg:'#F1ECE4',accent:'#6E6556',icon:'archive-outline' as const},
+            week:{bg:'#F1ECE4',accent:'#6E6556',icon:'grid-outline' as const},
           }[card.key];
           return <HapticTouchable key={card.key} accessibilityRole="button" accessibilityLabel={`Apri elenco ${card.title}`} accessibilityState={{expanded:selected}}
-            style={[styles.agendaViewCard,{flex:isDesktopWebLayout?1:undefined,minWidth:0,backgroundColor:tone.bg,borderColor:selected?tone.accent:availabilityPalette.border}]}
+            style={[styles.agendaViewCard,{flex:isDesktopWebLayout?1:undefined,minWidth:0,backgroundColor:tone.bg,borderColor:selected?tone.accent:availabilityPalette.border,borderWidth:selected?1.5:1}]}
             onPress={()=>handleAgendaViewSelect(card.key)} pressScale={0.98} pressOpacity={0.98}>
-            <View style={{width:40,height:40,borderRadius:13,backgroundColor:availabilityPalette.field,alignItems:'center',justifyContent:'center',marginRight:12,flexShrink:0}}><Ionicons name={tone.icon} size={21} color={tone.accent}/></View>
+            <View style={{width:40,height:40,borderRadius:20,backgroundColor:availabilityPalette.night?'#3A352C':'#F3E7D3',borderWidth:1,borderColor:availabilityPalette.night?'rgba(216,194,155,.32)':'rgba(150,118,72,.3)',alignItems:'center',justifyContent:'center',marginRight:12,flexShrink:0}}><Ionicons name={tone.icon} size={20} color={tone.accent}/></View>
             <View style={styles.agendaViewCardTextWrap}>
               <Text style={[styles.agendaViewEyebrow,{color:tone.accent}]}>{card.eyebrow}</Text>
               <Text style={[styles.agendaViewTitle,{color:availabilityPalette.ink}]}>{card.title}</Text>
@@ -50212,7 +50211,7 @@ null
                   onPrevious={()=>handleSelectDateStable(addDaysToIso(data,-1))}
                   onNext={()=>handleSelectDateStable(addDaysToIso(data,1))}
                   onSelect={handleAgendaDayPickerSelectFinal} onDayMenu={handleDayLongPressStable}
-                  onHelp={()=>setDaySelectionGuideOpen(value=>!value)}/>
+                  onHelp={()=>{const next=!(daySelectionGuideOpen||weekAgendaGuideOpen);setDaySelectionGuideOpen(next);setWeekAgendaGuideOpen(next);}}/>
 
 
               </View>
