@@ -4,11 +4,11 @@ import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
 
 /** Decoration only: never contributes to lane measurements or takes a touch. */
 export function AgendaSlotSatin({night,top}:{night:boolean;top:number}) {
- return <View pointerEvents="none" accessible={false} style={[StyleSheet.absoluteFillObject,{top,backgroundColor:night?'rgba(35,41,42,.16)':'rgba(235,229,217,.13)',...(Platform.OS==='web'?{backdropFilter:'blur(8px) saturate(.86)'}:{})}]}/>;
+ return <View pointerEvents="none" accessible={false} style={[StyleSheet.absoluteFillObject,{top,backgroundColor:'transparent'}]}/>;
 }
 export function AgendaOperatorSurface({night}:{night:boolean}) {
  const id=`operator-${useId().replace(/:/g,'')}`;
- const colors=night?['rgba(48,53,51,.78)','rgba(61,64,57,.80)','rgba(44,49,47,.72)']:['rgba(190,177,155,.64)','rgba(213,201,181,.72)','rgba(226,216,198,.58)'];
+ const colors=night?['#2E3330','#363933','#2B302E']:['#E3D8C6','#ECE3D4','#F1EADE'];
  const ink=night?'#D8C29B':'#343735';
  const stops=night?[0,.025,.10,.20,.10,.025,0]:[0,.018,.075,.14,.075,.018,0];
  return <View pointerEvents="none" accessible={false} style={StyleSheet.absoluteFillObject}>

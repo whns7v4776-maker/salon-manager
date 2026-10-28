@@ -21,10 +21,20 @@ export function getAgendaBookingColors(night: boolean) {
 }
 
 type Palette=ReturnType<typeof useAccessAppearance>['palette'];
+/** The agenda is a working surface: every fill is opaque so the silk backdrop never shows through. */
+export function solidAgendaPalette(p:Palette):Palette{
+ return {...p,field:p.night?'#2A2E2F':'#FBF8F3',surface:p.night?'#232728':'#F8F4ED'};
+}
+export const AGENDA_GRID_FILL={day:'#F3EEE5',night:'#1C2021'};
+export function useSolidAgendaPalette(){
+ const {palette}=useAccessAppearance();
+ return React.useMemo(()=>solidAgendaPalette(palette),[palette]);
+}
 export const AGENDA_PREMIUM_GRID_RADIUS=20;
 /** One shared object per theme, including portal menus. Geometry is preserved unless explicitly listed. */
 export const AgendaPremiumStyleContext=React.createContext<Record<string,any>|null>(null);
-export function createAgendaPremiumStyles<T extends Record<string,any>>(base:T,p:Palette):T{
+export function createAgendaPremiumStyles<T extends Record<string,any>>(base:T,theme:Palette):T{
+ const p=solidAgendaPalette(theme);
  const web=Platform.OS==='web',out:Record<string,any>={};
  for(const [key,original] of Object.entries(base)){
   const v={...StyleSheet.flatten(original)} as Record<string,any>;
@@ -151,7 +161,7 @@ export function createAgendaPremiumStyles<T extends Record<string,any>>(base:T,p
  for(const key of ['weekPlannerControlDaysIcon','weekPlannerControlDensityIcon'])patch(key,{backgroundColor:'transparent'});
  // Round the painted surfaces themselves. The interaction host stays visible
  // so drag previews, the live-time badge and resize returns retain their bounds.
- patch('weekPlannerTableShell',{borderRadius:AGENDA_PREMIUM_GRID_RADIUS,borderWidth:1,borderColor:p.night?'rgba(237,230,215,.08)':'rgba(52,55,53,.08)',backgroundColor:p.night?'rgba(22,27,28,.46)':'rgba(221,213,198,.46)',...(web?{boxShadow:p.night?'0 8px 28px rgba(0,0,0,.12),inset 0 1px 0 rgba(255,255,255,.035)':'0 8px 28px rgba(58,48,31,.055),inset 0 1px 0 rgba(255,255,255,.25)'}:{})});
+ patch('weekPlannerTableShell',{borderRadius:AGENDA_PREMIUM_GRID_RADIUS,borderWidth:1,borderColor:p.night?'rgba(237,230,215,.08)':'rgba(52,55,53,.08)',backgroundColor:p.night?AGENDA_GRID_FILL.night:AGENDA_GRID_FILL.day,...(web?{boxShadow:p.night?'0 8px 28px rgba(0,0,0,.12),inset 0 1px 0 rgba(255,255,255,.035)':'0 8px 28px rgba(58,48,31,.055),inset 0 1px 0 rgba(255,255,255,.25)'}:{})});
  // The header and slots share this scroll viewport. Keep overflowing lanes
  // inside the calendar instead of letting the header paint beyond its edge.
  if(web)patch('weekPlannerGridScroller',{overflow:'hidden',overflowX:'auto',overflowY:'hidden',borderTopRightRadius:AGENDA_PREMIUM_GRID_RADIUS-1,borderBottomRightRadius:AGENDA_PREMIUM_GRID_RADIUS-1});
@@ -209,7 +219,7 @@ export function createAgendaPremiumStyles<T extends Record<string,any>>(base:T,p
  patch('weekPlannerTimeLabelMarker',{color:p.ink,fontWeight:'500'});
  patch('weekPlannerTimeTextMinor',{color:p.muted,fontSize:web?11:10,lineHeight:14,fontWeight:'400'});
  patch('weekPlannerTimeTextHour',{color:p.ink,fontSize:web?12:11,lineHeight:15,fontWeight:'500'});
- patch('weekStickyOperatorHeaderOverlayWeb',{backgroundColor:p.night?'rgba(28,32,34,.64)':'rgba(250,247,241,.64)',backdropFilter:'blur(18px)'});
+ patch('weekStickyOperatorHeaderOverlayWeb',{backgroundColor:p.night?'#24282A':'#F1EADF',backdropFilter:'none',boxShadow:p.night?'0 6px 16px rgba(0,0,0,.32)':'0 6px 16px rgba(73,54,35,.10)'});
  // The current-time indicator uses the same action tone as the controls.
  patch('weekPlannerCurrentTimeRailGlow',{top:-1,height:4,backgroundColor:'rgba(237,155,148,.08)'});
  patch('weekPlannerCurrentTimeLine',{height:1.25,backgroundColor:'#ED9B94'});

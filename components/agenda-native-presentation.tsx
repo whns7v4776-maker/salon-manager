@@ -12,7 +12,7 @@ export function finishNativeAgendaStyles<T extends Record<string, any>>(styles: 
   const patch = (key: string, value: Record<string, any>) => {
     if (out[key]) (out as Record<string, any>)[key] = { ...StyleSheet.flatten(out[key]), ...value };
   };
-  patch('weekPlannerTableShell', { overflow: 'hidden', borderRadius: 20, borderTopWidth: 1, backgroundColor: p.night ? 'rgba(22,27,28,.46)' : 'rgba(221,213,198,.46)' });
+  patch('weekPlannerTableShell', { overflow: 'hidden', borderRadius: 20, borderTopWidth: 1, backgroundColor: p.night ? '#1C2021' : '#F3EEE5' });
   for (const key of ['weekPlannerCellPast', 'weekPlannerCellOutside', 'weekPlannerCellOutsideEmpty', 'weekPlannerCellClosedDay', 'weekPlannerCellDisabledLane', 'weekPlannerCellUnavailableWeb', 'weekPlannerCellBlocked']) patch(key, { backgroundColor: 'transparent', borderRadius: 0 });
   patch('weekPlannerCell', { borderBottomWidth: 1, borderBottomColor: p.night ? 'rgba(237,230,215,.10)' : 'rgba(55,51,43,.10)' });
   patch('sectionBlock', { marginBottom: 0, paddingBottom: 0 });

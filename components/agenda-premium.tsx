@@ -11,6 +11,7 @@ import {InfoButton} from './ui/info-button';
 import {useTabSwipeLock} from '../src/context/TabSwipeLockContext';
 import {getAgendaDateStripOffset,getAgendaDateStripMetrics} from '../src/lib/agenda-date-strip';
 import {OwnerPremiumCompactAppearance} from './owner-premium-web';
+import {useSolidAgendaPalette} from './agenda-premium-style';
 
 type Day={value:string;weekdayShort:string;dayNumber:string;monthShort?:string;monthLabel?:string;closed?:boolean;past?:boolean;full?:boolean;pending?:number};
 const web=Platform.OS==='web';
@@ -18,7 +19,7 @@ export function AgendaPremiumBlockedSlotLabel({label,textStyle}:{label:string;te
  return <AgendaStateLabel label={label} textStyle={textStyle} action/>;
 }
 export function AgendaStateLabel({label,textStyle,action=false}:{label:string;textStyle?:StyleProp<TextStyle>;action?:boolean}){
- const {palette:p}=useAccessAppearance();
+ const p=useSolidAgendaPalette();
  const pressed=React.useContext(AgendaSlotFeedbackContext);
  return <View pointerEvents="none" style={{width:'100%',height:'100%',flexDirection:'row',alignItems:'center',justifyContent:'center',gap:web?12:6,paddingHorizontal:web?14:4}}>
   <View style={{flex:1,alignItems:'flex-end',opacity:pressed?0:1}}><AgendaStateRule night={p.night} hideOnAction={action}/></View>
@@ -30,7 +31,7 @@ export function AgendaStateLabel({label,textStyle,action=false}:{label:string;te
  </View>;
 }
 export function AgendaPremiumOperatorChoice({name,photo,status,selected,available}:{name:string;photo?:string|null;status:string;selected:boolean;available:boolean}){
- const {palette:p}=useAccessAppearance();
+ const p=useSolidAgendaPalette();
  const accent=available?(p.night?'#B2D4BB':'#426B54'):(p.night?'#E0C399':'#8A653C');
  return <>
   <View style={{width:36,height:36,borderRadius:18,backgroundColor:p.night?'rgba(255,255,255,.08)':'#EEEDE7',alignItems:'center',justifyContent:'center',overflow:'hidden',flexShrink:0}}>
@@ -41,7 +42,7 @@ export function AgendaPremiumOperatorChoice({name,photo,status,selected,availabl
  </>;
 }
 export function AgendaPremiumOperatorHeading({name,role,photo,accent,unavailable,historical=false,width=240}:{name:string;role:string;photo?:string|null;accent:string;unavailable:boolean;historical?:boolean;width?:number}){
- const {palette:p}=useAccessAppearance();
+ const p=useSolidAgendaPalette();
  const compact=width<190;
  const meta=historical?'Archiviato':unavailable?'Non attivo oggi':role;
  if(!web)return <NativeAgendaOperatorHeading name={name} meta={meta} photo={photo} accent={accent} unavailable={unavailable} width={width} night={p.night} ink={p.ink} muted={p.muted}/>;
@@ -89,7 +90,7 @@ export function AgendaPremiumHeader({date,time,review,onAvailability}:{date:stri
  </View>;
 }
 export function AgendaPremiumDateStrip({days,selected,month,onMonth,onToday,onPrevious,onNext,onSelect,onDayMenu,onHelp,dayCountControl,onEarlierDates}:{days:Day[];selected:string;month:string;onMonth:()=>void;onToday:()=>void;onPrevious:()=>void;onNext:()=>void;onSelect:(id:string)=>void;onDayMenu:(id:string)=>void;onHelp:()=>void;dayCountControl?:React.ReactNode;onEarlierDates?:()=>void}){
- const {palette:p}=useAccessAppearance();const {width}=useWindowDimensions();const {setDisableParentSwipe}=useTabSwipeLock();
+ const p=useSolidAgendaPalette();const {width}=useWindowDimensions();const {setDisableParentSwipe}=useTabSwipeLock();
  const compact=width<600,inline=web&&width>=900;
  const compactWeb=compact,tightWeb=compactWeb&&width<360;
  const rail=React.useRef<ScrollView>(null);
@@ -128,7 +129,7 @@ export function AgendaPremiumDateStrip({days,selected,month,onMonth,onToday,onPr
     [data-agenda-day-scroll] [role="scrollbar"]::before {display:none!important;}
     [data-agenda-day-scroll] [role="scrollbar"] > div {top:5px!important;height:6px!important;border-radius:4px!important;background:${p.night?'rgba(216,194,155,.58)':'rgba(70,83,72,.43)'}!important;}
    `):null}
-  <ScrollView {...(web?{dataSet:{agendaHorizontalScroll:'true'}}:{})} ref={rail} horizontal scrollEventThrottle={32} onScroll={event=>{const x=event.nativeEvent.contentOffset.x;const movedBack=x<railOffset.current-1;railOffset.current=x;if(onEarlierDates&&movedBack&&x<=dayWidth&&!loadingEarlier.current){loadingEarlier.current=true;onEarlierDates();}}} onLayout={event=>setRailWidth(event.nativeEvent.layout.width)} onContentSizeChange={centerSelected} style={{width:'100%',maxWidth:'100%',minWidth:0,borderRadius:14,backgroundColor:p.night?'rgba(255,255,255,.065)':'rgba(255,253,249,.82)'}} showsHorizontalScrollIndicator={false} onScrollBeginDrag={()=>setDisableParentSwipe(true)} onScrollEndDrag={()=>setDisableParentSwipe(false)} onMomentumScrollBegin={()=>setDisableParentSwipe(true)} onMomentumScrollEnd={()=>setDisableParentSwipe(false)} contentContainerStyle={{justifyContent:'flex-start',gap:0}}>
+  <ScrollView {...(web?{dataSet:{agendaHorizontalScroll:'true'}}:{})} ref={rail} horizontal scrollEventThrottle={32} onScroll={event=>{const x=event.nativeEvent.contentOffset.x;const movedBack=x<railOffset.current-1;railOffset.current=x;if(onEarlierDates&&movedBack&&x<=dayWidth&&!loadingEarlier.current){loadingEarlier.current=true;onEarlierDates();}}} onLayout={event=>setRailWidth(event.nativeEvent.layout.width)} onContentSizeChange={centerSelected} style={{width:'100%',maxWidth:'100%',minWidth:0,borderRadius:14,backgroundColor:p.field}} showsHorizontalScrollIndicator={false} onScrollBeginDrag={()=>setDisableParentSwipe(true)} onScrollEndDrag={()=>setDisableParentSwipe(false)} onMomentumScrollBegin={()=>setDisableParentSwipe(true)} onMomentumScrollEnd={()=>setDisableParentSwipe(false)} contentContainerStyle={{justifyContent:'flex-start',gap:0}}>
    {days.map((day,index)=>{const active=day.value===selected;const startsMonth=index>0&&day.value.slice(0,7)!==days[index-1].value.slice(0,7);return <React.Fragment key={day.value}>{startsMonth?<View {...(web?{dataSet:{agendaMonthDivider:day.value.slice(0,7)}}:{})} accessibilityLabel={`Inizio ${day.monthLabel||day.monthShort||day.value.slice(0,7)}`} style={{width:dividerWidth,flexShrink:0,alignSelf:'stretch',alignItems:'center',justifyContent:'center'}}><View pointerEvents="none" style={{width:22,height:66,borderRadius:11,borderWidth:1,borderColor:p.night?'rgba(216,194,155,.25)':'rgba(141,118,80,.20)',backgroundColor:p.night?'rgba(216,194,155,.075)':'rgba(189,165,127,.085)',alignItems:'center',justifyContent:'center',...(web?{backgroundImage:p.night?'linear-gradient(90deg,rgba(255,255,255,.035),transparent)':'linear-gradient(90deg,rgba(255,255,255,.65),rgba(255,255,255,.12))',boxShadow:p.night?'inset 1px 0 0 rgba(255,255,255,.035)':'inset 1px 0 0 rgba(255,255,255,.65)'} as any:{})}}><Text numberOfLines={1} style={{width:66,minWidth:66,maxWidth:66,height:14,flexShrink:0,transform:[{rotate:'-90deg'}],textAlign:'center',color:p.night?'#D8C29B':'#796346',fontSize:9,lineHeight:14,letterSpacing:1,fontWeight:'600',textTransform:'uppercase'}}>{day.monthLabel||day.monthShort||day.value.slice(5,7)}</Text></View></View>:null}<Pressable accessibilityRole="button" accessibilityLabel={`${day.weekdayShort} ${day.dayNumber}${day.closed?', chiuso':''}${day.full?', pieno':''}${day.pending?`, ${day.pending} richieste da confermare`:''}`} accessibilityState={{selected:active}} aria-pressed={active} onPress={()=>onSelect(day.value)} onLongPress={()=>onDayMenu(day.value)} {...(web?{onContextMenu:(event:any)=>{event.preventDefault();event.stopPropagation();onDayMenu(day.value);}}:{})} style={{width:dayWidth,flexGrow:0,flexShrink:0,minHeight:62,paddingHorizontal:compact?6:12,paddingVertical:7,borderRadius:active?28:12,backgroundColor:active?(p.night?'rgba(216,194,155,.18)':'rgba(237,208,181,.46)'):'transparent',borderWidth:1,borderColor:active?p.border:'transparent',alignItems:'center',justifyContent:'center',gap:3}}>{index>0&&!startsMonth?<View pointerEvents="none" style={{position:'absolute',left:-1,top:14,bottom:14,width:1,opacity:.7,backgroundColor:p.line,...(web?{backgroundColor:'transparent',backgroundImage:`linear-gradient(to bottom, transparent, ${p.line} 24%, ${p.line} 76%, transparent)`} as any:{})}}/>:null}<Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={.8} style={{fontSize:11,lineHeight:15,color:p.muted,maxWidth:'100%',textAlign:'center'}}>{day.weekdayShort}</Text><Text style={{fontSize:18,lineHeight:23,fontWeight:'600',color:p.ink}}>{day.dayNumber}</Text><View style={{flexDirection:'row',alignItems:'center',justifyContent:'center',gap:3,height:14,maxWidth:'100%'}}>
     {day.closed?<Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={.7} style={{fontSize:9,lineHeight:12,color:p.muted,flexShrink:1}}>Chiuso</Text>:<View style={{width:day.pending?10:18,height:4,borderRadius:2,backgroundColor:active?(p.night?'#E2CCAA':'#946333'):day.past||day.full?p.muted:'#86AA87',flexShrink:0}}/>}
     {day.pending?<View accessibilityLabel={`${day.pending} richieste da confermare`} style={{minWidth:18,height:14,paddingHorizontal:3,borderRadius:5,backgroundColor:'#B35050',alignItems:'center',justifyContent:'center',flexShrink:0}}><Text style={{fontSize:9,lineHeight:12,fontWeight:'700',color:'#FFFFFF'}}>{day.pending>99?'99+':`+${day.pending}`}</Text></View>:null}
@@ -140,7 +141,7 @@ export function AgendaPremiumDateStrip({days,selected,month,onMonth,onToday,onPr
  </View>;
 }
 export function AgendaPremiumOperatorFilters({operators,selected,onAll,onToggle,locked,inline=false}:{operators:{id:string;nome:string}[];selected:string[]|null;onAll:()=>void;onToggle:(id:string)=>void;locked:boolean;inline?:boolean}){
- const {palette:p}=useAccessAppearance();const {setDisableParentSwipe}=useTabSwipeLock();
+ const p=useSolidAgendaPalette();const {setDisableParentSwipe}=useTabSwipeLock();
  React.useEffect(()=>()=>setDisableParentSwipe(false),[setDisableParentSwipe]);
  if(!operators.length)return null;
  const orderedOperators=[...operators].sort((a,b)=>a.nome.localeCompare(b.nome,'it',{sensitivity:'base'})||a.id.localeCompare(b.id));
@@ -150,7 +151,7 @@ export function AgendaPremiumOperatorFilters({operators,selected,onAll,onToggle,
 
 /** CSS hover stays on the browser compositor; it never re-renders the grid or changes slot geometry. */
 export function AgendaPremiumSlotCss(){
- const {palette:p}=useAccessAppearance();
+ const p=useSolidAgendaPalette();
  if(!web)return null;
  const fill=p.night?'rgba(216,194,155,.14)':'rgba(104,128,108,.13)';
  const stroke=p.night?'rgba(232,218,190,.52)':'rgba(98,118,102,.42)';
