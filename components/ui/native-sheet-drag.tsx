@@ -57,7 +57,9 @@ export function AutomaticNativeSheetHandle() {
 }
 export function NativeSheetHandle({ style }: { style?: StyleProp<ViewStyle> }) {
   const drag = useContext(NativeSheetDragContext);
-  if (Platform.OS === 'web' || !drag) return <View style={style} />;
+  // Web docked sheets draw their own grabber (WebSheetGrabber); a second bar here doubled it.
+  if (Platform.OS === 'web') return null;
+  if (!drag) return <View style={style} />;
   return <GestureDetector gesture={drag.gesture}>
     <View collapsable={false} accessible={false} hitSlop={{top:8,bottom:8}} style={{ alignSelf: 'stretch', minHeight: 28, justifyContent: 'center' }}>
       <View style={style} />

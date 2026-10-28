@@ -5,6 +5,7 @@ import { SectionHowItWorksPanel } from './section-how-it-works';
 import React, { useState } from 'react';
 import { ActivityIndicator, Platform, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { NativeMedal } from './owner-premium-native-home';
 import { HapticTouchable } from './ui/haptic-touchable';
 import { useCustomerCancellationPolicy } from '../src/lib/use-customer-cancellation-policy';
 import { cancellationNoticeLabel } from '../src/lib/customer-cancellation-policy';
@@ -35,14 +36,14 @@ export function CustomerCancellationSettings({ salonCode, premiumNative=false }:
       </View>
       <Text style={[styles.body, !NATIVE && styles.centeredWeb, policy.ready && styles.successText]}>{policy.ready ? `Il cliente può annullare ${cancellationNoticeLabel(policy.minutes)}.` : policy.error ? 'Regola attiva non disponibile. Riprova il caricamento.' : 'Caricamento della regola del salone…'}</Text>
     </View>
-    <View style={[styles.options, !NATIVE && styles.optionsWeb]}>{OPTIONS.map(minutes => <HapticTouchable webHoverLift key={minutes} accessibilityRole="radio" accessibilityState={{ checked: selected === minutes, disabled: saving || !policy.ready }} disabled={saving || !policy.ready} onPress={() => { setDraft(minutes); setMessage(''); }} style={[styles.option, !NATIVE && styles.optionWeb, selected === minutes && styles.selected]}>
-        <Text style={[styles.optionText, selected === minutes && { color: premiumNative?p.actionText:'#fff' }]}>{durationLabel(minutes)}</Text>
+    <View style={[styles.options, !NATIVE && styles.optionsWeb]}>{OPTIONS.map(minutes => <HapticTouchable webHoverLift key={minutes} accessibilityRole="radio" accessibilityState={{ checked: selected === minutes, disabled: saving || !policy.ready }} disabled={saving || !policy.ready} onPress={() => { setDraft(minutes); setMessage(''); }} style={[styles.option, !NATIVE && styles.optionWeb, selected === minutes && styles.selected, selected === minutes && premiumNative && { backgroundColor: p.night ? 'rgba(156,132,97,.16)' : 'rgba(122,100,70,.10)', borderColor: p.night ? '#9C8461' : '#7A6446' }]}>
+        <Text style={[styles.optionText, selected === minutes && { color: premiumNative?p.ink:'#fff' }]}>{durationLabel(minutes)}</Text>
       </HapticTouchable>)}</View>
   </>;
   return <View style={styles.card}>
     <PremiumGuideDock tone={premiumNative?{ink:p.ink,fill:p.field,border:p.border}:undefined} guideOpen={guideOpen} onGuidePress={() => setGuideOpen(value => !value)} guideAccessibilityLabel="Come funziona Annullamento clienti" cutoutColor={premiumNative?(p.night?"#26292B":"#F7F4EF"):"#F3F6FA"} />
 
-    <View style={styles.header}><View style={styles.icon}><Ionicons name="time-outline" size={24} color={premiumNative?p.ink:"#334155"} /></View><Text style={styles.title}>Annullamento clienti</Text></View>
+    <View style={styles.header}>{premiumNative ? <NativeMedal icon="hourglass-outline" size={40} iconSize={18} /> : <View style={styles.icon}><Ionicons name="time-outline" size={24} color="#334155" /></View>}<Text style={styles.title}>Annullamento clienti</Text></View>
     {guideOpen && <SectionHowItWorksPanel onClose={() => setGuideOpen(false)} premiumNative={premiumNative} title="Annullamento clienti" description="Decidi fino a quando i clienti possono annullare un appuntamento confermato." steps={[
       { title: 'Scegli l’anticipo', description: 'Il valore predefinito è 30 minuti. Seleziona un tempo diverso oppure Fino all’inizio.' },
       { title: 'Salva la regola', description: 'Premi Salva regola e attendi la conferma. La regola attiva viene conservata per il salone e condivisa tra app e web.' },
@@ -58,10 +59,10 @@ export function CustomerCancellationSettings({ salonCode, premiumNative=false }:
 }
 const baseCancellationStyles = StyleSheet.create({
  controlsWeb: { gap: 16, alignItems: 'stretch' },
- summaryWeb: { width: '100%', minWidth: 0, alignItems: 'center', justifyContent: 'center' },
+ summaryWeb: { width: '100%', minWidth: 0, alignItems: 'stretch', justifyContent: 'center', paddingVertical: 14, paddingHorizontal: 16 },
  optionsWeb: { width: '100%', minWidth: 0, justifyContent: 'center', alignItems: 'stretch' },
  optionWeb: { flexBasis: 60, flexGrow: 1, flexShrink: 0, minWidth: 60, paddingHorizontal: 6 },
- summaryHeadingWeb: { gap: 8, alignItems: 'center' },
+ summaryHeadingWeb: { gap: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
  centeredWeb: { textAlign: 'left', maxWidth: '100%' },
  descriptionWeb: { textAlign: 'left', alignSelf: 'stretch', width: '100%', maxWidth: 760, marginTop: -6 },
  summaryHeadingNative: { alignItems: 'flex-start', gap: 3 },
@@ -69,11 +70,11 @@ const baseCancellationStyles = StyleSheet.create({
  card: { marginBottom: NATIVE ? 16 : 22, padding: NATIVE ? 16 : 22, gap: NATIVE ? 12 : 16, borderRadius: 26, borderWidth: 1, borderColor: '#E5EAF1', backgroundColor: '#fff' },
  header: { paddingRight: NATIVE ? 24 : 0, flexDirection: 'row', alignItems: 'center', gap: NATIVE ? 10 : 12, ...(!NATIVE ? { width: '100%', justifyContent: 'flex-start', paddingRight: 52 } : {}) },
  icon: { width: 44, height: 44, borderRadius: 15, backgroundColor: '#F1F5F9', alignItems: 'center', justifyContent: 'center', ...(NATIVE ? { width: 34, height: 34, borderRadius: 12 } : {}) },
- title: { fontSize: NATIVE ? 17 : 20, fontWeight: NATIVE ? '700' : '800', color: '#182033', ...(NATIVE ? { flex: 1 } : { flexGrow: 0, flexShrink: 1, flexBasis: 'auto' as const, width: 'auto' as const, textAlign: 'left' as const }) },
+ title: { fontSize: NATIVE ? 17 : 16, fontWeight: NATIVE ? '700' : '800', color: '#182033', ...(NATIVE ? { flex: 1 } : { flexGrow: 0, flexShrink: 1, flexBasis: 'auto' as const, width: 'auto' as const, textAlign: 'left' as const }) },
  body: { fontSize: 13, lineHeight: 20, color: '#64748b', ...(NATIVE ? { fontSize: 12, lineHeight: 17, fontWeight: '500' as const } : {}) },
  summary: { backgroundColor: '#F6F8FB', borderRadius: 20, padding: 20, gap: 8, borderWidth: 1, borderColor: '#EDF1F6', ...(NATIVE ? { padding: 12, gap: 6, borderRadius: 14 } : {}) },
  eyebrow: { fontSize: 10, letterSpacing: 1.1, fontWeight: '800', color: '#64748B', ...(NATIVE ? { fontSize: 10, letterSpacing: 0, fontWeight: '600' as const } : {}) },
- duration: { fontSize: 30, fontWeight: '800', color: '#182033', ...(NATIVE ? { fontSize: 23, lineHeight: 28, fontWeight: '700' as const } : {}) },
+ duration: { fontSize: NATIVE ? 30 : 24, fontWeight: '800', color: '#182033', ...(NATIVE ? { fontSize: 23, lineHeight: 28, fontWeight: '700' as const } : {}) },
  groups: { gap: 18 }, group: { gap: 9 }, groupLabel: { color: '#475569', fontSize: 12, fontWeight: '700' },
  options: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, ...(NATIVE ? { gap: 6 } : {}) },
  option: { paddingHorizontal: 14, paddingVertical: 12, borderRadius: 13, borderWidth: 1, borderColor: '#E2E8F0', backgroundColor: '#fff', minHeight: 44, alignItems: 'center', justifyContent: 'center', ...(NATIVE ? { width: '31.8%' as const, paddingHorizontal: 4, paddingVertical: 8, borderRadius: 11 } : {}) },

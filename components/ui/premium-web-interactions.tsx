@@ -65,7 +65,7 @@ export function PremiumWebInteractions({night}:{night:boolean}){
  /* Cards whose main action fills them: the whole card lights up, never just the inner hit area. */
  @media(hover:hover) and (pointer:fine){
   html body [data-premium-hover-card="true"]{transition:background-color 140ms ease,border-color 140ms ease;}
-  html body [data-premium-hover-card="true"]:has([data-premium-hover-primary="true"]:hover){background-color:${night?'rgba(216,194,155,.10)':'rgba(155,144,125,.10)'}!important;border-color:${night?'rgba(234,221,194,.42)':'rgba(99,115,100,.34)'}!important;}
+  html body [data-premium-hover-card="true"]:has([data-premium-hover-primary="true"]:hover){box-shadow:inset 0 0 0 1000px ${night?'rgba(255,255,255,.04)':'rgba(40,36,30,.03)'},0 10px 26px rgba(0,0,0,${night?'.38':'.12'})!important;border-color:${night?'rgba(255,255,255,.30)':'rgba(40,36,30,.28)'}!important;}
   html body [data-premium-hover-card="true"] [data-premium-hover-primary="true"]:hover{outline:none!important;filter:none!important;box-shadow:none!important;background-color:transparent!important;}
  }
  html body [data-premium-hover-card="true"]:has([data-premium-hover-primary="true"]:focus-visible){outline:2px solid ${night?'#D8C29B':'#55745E'};outline-offset:-2px;}

@@ -25,25 +25,29 @@ export function RequestsPremiumWorkspace({navigation,renderContent,rules,autoAcc
   handledToken.current=token;setFromSettings(true);setRulesOpen(true);
  },[token,pathname]);
  const wide=Platform.OS==='web'&&width>=1000;
- const surface={borderWidth:1,borderColor:p.border,borderRadius:18,backgroundColor:p.night?'rgba(35,39,40,.73)':'rgba(255,253,249,.65)'};
+ const surface={borderWidth:1,borderColor:p.border,borderRadius:19,backgroundColor:p.night?'rgba(38,41,43,.9)':'rgba(255,253,250,.86)'};
+ const gold=p.night?'#E2CFAA':'#7A5F38';
  const close=()=>{setRulesOpen(false);if(fromSettings){setFromSettings(false);router.navigate('/settings' as any);}};
+ // Coming from Settings keeps its own popup/sheet; otherwise the "Regole" tab swaps the view in place.
+ const rulesInline=rulesOpen&&!fromSettings;
+ const tab=(label:string,icon:React.ComponentProps<typeof Ionicons>['name'],active:boolean,onPress:()=>void,meta?:string)=><Pressable key={label} accessibilityRole="tab" accessibilityState={{selected:active}} onPress={onPress} style={{flex:wide?undefined:1,flexDirection:'row',alignItems:'center',justifyContent:'center',gap:7,minHeight:40,paddingHorizontal:wide?18:10,borderRadius:16,backgroundColor:active?p.action:'transparent'}}>
+  <Ionicons name={icon} size={15} color={active?p.actionText:p.ink}/>
+  <Text numberOfLines={1} style={{fontSize:13,fontWeight:'600',color:active?p.actionText:p.ink}}>{label}</Text>
+  {meta?<Text style={{fontSize:11,fontWeight:'600',color:active?p.actionText:gold,opacity:active?.75:1}}>{meta}</Text>:null}
+ </Pressable>;
  return <View style={{gap:14}}>
-  <View style={[surface,{flexDirection:'row',flexWrap:wide?'wrap':'nowrap',alignSelf:wide?'flex-start':'stretch',padding:4,borderRadius:22}]}>
-   {['Prenotazioni','Regole di prenotazione'].map((label,i)=><Pressable key={label} accessibilityRole="tab" accessibilityState={{selected:i===0&&!rulesOpen||i===1&&rulesOpen}} onPress={()=>setRulesOpen(i===1)} style={{flex:wide?undefined:1,alignItems:'center',paddingVertical:10,paddingHorizontal:wide?18:10,borderRadius:18,backgroundColor:(i===0&&!rulesOpen||i===1&&rulesOpen)?p.action:'transparent'}}><Text style={{fontSize:12,fontWeight:'600',color:(i===0&&!rulesOpen||i===1&&rulesOpen)?p.actionText:p.ink}}>{label}</Text></Pressable>)}
+  <View style={[surface,{flexDirection:'row',alignSelf:wide?'flex-start':'stretch',padding:4,borderRadius:21,gap:4}]}>
+   {tab('Prenotazioni','calendar-outline',!rulesInline,()=>setRulesOpen(false))}
+   {tab('Regole','options-outline',rulesInline,()=>setRulesOpen(true))}
   </View>
+  {rulesInline?<View style={[surface,{padding:wide?18:12,gap:16}]}>{rules}</View>:
   <View style={{flexDirection:wide?'row':'column',gap:14,alignItems:'stretch'}}>
-   <View style={[surface,{width:wide?310:'100%',overflow:'visible',padding:6,alignSelf:wide?'flex-start':'stretch'},wide?({position:'sticky',top:16} as any):null]}>{navigation}</View>
-   <View style={[surface,{flex:wide?1:undefined,minWidth:0,minHeight:wide?340:120,padding:wide?16:8}]}>{renderContent()}</View>
-  </View>
-  <View style={[surface,{padding:16,gap:14}]}>
-   <Pressable {...({dataSet:{premiumHoverScope:"container"}} as any)} accessibilityRole="button" accessibilityLabel="Modifica regole di prenotazione" accessibilityState={{expanded:rulesOpen}} onPress={()=>setRulesOpen(true)} style={{flexDirection:'row',alignItems:'center',gap:12}}>
-    <Ionicons name="options-outline" size={23} color={p.ink}/><Text style={{flex:1,fontSize:16,fontWeight:'500',color:p.ink}}>Regole di prenotazione</Text><View style={{flexDirection:'row',alignItems:'center',gap:6,paddingHorizontal:12,paddingVertical:9,borderRadius:10,backgroundColor:p.field,borderWidth:1,borderColor:p.border}}><Ionicons name="create-outline" size={16} color={p.ink}/><Text style={{fontSize:12,color:p.ink}}>Modifica</Text></View>
-   </Pressable>
-   <View style={{flexDirection:'row',flexWrap:'wrap',gap:10}}>{[{label:'Accettazione automatica',active:autoAccept,status:autoAccept?'Attiva':'Disattiva'},{label:'Slot guidati',active:guided,status:guided?'Attivi':'Disattivi'}].map(item=><Pressable key={item.label} accessibilityRole="button" accessibilityLabel={`${item.label}: ${item.status}. Apri impostazioni`} onPress={()=>setRulesOpen(true)} style={{flexDirection:'row',alignItems:'center',gap:12,paddingHorizontal:13,paddingVertical:11,borderRadius:12,borderWidth:1,borderColor:item.active?(p.night?'#6A8770':'#A6BFA9'):p.border,backgroundColor:item.active?(p.night?'rgba(128,165,138,.16)':'rgba(213,232,216,.64)'):p.field}}><Text style={{fontSize:12,color:p.ink,fontWeight:'500'}}>{item.label}</Text><View style={{flexDirection:'row',alignItems:'center',gap:5}}><Ionicons name={item.active?'checkmark-circle':'ellipse-outline'} size={16} color={item.active?(p.night?'#B9D7BF':'#40684A'):p.muted}/><Text style={{fontSize:11,fontWeight:'600',color:item.active?(p.night?'#B9D7BF':'#40684A'):p.muted}}>{item.status}</Text></View></Pressable>)}</View>
-   {Platform.OS==='web'&&rulesOpen&&!fromSettings?<View style={{borderTopWidth:1,borderTopColor:p.line,paddingTop:16,gap:16}}>{rules}</View>:null}
-  </View>
+   {/* Wide web: both panes stretch to the same height. */}
+   <View style={[surface,{width:wide?320:'100%',overflow:'visible',padding:6,alignSelf:'stretch',justifyContent:'center'}]}>{navigation}</View>
+   <View style={[wide?surface:null,{flex:wide?1:undefined,minWidth:0,alignSelf:'stretch',padding:wide?16:0}]}>{renderContent()}</View>
+  </View>}
   {Platform.OS==='web'&&rulesOpen&&fromSettings?<OwnerPremiumPopup title="Regole di prenotazione" icon="options-outline" onClose={close}>{rules}</OwnerPremiumPopup>:null}
-  <Modal supportedOrientations={TABLET_MODAL_ORIENTATIONS} visible={rulesOpen&&Platform.OS!=='web'} transparent animationType="fade" onRequestClose={close}>
+  <Modal supportedOrientations={TABLET_MODAL_ORIENTATIONS} visible={rulesOpen&&fromSettings&&Platform.OS!=='web'} transparent animationType="fade" onRequestClose={close}>
    {Platform.OS==='web'?<View style={{flex:1,flexDirection:'row',justifyContent:'flex-end',backgroundColor:p.night?'rgba(0,0,0,.38)':'rgba(45,39,30,.22)',...({backdropFilter:'blur(8px)'} as any)}}>
     <Pressable accessibilityLabel="Chiudi regole di prenotazione" onPress={close} style={{flex:1}}/>
     <View style={{width:Math.min(480,width-24),height:'100%',backgroundColor:p.night?'#202425':'#F5F1EB',borderLeftWidth:1,borderColor:p.border}}>

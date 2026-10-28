@@ -92,19 +92,22 @@ export function nativeRequestsStyles<T extends Record<string,any>>(base:T,p:Pale
  // Contact actions share the row equally, icon + label, like the rest of the back office.
  patch('compactActionChip',{flex:1,flexGrow:1,flexBasis:0,alignSelf:'stretch',flexDirection:'row',gap:7,minHeight:Platform.OS==='web'?38:44,paddingHorizontal:14,borderRadius:13});
  patch('compactActionsRow',{flexWrap:'nowrap',gap:8,marginTop:10});
+ patch('requestDetailField',{width:undefined,flexGrow:1,flexBasis:'45%',minWidth:0});
+ patch('compactDecisionBlock',{paddingHorizontal:14,paddingBottom:14,paddingTop:12,marginTop:0,gap:10,borderTopWidth:StyleSheet.hairlineWidth,borderTopColor:p.line,backgroundColor:'transparent'});
  for(const key of ['requestDetailPrimaryAction','requestDetailSecondaryAction'])patch(key,{flexDirection:'row',alignItems:'center',justifyContent:'center',gap:8});
  patch('compactActionChipText',{fontSize:13,lineHeight:18,fontWeight:'600'});
  patch('compactActionChipWhatsapp',{backgroundColor:sage,borderColor:p.border});
  patch('compactActionChipWhatsappText',{color:p.night?'#C3D8C6':'#416A4B'});
- const activeFill=p.night?'rgba(131,169,143,.18)':'rgba(216,234,220,.65)';
- const activeInk=p.night?'#C3DCC8':'#355F41';
- const activeBorder=p.night?'rgba(161,194,170,.36)':'rgba(112,151,123,.42)';
- const stopFill=p.night?'rgba(190,116,123,.15)':'rgba(246,224,226,.65)';
- const stopInk=p.night?'#E7B4B8':'#92434B';
- const stopBorder=p.night?'rgba(205,142,149,.34)':'rgba(184,120,128,.36)';
+ // One accent for the whole page: soft gold for "on/selected", neutral glass for the switch-off action.
+ const activeFill=p.night?'rgba(255,255,255,.07)':'rgba(255,255,255,.9)';
+ const activeInk=p.ink;
+ const activeBorder=p.night?'rgba(255,255,255,.30)':'rgba(40,40,38,.30)';
+ const stopFill=p.field;
+ const stopInk=p.ink;
+ const stopBorder=p.border;
  for(const key of ['autoAcceptBadgeOn','autoAcceptLiveRow','guidedSlotChipActive'])patch(key,{backgroundColor:activeFill,borderColor:activeBorder,borderWidth:1,shadowOpacity:0,elevation:0});
  for(const key of ['autoAcceptBadgeTextOn','autoAcceptLiveText','guidedSlotChipTextActive'])patch(key,{color:activeInk});
- patch('guidedSlotChoiceDescriptionActive',{color:p.night?'#BCD0C0':'#466451'});
+ patch('guidedSlotChoiceDescriptionActive',{color:p.muted});
  patch('guidedSlotRadio',{width:24,height:24,borderRadius:12,borderWidth:1.5,borderColor:p.night?'#8C948F':'#8A958D',backgroundColor:'transparent',flexShrink:0});
  patch('guidedSlotRadioActive',{backgroundColor:activeFill,borderColor:activeInk,borderWidth:2});
  patch('guidedSlotRecommendedBadge',{backgroundColor:p.night?'rgba(155,181,158,.16)':'rgba(242,248,240,.8)',borderRadius:7});
@@ -157,13 +160,26 @@ export function nativeRequestsStyles<T extends Record<string,any>>(base:T,p:Pale
   patch('requestDetailActions',{flexWrap:'wrap'});
  }
  if(Platform.OS==='web'){patch('autoAcceptToggle',{alignSelf:'flex-start',width:'auto',minWidth:0,maxWidth:'100%',paddingHorizontal:20,paddingVertical:10});patch('autoAcceptToggleText',{width:'auto',maxWidth:'100%',flexShrink:1});}
- // Rule cards read left-aligned like every other back-office card; the info button keeps the top-right corner.
- patch('autoAcceptCard',{alignItems:'stretch'});
- patch('autoAcceptHeaderRow',{alignItems:'flex-start',justifyContent:'flex-start'});
- patch('autoAcceptHeaderTextWrap',{alignItems:'flex-start',paddingRight:44});
- patch('autoAcceptTitle',{textAlign:'left',paddingHorizontal:0,marginBottom:4});
- patch('autoAcceptHint',{textAlign:'left',fontWeight:'400',color:p.muted});
- for(const key of ['autoAcceptLiveRow','autoAcceptBadge'])patch(key,{alignSelf:'flex-start'});
+ // Rule cards: settings rows — medallion, title + info, description, switch on the right; choices as compact lists.
+ const lift=p.night?'rgba(46,49,50,.92)':'rgba(255,253,250,.92)';
+ patch('autoAcceptCard',{alignItems:'stretch',backgroundColor:lift,borderWidth:1,borderColor:p.border,borderRadius:19,paddingHorizontal:16,paddingVertical:16,marginBottom:12,shadowColor:'#000',shadowOpacity:p.night?.3:.08,shadowRadius:12,shadowOffset:{width:0,height:5},elevation:3});
+ patch('autoAcceptHeaderRow',{flexDirection:'row',alignItems:'flex-start',justifyContent:'flex-start',gap:12,paddingRight:64});
+ patch('autoAcceptHeaderTextWrap',{flex:1,width:undefined,alignItems:'flex-start',paddingRight:0,gap:2});
+ patch('autoAcceptTitle',{textAlign:'left',paddingHorizontal:0,marginBottom:0,fontSize:16,lineHeight:22});
+ patch('autoAcceptHint',{textAlign:'left',fontWeight:'400',color:p.muted,fontSize:12,lineHeight:18});
+ patch('autoAcceptLiveRow',{alignSelf:'flex-start',marginTop:6});
+ patch('autoAcceptBadge',{display:'none'});
+ const track={position:'absolute',top:20,right:16,width:54,height:32,minHeight:32,minWidth:0,maxWidth:54,borderRadius:16,paddingHorizontal:4,paddingVertical:0,marginTop:0,alignSelf:'auto',justifyContent:'center',alignItems:'stretch',shadowOpacity:0,elevation:0};
+ patch('autoAcceptToggle',track);
+ // Neutral switch: light track when on (dark mode), dark track when on (light mode) — no yellow.
+ patch('autoAcceptToggleOn',{backgroundColor:p.night?'#9C8461':'#7A6446',borderColor:p.night?'#9C8461':'#7A6446',borderWidth:1});
+ patch('autoAcceptToggleOff',{backgroundColor:p.field,borderColor:p.border,borderWidth:1});
+ patch('guidedSlotOptionGroup',{alignItems:'stretch',gap:8,marginTop:16});
+ patch('guidedSlotOptionLabel',{textAlign:'left',fontSize:11,lineHeight:16,letterSpacing:.8,textTransform:'uppercase',color:p.muted,fontWeight:'600'});
+ patch('guidedSlotChip',{borderRadius:14,borderWidth:1,borderColor:p.border,backgroundColor:p.field,minHeight:58});
+ patch('guidedSlotChipActive',{backgroundColor:activeFill,borderColor:activeBorder});
+ patch('guidedSlotRecommendedBadge',{backgroundColor:p.night?'rgba(255,255,255,.08)':'rgba(40,40,38,.06)',borderColor:p.border});
+ patch('guidedSlotRecommendedBadgeText',{color:p.muted});
  if(result.archiveMonthList)Object.assign(result.archiveMonthList,{backgroundColor:'transparent',padding:0,gap:8,borderWidth:0});
  if(result.archiveMonthSection)Object.assign(result.archiveMonthSection,{backgroundColor:p.field,borderWidth:1,borderColor:p.border,borderRadius:14,overflow:'hidden'});
  if(result.archiveMonthHeader)Object.assign(result.archiveMonthHeader,{paddingHorizontal:14,paddingVertical:12,minHeight:54,backgroundColor:'transparent',borderWidth:0});

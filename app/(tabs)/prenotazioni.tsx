@@ -9,6 +9,7 @@ import { RequestsArchiveBrowser } from '../../components/requests-archive-browse
 import { RequestsPremiumWorkspace } from '../../components/requests-premium-workspace';
 import { OwnerPremiumSheetFrame } from '../../components/owner-premium-sheet';
 import { NativeRequestsHeader, RequestsWebSummary, nativeRequestsStyles } from '../../components/owner-premium-requests';
+import { NativeMedal } from '../../components/owner-premium-native-home';
 import { useAccessAppearance } from '../../components/access-premium';
 import { NativeSheetHandle } from '../../components/ui/native-sheet-drag';
 import { DockedSheetSurface } from '../../components/ui/docked-sheet-surface';
@@ -26,6 +27,7 @@ import React, {
   useState,
 } from "react";
 import {
+  ActivityIndicator,
   Alert,
   Keyboard,
   LayoutAnimation,
@@ -4333,6 +4335,40 @@ export default function PrenotazioniScreen() {
         ? getAutoAcceptRemainingSeconds(item, autoAcceptNowMs)
         : null;
 
+    const rp = premiumRequestsPalette;
+    const goldInk = rp.night ? "#E2CFAA" : "#7A5F38";
+    const statusLabel =
+      variant === "pending"
+        ? item.stato === "Annullata"
+          ? "Annullata"
+          : "In attesa"
+        : historyLabel;
+    // Status is a quiet dot + word: gold while waiting, muted when settled, rose when cancelled.
+    const statusTone =
+      variant === "pending" && item.stato !== "Annullata"
+        ? goldInk
+        : historyDanger || item.stato === "Annullata"
+          ? (rp.night ? "#D9A3A8" : "#9A4B53")
+          : rp.ink;
+    const [weekdayLabel = "", dayLabel = "", monthLabel = ""] = formatDateLong(item.data).split(" ");
+    const contactButton = (
+      icon: React.ComponentProps<typeof Ionicons>["name"],
+      label: string,
+      onPress: () => void,
+    ) => (
+      <HapticTouchable
+        key={label}
+        accessibilityRole="button"
+        accessibilityLabel={`${label} ${item.nome} ${item.cognome}`.trim()}
+        onPress={onPress}
+        pressScale={0.94}
+        pressOpacity={0.9}
+        style={{ borderRadius: 20 }}
+      >
+        <NativeMedal icon={icon} size={40} iconSize={17} />
+      </HapticTouchable>
+    );
+
     return (
       <Animated.View
         key={item.id}
@@ -4342,191 +4378,96 @@ export default function PrenotazioniScreen() {
             node as unknown as View | null,
           )
         }
+        {...(IS_WEB ? ({ dataSet: { premiumHoverCard: "true" } } as object) : {})}
         layout={LinearTransition.duration(150).easing(Easing.out(Easing.cubic))}
-        style={[
-          styles.compactRequestCard,
-          isUnread && styles.compactRequestCardUnread,
-        ]}
+        style={{
+          borderRadius: 18,
+          borderWidth: 1,
+          borderColor: isUnread ? (rp.night ? "rgba(216,194,155,.5)" : "rgba(150,118,72,.42)") : (rp.night ? "rgba(255,255,255,.12)" : "rgba(40,36,30,.12)"),
+          backgroundColor: rp.night ? "#2E3133" : "#FFFDFA",
+          marginBottom: 12,
+          shadowColor: "#000",
+          shadowOpacity: rp.night ? 0.38 : 0.1,
+          shadowRadius: 14,
+          shadowOffset: { width: 0, height: 6 },
+          elevation: 4,
+        }}
       >
-        <HapticTouchable
-          style={styles.requestCardTapArea}
-          onPress={() => {
-            haptic.light();
-            setSelectedRequest(item);
-          }}
-          pressScale={0.992}
-          pressOpacity={0.96}
-        >
-          <View style={styles.compactRequestTopRow}>
-            <View style={styles.compactRequestTitleWrap}>
-              <View style={styles.requestCardNameRow}>
-                {isUnread ? <View style={styles.requestUnreadDot} /> : null}
-                <Text style={styles.compactRequestName} numberOfLines={IS_WEB ? undefined : 1}>
+        {/* Soft top sheen: the card catches light like the Home glass cards. */}
+        <View pointerEvents="none" style={[{ position: "absolute", top: 0, left: 0, right: 0, height: IS_WEB ? "70%" : 1, borderTopLeftRadius: 17, borderTopRightRadius: 17, backgroundColor: rp.night ? "rgba(255,255,255,.10)" : "rgba(255,255,255,.9)" }, IS_WEB ? ({ backgroundColor: "transparent", backgroundImage: rp.night ? "linear-gradient(180deg, rgba(255,255,255,.055), rgba(255,255,255,0))" : "linear-gradient(180deg, rgba(255,255,255,.8), rgba(255,255,255,0))" } as object) : null]} />
+        <View style={{ flexDirection: "row", alignItems: "stretch" }}>
+          <HapticTouchable
+            {...(IS_WEB ? ({ dataSet: { premiumHoverPrimary: "true" } } as object) : {})}
+            accessibilityRole="button"
+            accessibilityLabel={`Apri ${item.nome} ${item.cognome}, ${logicalTitle}, ${formatDateLong(item.data)} ${item.ora}`}
+            style={{ flex: 1, minWidth: 0, flexDirection: "row", alignItems: "stretch" }}
+            onPress={() => {
+              haptic.light();
+              setSelectedRequest(item);
+            }}
+            pressScale={0.992}
+            pressOpacity={0.96}
+          >
+            <View style={{ width: 76, alignItems: "center", justifyContent: "center", gap: 2, paddingVertical: 14, margin: 6, marginRight: 0, borderRadius: 13, backgroundColor: rp.night ? "rgba(255,255,255,.06)" : "rgba(40,36,30,.05)", borderWidth: 1, borderColor: rp.night ? "rgba(255,255,255,.12)" : "rgba(40,36,30,.12)" }}>
+              <Text style={{ fontSize: 18, lineHeight: 23, fontWeight: "600", color: rp.ink, fontVariant: ["tabular-nums"] }}>{item.ora}</Text>
+              <Text style={{ fontSize: 11, lineHeight: 14, color: rp.ink, fontWeight: "600", opacity: 0.8 }}>{weekdayLabel}</Text>
+              <Text style={{ fontSize: 11, lineHeight: 14, color: rp.muted }}>{dayLabel} {monthLabel}</Text>
+            </View>
+            <View style={{ flex: 1, minWidth: 0, paddingVertical: 13, paddingLeft: 14, paddingRight: 10, gap: 3 }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>
+                {isUnread ? <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: goldInk }} /> : null}
+                <Text style={{ flex: 1, minWidth: 0, fontSize: 16, lineHeight: 21, fontWeight: "600", color: rp.ink }} numberOfLines={1}>
                   {item.nome} {item.cognome}
                 </Text>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 5, flexShrink: 0 }}>
+                  <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: statusTone }} />
+                  <Text style={{ fontSize: 11, lineHeight: 15, fontWeight: "600", color: statusTone }} numberOfLines={1}>{statusLabel}</Text>
+                </View>
               </View>
-              <Text style={styles.compactRequestService} numberOfLines={IS_WEB ? undefined : 1}>
+              <Text style={{ fontSize: 13, lineHeight: 18, color: rp.ink, opacity: 0.86 }} numberOfLines={IS_WEB ? 2 : 1}>
                 {logicalTitle}
               </Text>
-              <View
-                style={[
-                  styles.compactStatusBadge,
-                  styles.compactStatusBadgeInline,
-                  variant === "pending" && item.stato !== "Annullata"
-                    ? styles.compactStatusBadgePending
-                    : historyDanger
-                      ? styles.compactStatusBadgeDanger
-                      : styles.compactStatusBadgeSuccess,
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.compactStatusBadgeText,
-                    variant === "pending" && item.stato !== "Annullata"
-                      ? styles.compactStatusBadgeTextPending
-                      : historyDanger
-                        ? styles.compactStatusBadgeTextDanger
-                        : styles.compactStatusBadgeTextSuccess,
-                  ]}
-                >
-                  {variant === "pending"
-                    ? item.stato === "Annullata"
-                      ? "Annullata"
-                      : "In attesa"
-                    : historyLabel}
-                </Text>
-              </View>
-              {item.operatoreNome ? (
-                <View style={{flexDirection:"row",alignItems:"center",gap:5}}>
-                  <Ionicons name="cut-outline" size={13} color={premiumRequestsPalette.muted} />
-                  <Text style={styles.compactRequestMeta} numberOfLines={1}>
-                    {item.operatoreNome}
-                  </Text>
+              {logicalKindLabel ? (
+                <View style={{ gap: 2, marginTop: 2 }}>
+                  {logicalMembers.map((member) => {
+                    const phaseConfig = normalizeServicePhaseConfig(member.phaseConfig);
+                    return (
+                      <View key={member.id} style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                        <Ionicons name={logicalKindIcon} size={12} color={goldInk} />
+                        <Text style={{ flex: 1, minWidth: 0, fontSize: 12, lineHeight: 16, color: rp.muted }} numberOfLines={1}>
+                          {logicalMembers.length > 1 ? `${member.ora} · ${member.servizio}` : logicalKindLabel.charAt(0) + logicalKindLabel.slice(1).toLowerCase()}
+                          {phaseConfig?.processingDurationMinutes ? ` · posa ${phaseConfig.processingDurationMinutes} min` : ""}
+                        </Text>
+                      </View>
+                    );
+                  })}
                 </View>
               ) : null}
-            </View>
-            <View style={styles.compactStatusWrap}>
-              <View style={styles.compactTimePill}>
-                <Ionicons name="time-outline" size={12} color={premiumRequestsPalette.ink} />
-                <Text style={styles.compactTimePillText}>{item.ora}</Text>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 3 }}>
+                {item.operatoreNome ? (
+                  <>
+                    <Ionicons name="cut-outline" size={12} color={rp.muted} />
+                    <Text style={{ fontSize: 12, lineHeight: 16, color: rp.muted, flexShrink: 1 }} numberOfLines={1}>{item.operatoreNome}</Text>
+                    <Text style={{ fontSize: 12, color: rp.muted }}>·</Text>
+                  </>
+                ) : null}
+                <Text style={{ fontSize: 12, lineHeight: 16, color: rp.ink, fontWeight: "600", fontVariant: ["tabular-nums"] }}>€ {item.prezzo.toFixed(2).replace(".", ",")}</Text>
+                {autoAcceptRemainingSeconds !== null ? (
+                  <Text style={{ fontSize: 12, lineHeight: 16, color: goldInk, fontWeight: "600" }}>· auto {autoAcceptRemainingSeconds}s</Text>
+                ) : null}
               </View>
-              {autoAcceptRemainingSeconds !== null ? (
-                <View style={styles.compactCountdownBadge}>
-                  <Ionicons name="timer-outline" size={11} color="#0f766e" />
-                  <Text style={styles.compactCountdownBadgeText}>
-                    {autoAcceptRemainingSeconds}s
-                  </Text>
-                </View>
+              {visibleRequestNote(item.note) ? (
+                <Text style={{ fontSize: 12, lineHeight: 17, color: rp.muted, fontStyle: "italic", marginTop: 2 }} numberOfLines={IS_WEB ? undefined : 1}>
+                  “{visibleRequestNote(item.note)}”
+                </Text>
               ) : null}
             </View>
-          </View>
-
-          {logicalKindLabel ? (
-            <View style={styles.logicalRequestTimelineCard}>
-              <View style={styles.logicalRequestTimelineHeading}>
-                <Ionicons name={logicalKindIcon} size={17} color={premiumRequestsPalette.night ? "#E2CFAA" : "#7A5F38"} />
-                <Text style={styles.logicalRequestTimelineEyebrow}>
-                  {logicalKindLabel}
-                </Text>
-              </View>
-              {logicalMembers.map((member) => {
-                const phaseConfig = normalizeServicePhaseConfig(
-                  member.phaseConfig,
-                );
-                return (
-                  <View key={member.id} style={styles.logicalRequestTimelineRow}>
-                    <View style={styles.logicalRequestTimelineDot} />
-                    <Text
-                      style={styles.logicalRequestTimelineService}
-                      numberOfLines={IS_WEB ? undefined : 1}
-                    >
-                      {member.servizio}
-                    </Text>
-                    <Text style={styles.logicalRequestTimelineTime}>
-                      {member.ora}
-                    </Text>
-                    {phaseConfig?.processingDurationMinutes ? (
-                      <Text style={styles.logicalRequestTimelinePause}>
-                        Posa {phaseConfig.processingDurationMinutes} min
-                      </Text>
-                    ) : null}
-                  </View>
-                );
-              })}
-            </View>
-          ) : null}
-
-          <View style={styles.compactSummaryRow}>
-            <View style={styles.compactInfoPill}>
-              <Ionicons name="calendar-outline" size={12} color={premiumRequestsPalette.ink} />
-              <Text style={styles.compactInfoPillValue} numberOfLines={IS_WEB ? undefined : 1}>
-                {formatDateLong(item.data)}
-              </Text>
-            </View>
-            <View style={[styles.compactInfoPill, styles.compactInfoPillPrice]}>
-              <Ionicons name="card-outline" size={12} color={premiumRequestsPalette.ink} />
-              <Text style={styles.compactInfoPillValue}>
-                € {item.prezzo.toFixed(2)}
-              </Text>
-            </View>
-          </View>
-
-          {visibleRequestNote(item.note) ? (
-            <Text style={styles.requestCardInlineNote} numberOfLines={IS_WEB ? undefined : 1}>
-              {visibleRequestNote(item.note)}
-            </Text>
-          ) : null}
-        </HapticTouchable>
-
-        <View style={styles.compactActionsRow}>
-          <HapticTouchable
-            style={styles.compactActionChip}
-            onPress={() =>
-              openExternalUrl(`tel:${buildDialablePhone(item.telefono)}`)
-            }
-            pressScale={0.97}
-            pressOpacity={0.98}
-          >
-            <Ionicons name="call-outline" size={15} color={premiumRequestsPalette.ink} />
-            <Text style={styles.compactActionChipText}>Chiama</Text>
           </HapticTouchable>
-          <HapticTouchable
-            style={[styles.compactActionChip, styles.compactActionChipWhatsapp]}
-            onPress={() => openExternalUrl(buildWhatsappUrl(item.telefono))}
-            pressScale={0.97}
-            pressOpacity={0.98}
-          >
-            <Ionicons name="logo-whatsapp" size={15} color={premiumRequestsPalette.night ? "#C3D8C6" : "#416A4B"} />
-            <Text
-              style={[
-                styles.compactActionChipText,
-                styles.compactActionChipWhatsappText,
-              ]}
-            >
-              WhatsApp
-            </Text>
-          </HapticTouchable>
-          {item.instagram ? (
-            <HapticTouchable
-              style={[
-                styles.compactActionChip,
-                styles.compactActionChipInstagram,
-              ]}
-              onPress={() => openExternalUrl(buildInstagramUrl(item.instagram))}
-              pressScale={0.97}
-              pressOpacity={0.98}
-            >
-              <Ionicons name="logo-instagram" size={15} color={premiumRequestsPalette.ink} />
-              <Text
-                style={[
-                  styles.compactActionChipText,
-                  styles.compactActionChipInstagramText,
-                ]}
-              >
-                Instagram
-              </Text>
-            </HapticTouchable>
-          ) : null}
+          <View style={{ justifyContent: "center", gap: 8, paddingRight: 12, paddingLeft: 2, paddingVertical: 12 }}>
+            {contactButton("call-outline", "Chiama", () => openExternalUrl(`tel:${buildDialablePhone(item.telefono)}`))}
+            {contactButton("logo-whatsapp", "WhatsApp", () => openExternalUrl(buildWhatsappUrl(item.telefono)))}
+            {item.instagram ? contactButton("logo-instagram", "Instagram", () => openExternalUrl(buildInstagramUrl(item.instagram))) : null}
+          </View>
         </View>
 
         {variant === "pending" && item.stato !== "Annullata" ? (
@@ -5352,7 +5293,7 @@ export default function PrenotazioniScreen() {
           styles.accordionSection,
           responsive.isDesktop && styles.wideCard,
           IS_WEB && styles.webAccordionSection,
-          {marginBottom:0,paddingHorizontal:8,paddingVertical:2,borderRadius:14,borderWidth:1,borderColor:workspaceSection===sectionKey&&expanded?(premiumRequestsPalette.night?"rgba(216,194,155,.30)":"rgba(150,118,72,.28)"):"transparent",backgroundColor:workspaceSection===sectionKey&&expanded?premiumRequestsPalette.night?"rgba(211,188,145,.11)":"rgba(217,196,157,.26)":"transparent",minHeight:50,shadowOpacity:0,elevation:0},
+          {marginBottom:0,paddingHorizontal:8,paddingVertical:1,borderRadius:13,borderWidth:0,borderTopWidth:0,backgroundColor:workspaceSection===sectionKey&&expanded?premiumRequestsPalette.night?"rgba(216,194,155,.10)":"rgba(189,165,127,.16)":"transparent",minHeight:52,shadowOpacity:0,elevation:0},
         ]}
       >
         {unreadCount > 0 ? (
@@ -5379,15 +5320,13 @@ export default function PrenotazioniScreen() {
               style={styles.nativeSectionToggle}
             >
               <View style={[styles.nativeSectionHeading,{flexDirection:'row',alignItems:'center',gap:10}]}>
-                <View style={{width:34,height:34,borderRadius:17,alignItems:'center',justifyContent:'center',backgroundColor:premiumRequestsPalette.night?'rgba(216,194,155,.10)':'rgba(189,165,127,.14)',borderWidth:1,borderColor:premiumRequestsPalette.night?'rgba(216,194,155,.26)':'rgba(150,118,72,.24)'}}><Ionicons name={({pending:'time-outline',customerConfirmation:'hourglass-outline',accepted:'calendar-outline',cancelled:'person-outline',salonDeclined:'ban-outline',archive:'archive-outline'} as Record<string,React.ComponentProps<typeof Ionicons>['name']>)[sectionKey]??'albums-outline'} size={17} color={premiumRequestsPalette.night?'#E2CFAA':'#7A5F38'}/></View>
+                <NativeMedal icon={({pending:'notifications-outline',customerConfirmation:'hourglass-outline',accepted:'checkmark-done-outline',cancelled:'person-remove-outline',salonDeclined:'storefront-outline',archive:'archive-outline'} as Record<string,React.ComponentProps<typeof Ionicons>['name']>)[sectionKey]??'albums-outline'} size={34} iconSize={16}/>
                 <PremiumFitLabel fontSize={13} minFontSize={11} style={[styles.accordionTitle,{lineHeight:18,fontWeight:"500"}]}>{title}</PremiumFitLabel>
               </View>
               {unreadCount > 0 ? <Text style={styles.nativeSectionUnread}>{unreadCount} da leggere</Text> : null}
             </HapticTouchable>
 
-                <View style={styles.nativeSectionCount}>
-                  <Text style={styles.nativeSectionCountText}>{count}</Text>
-                </View>
+                <Text style={[styles.nativeSectionCountText,{minWidth:24,textAlign:'right',fontSize:14,color:count>0&&sectionKey==='pending'?(premiumRequestsPalette.night?'#E2CFAA':'#7A5F38'):premiumRequestsPalette.muted}]}>{count}</Text>
             <HapticTouchable
               immediatePress
               onPress={() => selectWorkspaceSection(sectionKey)}
@@ -5504,16 +5443,6 @@ export default function PrenotazioniScreen() {
   const bookingRulesContent=(<>
           <View style={[styles.heroCard, { marginTop: 0 }]}>
             <View style={styles.autoAcceptCard}>
-              <PremiumGuideDock tone={{ink:premiumRequestsPalette.ink,fill:premiumRequestsPalette.field,border:premiumRequestsPalette.border}}
-                guideOpen={bookingSettingsHelpOpen === "auto_accept"}
-                cutoutColor={IS_WEB?"#F3F6FA":premiumRequestsPalette.night?"#26292B":"#F7F4EF"}
-                onGuidePress={() => {
-                  setBookingSettingsHelpOpen((current) =>
-                    current === "auto_accept" ? null : "auto_accept",
-                  );
-                }}
-                guideAccessibilityLabel="Come funziona Accettazione automatica"
-              />
 
               <View
                 style={[
@@ -5521,7 +5450,9 @@ export default function PrenotazioniScreen() {
                   !responsive.isDesktop && styles.autoAcceptHeaderRowCompact,
                 ]}
               >
+                <NativeMedal icon="flash-outline" size={40} iconSize={18}/>
                 <View style={styles.autoAcceptHeaderTextWrap}>
+                  <View style={{flexDirection:"row",alignItems:"center",gap:8}}>
                   <Text
                     style={styles.autoAcceptTitle}
                     numberOfLines={IS_WEB?undefined:2}
@@ -5530,6 +5461,8 @@ export default function PrenotazioniScreen() {
                   >
                     Accettazione automatica
                   </Text>
+                  <HapticTouchable accessibilityRole="button" accessibilityLabel="Come funziona Accettazione automatica" hitSlop={8} onPress={() => setBookingSettingsHelpOpen((current) => current === "auto_accept" ? null : "auto_accept")} style={{width:24,height:24,borderRadius:12,alignItems:"center",justifyContent:"center",backgroundColor:premiumRequestsPalette.field}}><Ionicons name="information" size={14} color={premiumRequestsPalette.muted}/></HapticTouchable>
+                  </View>
                   <Text
                     style={styles.autoAcceptHint}
                     numberOfLines={IS_WEB?undefined:3}
@@ -5590,7 +5523,7 @@ export default function PrenotazioniScreen() {
 
 
 
-              <HapticTouchable webHoverLift
+              <HapticTouchable webHoverLift accessibilityRole="switch"
                 style={[
                   styles.autoAcceptToggle,
                   autoAcceptAuthorityConfirmed &&
@@ -5687,39 +5620,11 @@ export default function PrenotazioniScreen() {
                 pressScale={0.975}
                 pressOpacity={0.98}
               >
-                <Text
-                  numberOfLines={IS_WEB?undefined:2}
-                  adjustsFontSizeToFit
-                  minimumFontScale={0.78}
-                  style={[
-                    styles.autoAcceptToggleText,
-                    autoAcceptAuthorityConfirmed &&
-                    !autoAcceptControlBusy &&
-                    displayedAutoAcceptBookingRequests
-                      ? styles.autoAcceptToggleTextOn
-                      : styles.autoAcceptToggleTextOff,
-                  ]}
-                >
-                  {autoAcceptSaving
-                    ? "Salvataggio in corso..."
-                    : displayedAutoAcceptBookingRequests
-                      ? "Disattiva accettazione automatica"
-                      : "Attiva accettazione automatica (15s)"}
-                </Text>
+                {autoAcceptSaving ? <ActivityIndicator size="small" color={premiumRequestsPalette.ink} /> : <View style={{width:24,height:24,borderRadius:12,backgroundColor:displayedAutoAcceptBookingRequests?"#F4EFE6":premiumRequestsPalette.muted,alignSelf:displayedAutoAcceptBookingRequests?"flex-end":"flex-start",shadowColor:"#000",shadowOpacity:.25,shadowRadius:3,shadowOffset:{width:0,height:1}}} />}
               </HapticTouchable>
             </View>
 
             <View style={styles.autoAcceptCard}>
-              <PremiumGuideDock tone={{ink:premiumRequestsPalette.ink,fill:premiumRequestsPalette.field,border:premiumRequestsPalette.border}}
-                guideOpen={bookingSettingsHelpOpen === "guided_slots"}
-                cutoutColor={IS_WEB?"#F3F6FA":premiumRequestsPalette.night?"#26292B":"#F7F4EF"}
-                onGuidePress={() => {
-                  setBookingSettingsHelpOpen((current) =>
-                    current === "guided_slots" ? null : "guided_slots",
-                  );
-                }}
-                guideAccessibilityLabel="Come funzionano gli Slot guidati"
-              />
 
               <View
                 style={[
@@ -5727,7 +5632,9 @@ export default function PrenotazioniScreen() {
                   !responsive.isDesktop && styles.autoAcceptHeaderRowCompact,
                 ]}
               >
+                <NativeMedal icon="sparkles-outline" size={40} iconSize={18}/>
                 <View style={styles.autoAcceptHeaderTextWrap}>
+                  <View style={{flexDirection:"row",alignItems:"center",gap:8}}>
                   <Text
                     style={styles.autoAcceptTitle}
                     numberOfLines={IS_WEB?undefined:2}
@@ -5736,6 +5643,8 @@ export default function PrenotazioniScreen() {
                   >
                     Slot guidati
                   </Text>
+                  <HapticTouchable accessibilityRole="button" accessibilityLabel="Come funzionano gli Slot guidati" hitSlop={8} onPress={() => setBookingSettingsHelpOpen((current) => current === "guided_slots" ? null : "guided_slots")} style={{width:24,height:24,borderRadius:12,alignItems:"center",justifyContent:"center",backgroundColor:premiumRequestsPalette.field}}><Ionicons name="information" size={14} color={premiumRequestsPalette.muted}/></HapticTouchable>
+                  </View>
                   <Text
                     style={styles.autoAcceptHint}
                     numberOfLines={IS_WEB?undefined:4}
@@ -5775,7 +5684,7 @@ export default function PrenotazioniScreen() {
 
 
 
-              <HapticTouchable webHoverLift
+              <HapticTouchable webHoverLift accessibilityRole="switch"
                 style={[
                   styles.autoAcceptToggle,
                   displayedGuidedSlotsEnabled
@@ -5804,211 +5713,91 @@ export default function PrenotazioniScreen() {
                 pressScale={0.975}
                 pressOpacity={0.98}
               >
-                <Text
-                  numberOfLines={IS_WEB?undefined:2}
-                  adjustsFontSizeToFit
-                  minimumFontScale={0.78}
-                  style={[
-                    styles.autoAcceptToggleText,
-                    displayedGuidedSlotsEnabled
-                      ? styles.autoAcceptToggleTextOn
-                      : styles.autoAcceptToggleTextOff,
-                  ]}
-                >
-                  {displayedGuidedSlotsEnabled
-                    ? "Disattiva slot guidati"
-                    : "Attiva slot guidati"}
-                </Text>
+                {guidedSaving ? <ActivityIndicator size="small" color={premiumRequestsPalette.ink} /> : <View style={{width:24,height:24,borderRadius:12,backgroundColor:displayedGuidedSlotsEnabled?"#F4EFE6":premiumRequestsPalette.muted,alignSelf:displayedGuidedSlotsEnabled?"flex-end":"flex-start",shadowColor:"#000",shadowOpacity:.25,shadowRadius:3,shadowOffset:{width:0,height:1}}} />}
               </HapticTouchable>
 
-              <View {...(IS_WEB?({dataSet:{requestsRuleColumns:"true"}} as any):{})} style={{width:'100%'}}>
-              <View {...(IS_WEB?({dataSet:{requestsRuleGroup:"strategy"}} as any):{})} style={[styles.guidedSlotOptionGroup, undefined]}>
-                <Text style={[styles.guidedSlotOptionLabel, IS_WEB && { width: "100%", textAlign: "center" }]}>
-                  1. Strategia del salone
-                </Text>
-                {[
-                  [{ key: "intelligent", label: "Consigliati intelligenti" }],
-                  [
-                    { key: "balanced", label: "Equilibrata" },
-                  ], [
-                    { key: "protect_long_services", label: "Proteggi lunghi" },
-                  ],
-                  [{ key: "fill_gaps", label: "Riempi buchi" }],
-                ].map((row, rowIndex) => (
-                  <View
-                    key={`guided-strategy-row-${rowIndex}`}
-                    style={[
-                      styles.guidedSlotExplicitRow,
-                      styles.guidedSlotExplicitRowSingle,
-                      undefined,
-                    ]}
+              {(() => {
+                // Two configuration panels as icon tiles: one row per panel on wide web, a compact list in the app.
+                const rp = premiumRequestsPalette;
+                const tilesInRow = IS_WEB && responsive.width >= 1000;
+                // Muted bronze: the selection accent, neither yellow nor white.
+                const bronze = rp.night ? "#9C8461" : "#7A6446";
+                const disabled = !displayedGuidedSlotsEnabled || guidedSaving;
+                type GuidedOption = { key: string; label: string; hint: string; icon: React.ComponentProps<typeof Ionicons>["name"]; recommended?: boolean };
+                const strategyOptions: GuidedOption[] = [
+                  { key: "intelligent", label: "Consigliati intelligenti", icon: "sparkles-outline", recommended: true, hint: "Confronta spazi liberi e durata dei servizi online per ridurre i buchi." },
+                  { key: "balanced", label: "Equilibrata", icon: "git-compare-outline", hint: "Distribuisce gli appuntamenti in modo uniforme." },
+                  { key: "protect_long_services", label: "Proteggi lunghi", icon: "hourglass-outline", hint: "Tiene spazio libero per i servizi lunghi." },
+                  { key: "fill_gaps", label: "Riempi buchi", icon: "grid-outline", hint: "Privilegia gli spazi liberi tra gli appuntamenti." },
+                ];
+                const visibilityOptions: GuidedOption[] = [
+                  { key: "recommended_and_all", label: "Consigliati + tutti", icon: "albums-outline", recommended: displayedGuidedSlotsStrategy === "intelligent", hint: "I consigliati in evidenza, insieme a tutti gli orari." },
+                  { key: "recommended_first", label: "Prima i consigliati", icon: "trending-up-outline", hint: "Mostra per primi gli orari consigliati." },
+                  { key: "recommended_only", label: "Solo consigliati", icon: "star-outline", hint: "Il cliente vede soltanto gli orari consigliati." },
+                ];
+                const tile = (option: GuidedOption, active: boolean, onSelect: () => void, count: number) => (
+                  <HapticTouchable webHoverLift
+                    key={option.key}
+                    accessibilityRole="radio"
+                    accessibilityLabel={`${option.label}. ${option.hint}`}
+                    accessibilityState={{ checked: active, disabled }}
+                    disabled={disabled}
+                    onPress={() => { if (!disabled && !active) onSelect(); }}
+                    pressScale={0.98}
+                    pressOpacity={0.95}
+                    style={{
+                      flexBasis: tilesInRow ? `${100 / count - 2}%` : "100%",
+                      flexGrow: 1,
+                      minWidth: 0,
+                      flexDirection: tilesInRow ? "column" : "row",
+                      alignItems: tilesInRow ? "flex-start" : "center",
+                      gap: tilesInRow ? 12 : 12,
+                      padding: tilesInRow ? 16 : 13,
+                      minHeight: tilesInRow ? 150 : 64,
+                      borderRadius: 16,
+                      borderWidth: 1,
+                      borderColor: active ? bronze : rp.line,
+                      backgroundColor: active ? (rp.night ? "rgba(156,132,97,.10)" : "rgba(122,100,70,.07)") : (rp.night ? "rgba(255,255,255,.02)" : "rgba(255,255,255,.4)"),
+                      opacity: disabled ? 0.5 : 1,
+                      shadowColor: "#000",
+                      shadowOpacity: active ? (rp.night ? 0.35 : 0.08) : 0,
+                      shadowRadius: 10,
+                      shadowOffset: { width: 0, height: 4 },
+                    }}
                   >
-                    {row.map((option) => {
-                      const active =
-                        displayedGuidedSlotsStrategy === option.key;
-                      return (
-                        <HapticTouchable webHoverLift
-                          key={option.key}
-                          accessibilityRole="radio"
-                          accessibilityState={{ checked: active, disabled: !displayedGuidedSlotsEnabled || guidedSaving }}
-                          style={[
-                            styles.guidedSlotChip,
-                            styles.guidedSlotChoiceFull,
-                            IS_WEB && responsive.isDesktop && { flex: 1 },
-                            active && styles.guidedSlotChipActive,
-                            !displayedGuidedSlotsEnabled &&
-                              styles.guidedSlotChipDisabled,
-                          ]}
-disabled={!displayedGuidedSlotsEnabled || guidedSaving}
-                          onPress={() => {
-                            if (!displayedGuidedSlotsEnabled || active) return;
-                            updateGuidedSlotsSettings((current) => option.key === "intelligent"
-                              ? activateIntelligentGuidedSlots(current, servizi)
-                              : ({
-                              ...current,
-                              guidedSlotsStrategy:
-                                option.key as typeof displayedGuidedSlotsStrategy,
-                            }));
-                          }}
-                          pressScale={0.98}
-                          pressOpacity={0.95}
-                        >
-                          <View style={styles.guidedSlotChoiceCopy}>
-                          <View style={styles.guidedSlotChoiceTitleRow}>
-                          <Text
-                            style={[
-                              styles.guidedSlotChipText,
-                              active && styles.guidedSlotChipTextActive,
-                              !displayedGuidedSlotsEnabled &&
-                                styles.guidedSlotChipTextDisabled,
-                            ]}
-                          >
-                            {option.label}
-                          </Text>
-                          {option.key === "intelligent" ? (
-                            <View style={styles.guidedSlotRecommendedBadge}>
-                              <Text style={styles.guidedSlotRecommendedBadgeText}>Scelta consigliata</Text>
-                            </View>
-                          ) : null}
-                          </View>
-                          <Text style={[styles.guidedSlotChoiceDescription, active && styles.guidedSlotChoiceDescriptionActive]}>{({
-                            balanced: "Bilancia la distribuzione degli appuntamenti.",
-                            protect_long_services: "Dà priorità allo spazio per i servizi lunghi.",
-                            fill_gaps: "Privilegia gli spazi liberi tra gli appuntamenti.",
-                            intelligent: IS_WEB ? "Più orari consigliati: confronta gli spazi liberi con la durata dei servizi prenotabili online per ridurre i buchi in agenda." : "Più orari consigliati e meno buchi: incrocia spazi liberi e durata dei servizi prenotabili online.",
-                            recommended_first: "Mette in evidenza prima gli orari consigliati.",
-                            recommended_only: "Mostra soltanto gli orari consigliati.",
-                            recommended_and_all: "Mostra i consigliati insieme a tutti gli orari disponibili.",
-                          } as Record<string, string>)[option.key]}</Text>
-                          </View>
-                          <View style={[styles.guidedSlotRadio, active && styles.guidedSlotRadioActive]}>
-                            {active ? <Ionicons name="checkmark" size={16} color={premiumRequestsPalette.night ? '#C3DCC8' : '#355F41'} /> : null}
-                          </View>
-                        </HapticTouchable>
-                      );
-                    })}
+                    <NativeMedal icon={option.icon} size={tilesInRow ? 40 : 36} iconSize={tilesInRow ? 18 : 16} />
+                    <View style={{ flex: tilesInRow ? undefined : 1, minWidth: 0, gap: 3 }}>
+                      <Text style={{ fontSize: 14, lineHeight: 19, fontWeight: "600", color: rp.ink }}>{option.label}</Text>
+                      <Text style={{ fontSize: 12, lineHeight: 17, color: rp.muted }}>{option.hint}</Text>
+                      {option.recommended ? <Text style={{ fontSize: 10, lineHeight: 14, letterSpacing: 0.8, fontWeight: "600", color: rp.muted, textTransform: "uppercase", marginTop: 2 }}>Consigliata</Text> : null}
+                    </View>
+                    <View style={[{ width: 20, height: 20, borderRadius: 10, alignItems: "center", justifyContent: "center", borderWidth: 1.5, borderColor: active ? bronze : rp.border }, tilesInRow ? { position: "absolute", top: 14, right: 14 } : null]}>
+                      {active ? <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: bronze }} /> : null}
+                    </View>
+                  </HapticTouchable>
+                );
+                const panel = (title: string, subtitle: string, options: GuidedOption[], activeKey: string, onSelect: (key: string) => void) => (
+                  <View style={{ gap: 12 }}>
+                    <View style={{ gap: 2 }}>
+                      <Text style={{ fontSize: 15, lineHeight: 20, fontWeight: "600", color: rp.ink }}>{title}</Text>
+                      <Text style={{ fontSize: 12, lineHeight: 17, color: rp.muted }}>{subtitle}</Text>
+                    </View>
+                    <View style={{ flexDirection: tilesInRow ? "row" : "column", flexWrap: tilesInRow ? "nowrap" : "nowrap", gap: tilesInRow ? 12 : 8 }}>
+                      {options.map((option) => tile(option, activeKey === option.key, () => onSelect(option.key), options.length))}
+                    </View>
                   </View>
-                ))}
-              </View>
-
-              <View
-                {...(IS_WEB?({dataSet:{requestsRuleGroup:"visibility"}} as any):{})}
-                style={[
-                  styles.guidedSlotOptionGroup,
-                  styles.guidedSlotOptionGroupTight,
-                  undefined,
-                ]}
-              >
-                <Text style={[styles.guidedSlotOptionLabel, IS_WEB && { width: "100%", textAlign: "center" }]}>
-                  2. Orari visibili al cliente
-                </Text>
-                {displayedGuidedSlotsStrategy === "intelligent" ? (
-                  <Text style={[styles.guidedSlotChoiceDescription, IS_WEB && { width: "100%", textAlign: "center" }]}>
-                    Consigliati + tutti è la scelta predefinita. Puoi scegliere una visualizzazione più restrittiva mantenendo lo stesso sistema di consigli intelligenti.
-                  </Text>
-                ) : null}
-                {[
-                  [
-                    {
-                      key: "recommended_and_all",
-                      label: "Consigliati + tutti",
-                    },
-                  ],
-                  [
-                    { key: "recommended_first", label: "Prima i consigliati" },
-                  ],
-                  [
-                    { key: "recommended_only", label: "Solo consigliati" },
-                  ],
-                ].map((row, rowIndex) => (
-                  <View
-                    key={`guided-visibility-row-${rowIndex}`}
-                    style={[
-                      styles.guidedSlotExplicitRow,
-                      styles.guidedSlotExplicitRowSingle,
-                      undefined,
-                    ]}
-                  >
-                    {row.map((option) => {
-                      const active =
-                        displayedGuidedSlotsVisibility === option.key;
-                      const choiceDisabled = !displayedGuidedSlotsEnabled || guidedSaving;
-                      return (
-                        <HapticTouchable webHoverLift
-                          key={option.key}
-                          accessibilityRole="radio"
-                          accessibilityState={{ checked: active, disabled: choiceDisabled }}
-                          style={[
-                            styles.guidedSlotChip,
-                            styles.guidedSlotChoiceFull,
-                            IS_WEB && responsive.isDesktop && { flex: 1 },
-                            active && styles.guidedSlotChipActive,
-                            choiceDisabled &&
-                              styles.guidedSlotChipDisabled,
-                          ]}
-disabled={choiceDisabled}
-                          onPress={() => {
-                            if (choiceDisabled) return;
-                            updateGuidedSlotsSettings((current) => ({
-                              ...current,
-                              guidedSlotsVisibility:
-                                option.key as typeof displayedGuidedSlotsVisibility,
-                            }));
-                          }}
-                          pressScale={0.98}
-                          pressOpacity={0.95}
-                        >
-                          <View style={styles.guidedSlotChoiceCopy}>
-                          <Text
-                            style={[
-                              styles.guidedSlotChipText,
-                              active && styles.guidedSlotChipTextActive,
-                              choiceDisabled &&
-                                styles.guidedSlotChipTextDisabled,
-                            ]}
-                          >
-                            {option.label}
-                          </Text>
-                          <Text style={[styles.guidedSlotChoiceDescription, active && styles.guidedSlotChoiceDescriptionActive]}>{({
-                            balanced: "Bilancia la distribuzione degli appuntamenti.",
-                            protect_long_services: "Dà priorità allo spazio per i servizi lunghi.",
-                            fill_gaps: "Privilegia gli spazi liberi tra gli appuntamenti.",
-                            intelligent: IS_WEB ? "Più orari consigliati: confronta gli spazi liberi con la durata dei servizi prenotabili online per ridurre i buchi in agenda." : "Più orari consigliati e meno buchi: incrocia spazi liberi e durata dei servizi prenotabili online.",
-                            recommended_first: "Mette in evidenza prima gli orari consigliati.",
-                            recommended_only: "Mostra soltanto gli orari consigliati.",
-                            recommended_and_all: "Mostra i consigliati insieme a tutti gli orari disponibili.",
-                          } as Record<string, string>)[option.key]}</Text>
-                          </View>
-                          <View style={[styles.guidedSlotRadio, active && styles.guidedSlotRadioActive]}>
-                            {active ? <Ionicons name="checkmark" size={16} color={premiumRequestsPalette.night ? '#C3DCC8' : '#355F41'} /> : null}
-                          </View>
-                        </HapticTouchable>
-                      );
-                    })}
+                );
+                return (
+                  <View style={{ marginTop: 18, paddingTop: 18, gap: 22, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: rp.line }}>
+                    {panel("Strategia del salone", "Come l’agenda sceglie gli orari da proporre ai clienti.", strategyOptions, displayedGuidedSlotsStrategy, (key) =>
+                      updateGuidedSlotsSettings((current) => key === "intelligent"
+                        ? activateIntelligentGuidedSlots(current, servizi)
+                        : ({ ...current, guidedSlotsStrategy: key as typeof displayedGuidedSlotsStrategy })))}
+                    {panel("Orari visibili al cliente", displayedGuidedSlotsStrategy === "intelligent" ? "Consigliati + tutti è la scelta predefinita; puoi renderla più restrittiva." : "Cosa vede il cliente quando sceglie l’orario.", visibilityOptions, displayedGuidedSlotsVisibility, (key) =>
+                      updateGuidedSlotsSettings((current) => ({ ...current, guidedSlotsVisibility: key as typeof displayedGuidedSlotsVisibility })))}
                   </View>
-                ))}
-              </View>
-              </View>
+                );
+              })()}
             </View>
           </View>
 
@@ -6354,7 +6143,7 @@ disabled={choiceDisabled}
               })}
             </View>
           </View>}
-            renderContent={()=>requestListInPopup ? <View style={{flex:1,minHeight:160,alignItems:'center',justifyContent:'center',gap:12,padding:20}}><Ionicons name="documents-outline" size={34} color={premiumRequestsPalette.muted}/><Text style={{fontFamily:'Georgia',fontSize:23,color:premiumRequestsPalette.ink}}>{activeSectionMeta.title}</Text><Text style={{color:premiumRequestsPalette.muted,fontSize:13}}>{activeSectionMeta.count} prenotazioni · elenco aperto nel pannello</Text></View> : expandedSections[workspaceSection] ? requestSectionPanels[workspaceSection]?.() : <View style={{flex:1,minHeight:140,alignItems:'center',justifyContent:'center',gap:10,padding:20}}><Ionicons name="calendar-outline" size={36} color={premiumRequestsPalette.muted}/><Text style={{fontFamily:'Georgia',fontSize:22,color:premiumRequestsPalette.ink}}>{richiesteDaAccettare.length===0?'Nessuna richiesta in attesa':'Le tue prenotazioni'}</Text><Text style={{fontSize:13,lineHeight:19,textAlign:'center',color:premiumRequestsPalette.muted}}>Scegli una sezione per consultare le prenotazioni.</Text></View>}
+            renderContent={()=>requestListInPopup ? <View style={{flex:1,minHeight:160,alignItems:'center',justifyContent:'center',gap:12,padding:20,...(!(IS_WEB&&responsive.width>=1000)?{borderWidth:1,borderColor:premiumRequestsPalette.border,borderRadius:19,backgroundColor:premiumRequestsPalette.night?'rgba(38,41,43,.9)':'rgba(255,253,250,.86)'}:{})}}><Ionicons name="documents-outline" size={34} color={premiumRequestsPalette.muted}/><Text style={{fontFamily:'Georgia',fontSize:23,color:premiumRequestsPalette.ink}}>{activeSectionMeta.title}</Text><Text style={{color:premiumRequestsPalette.muted,fontSize:13}}>{activeSectionMeta.count} prenotazioni · elenco aperto nel pannello</Text></View> : expandedSections[workspaceSection] ? requestSectionPanels[workspaceSection]?.() : <View style={{flex:1,minHeight:140,alignItems:'center',justifyContent:'center',gap:10,padding:22,...(!(IS_WEB&&responsive.width>=1000)?{borderWidth:1,borderColor:premiumRequestsPalette.border,borderRadius:19,backgroundColor:premiumRequestsPalette.night?'rgba(38,41,43,.9)':'rgba(255,253,250,.86)'}:{})}}><NativeMedal icon="calendar-outline" size={46} iconSize={21}/><Text style={{fontFamily:IS_WEB?'Georgia':(Platform.OS==='ios'?'Georgia':'serif'),fontSize:20,lineHeight:26,color:premiumRequestsPalette.ink,textAlign:'center'}}>{richiesteDaAccettare.length===0?'Nessuna richiesta in attesa':`${richiesteDaAccettare.length} ${richiesteDaAccettare.length===1?'richiesta da confermare':'richieste da confermare'}`}</Text><Text style={{fontSize:13,lineHeight:19,textAlign:'center',color:premiumRequestsPalette.muted}}>Scegli una sezione per vedere le prenotazioni.</Text></View>}
           />
 
 

@@ -7,7 +7,7 @@ import { useIsFocused } from '@react-navigation/native';
 import { Platform, Pressable, StyleSheet, StatusBar, View, useWindowDimensions } from 'react-native';
 
 import { AccessWordmark, useAccessAppearance } from './access-premium';
-import { NativeHomeClock } from './owner-premium-native-home';
+import { NativeHomeClock, NativeMedal } from './owner-premium-native-home';
 const sans=Platform.OS==='ios'?'System':'sans-serif';
 /** Presentation only; counts are supplied by the existing Requests selectors. */
 export const NativeRequestsHeader=React.memo(function NativeRequestsHeader({today,pending,handled,cancelled,cancelledBySalon,cancelledByClient}:{today:string;pending:string;handled:string;cancelled:string;cancelledBySalon?:string;cancelledByClient?:string}){
@@ -23,16 +23,37 @@ export const NativeRequestsHeader=React.memo(function NativeRequestsHeader({toda
 });
 export { nativeRequestsStyles } from './owner-premium-requests-style';
 
-/** Same summary hierarchy as the app; all four existing web metrics remain visible. */
+const waitingTone=(p:{night:boolean;ink:string})=>p.ink;
+/** Same language as the Home income card: one hero number, three quiet stats with medallions. */
 export function RequestsWebSummary({pending,handled,cancelledBySalon,cancelledByClient}:{pending:string;handled:string;cancelledBySalon:string;cancelledByClient:string}){
  const {palette:p}=useAccessAppearance();
  const {width}=useWindowDimensions();
  const compact=width<600;
- const entries=[{label:'In attesa',value:pending,tint:'#A899C9'},{label:'Già gestite',value:handled,tint:'#9BB39B'},{label:'Annullate dal salone',value:cancelledBySalon,tint:'#CBAE91'},{label:'Annullate dal cliente',value:cancelledByClient,tint:'#C296A4'}];
- return <View style={{flexDirection:'row',flexWrap:'wrap',borderWidth:1,borderColor:p.border,borderRadius:19,backgroundColor:p.night?'rgba(38,41,43,.82)':'rgba(255,253,250,.68)',marginBottom:16,overflow:'hidden'}}>
-  {entries.map((entry,index)=><View key={entry.label} style={{flexBasis:compact?'50%':'25%',minWidth:0,alignItems:'center',justifyContent:'center',gap:6,paddingHorizontal:10,paddingVertical:18,borderLeftWidth:index%(compact?2:4)?StyleSheet.hairlineWidth:0,borderLeftColor:p.line,borderTopWidth:compact&&index>=2?StyleSheet.hairlineWidth:0,borderTopColor:p.line}}>
-   {entry.value==='—'?<OwnerStartupSkeletonPulse><OwnerStartupSkeletonItem style={{width:48,height:33,borderRadius:9,backgroundColor:p.night?'rgba(219,212,197,.14)':'rgba(185,175,158,.23)'}}/></OwnerStartupSkeletonPulse>:<Text style={{fontSize:27,lineHeight:33,fontWeight:'600',fontVariant:['tabular-nums'],color:p.ink}}>{entry.value}</Text>}
-   <View style={{flexDirection:'row',alignItems:'center',gap:5}}><View style={{width:6,height:6,borderRadius:3,backgroundColor:entry.tint}}/><Text style={{fontSize:11,lineHeight:16,color:p.muted,flexShrink:1,textAlign:'center'}}>{entry.label}</Text></View>
-  </View>)}
+ const loading=pending==='—';
+ const waiting=!loading&&Number(pending)>0;
+ const gold=waitingTone(p);
+ const value=(text:string,style:any)=>text==='—'?<OwnerStartupSkeletonPulse><OwnerStartupSkeletonItem style={{width:40,height:style.lineHeight-6,borderRadius:8,backgroundColor:p.night?'rgba(219,212,197,.14)':'rgba(185,175,158,.23)'}}/></OwnerStartupSkeletonPulse>:<Text style={style}>{text}</Text>;
+ const stats:{label:string;value:string;icon:React.ComponentProps<typeof Ionicons>['name']}[]=[{label:'Gestite',value:handled,icon:'checkmark-done-outline'},{label:compact?'Annullate salone':'Annullate dal salone',value:cancelledBySalon,icon:'storefront-outline'},{label:compact?'Annullate cliente':'Annullate dal cliente',value:cancelledByClient,icon:'person-remove-outline'}];
+ return <View style={{borderWidth:1,borderColor:p.border,borderRadius:19,backgroundColor:p.night?'rgba(38,41,43,.9)':'rgba(255,253,250,.86)',padding:compact?15:18,marginBottom:16,shadowColor:'#302419',shadowOpacity:p.night?.28:.08,shadowRadius:14,shadowOffset:{width:0,height:6}}}>
+  <View style={{flexDirection:'row',alignItems:'center',gap:12}}>
+   <View style={{flex:1,minWidth:0,gap:3}}>
+    {value(pending,{fontFamily:sans,fontSize:32,lineHeight:40,fontWeight:'600',letterSpacing:-1,fontVariant:['tabular-nums'],color:p.ink})}
+    <Text style={{fontFamily:sans,fontSize:12,lineHeight:18,color:p.muted}}>Richieste da confermare</Text>
+   </View>
+   {loading?null:<View style={{flexDirection:'row',alignItems:'center',gap:7,paddingHorizontal:12,minHeight:32,borderRadius:16,borderWidth:1,borderColor:p.border,backgroundColor:p.field}}>
+    {waiting?<View style={{width:7,height:7,borderRadius:4,backgroundColor:gold}}/>:<Ionicons name="checkmark" size={14} color={gold}/>}
+    <Text style={{fontFamily:sans,fontSize:12,fontWeight:'600',color:gold}}>{waiting?'Da gestire':'Tutto in ordine'}</Text>
+   </View>}
+  </View>
+  <View style={{height:StyleSheet.hairlineWidth,backgroundColor:p.line,marginVertical:13}}/>
+  <View style={{flexDirection:'row'}}>
+   {stats.map((item,i)=><View key={item.label} style={{flex:1,minWidth:0,flexDirection:'row',alignItems:'center',gap:compact?6:10,paddingHorizontal:compact?5:12,borderLeftWidth:i?StyleSheet.hairlineWidth:0,borderLeftColor:p.line}}>
+    <NativeMedal icon={item.icon} size={compact?32:36} iconSize={compact?15:17}/>
+    <View style={{flex:1,minWidth:0}}>
+     {value(item.value,{fontFamily:sans,fontSize:19,lineHeight:24,fontWeight:'600',fontVariant:['tabular-nums'],color:p.ink})}
+     <Text numberOfLines={1} style={{fontFamily:sans,fontSize:11,lineHeight:15,color:p.muted}}>{item.label}</Text>
+    </View>
+   </View>)}
+  </View>
  </View>;
 }
