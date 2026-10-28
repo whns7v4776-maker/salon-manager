@@ -3564,7 +3564,7 @@ invite: (<View {...webHomePart("invite")}
             <Text {...webHomePart("invite-name")} style={styles.accessCode}>{clientAccessDisplayName}</Text>{Platform.OS === 'web' ? <Text {...webHomePart("invite-description")}>Invita i clienti a prenotare nella tua area dedicata.</Text> : null}
             <View {...webHomePart("invite-url")} style={styles.accessLinkPlate}>
               <Text style={styles.accessLink} selectable>
-                {salonClientLink || 'Configura publicClientBaseUrl per generare il link pubblico.'}
+                {salonClientLink ? salonClientLink.replace(/^https?:\/\//, '').replace(/\?.*$/, '').replace(/\/{2,}/g, '/') : 'Configura publicClientBaseUrl per generare il link pubblico.'}
               </Text>
             </View>
           <HapticTouchable

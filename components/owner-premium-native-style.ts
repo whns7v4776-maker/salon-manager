@@ -26,6 +26,8 @@ export function nativeHomeStyles<T extends Record<string,any>>(base:T,p:Palette)
  for(const key of ['priorityEyebrow','priorityEyebrowGlassBlue','priorityEyebrowAndroidPremium'])patch(key,{color:p.night?'#D8C29B':'#8F6D3B',fontSize:10,lineHeight:14,fontWeight:'600',letterSpacing:1.2,textAlign:'left',alignSelf:'stretch'});
  patch('sectionCardDark',{backgroundColor:p.night?'rgba(179,145,93,.10)':'rgba(246,233,211,.5)',borderColor:p.border,borderWidth:1,borderRadius:17,padding:14,marginBottom:12});
  patch('sectionTitleDark',{color:p.ink}); patch('sectionTextDark',{color:p.muted});
+ // Focus card reads left-aligned like every other card on the native Home.
+ patch('sectionTitleCentered',{textAlign:'left',alignSelf:'stretch'}); patch('sectionTextCentered',{textAlign:'left',alignSelf:'stretch'});
  for(const key of ['operatorModalCard','customerInsightModalCard'])patch(key,{backgroundColor:p.night?'#202325':'#F5F1EB',borderColor:p.border});
  patch('operatorModalBackdrop',{backgroundColor:'rgba(0,0,0,.38)'});
  // Native sheets use the same compact surface and typography as the renewed app.

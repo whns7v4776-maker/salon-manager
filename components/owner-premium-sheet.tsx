@@ -87,7 +87,9 @@ export function OwnerPremiumSheetFrame({ title, icon, onClose, dismissDisabled, 
 [data-premium-sheet="invite"] [data-premium-home="qr-subtitle"] { display:none!important; }
 [data-premium-sheet="invite"] [data-premium-home="qr-badge"] { border-top:1px solid var(--sheet-line)!important; padding-top:16px!important; margin-top:2px!important; }
 [data-premium-sheet="invite"] [aria-label^="Codice salone"] { border:0!important; background:transparent!important; padding:0 8px!important; margin:8px 0!important; }
-[data-premium-sheet="invite"] [data-premium-home="print"] { margin:0!important; min-height:60px!important; border-radius:12px!important; align-self:start!important; }
+[data-premium-sheet="invite"] [data-premium-home="print"] { margin:0!important; min-height:60px!important; border-radius:12px!important; align-self:end!important; height:auto!important; max-height:60px!important; width:100%!important; max-width:none!important; }
+[data-premium-sheet="invite"] [data-premium-home="invite-label"] { display:none!important; }
+[data-premium-sheet="invite"] [data-premium-home="invite-url"] { align-self:stretch!important; width:100%!important; max-width:none!important; box-sizing:border-box; }
 [data-premium-sheet="invite"] [data-premium-home="print"] [dir="auto"] { color:var(--sheet-ink)!important; font-size:15px!important; }
 [data-premium-sheet="invite"] [data-premium-home="invite-label"] {margin:0!important;line-height:16px!important;letter-spacing:1px!important;}
 [data-premium-sheet="invite"] [data-premium-home="invite-name"] {margin:0!important;}
