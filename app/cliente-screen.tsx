@@ -33723,7 +33723,7 @@ function ClienteFrontendScreenContent({ nativeInitialTab }: ClienteFrontendScree
             setShowDatePicker(false);
           }}
         />
-        <KeyboardNextToolbar onNext={handleKeyboardNext} label="Next" shouldShow={() => !nativeBookingNote.active} />
+        <KeyboardNextToolbar appearance="floating" onNext={handleKeyboardNext} label="Next" shouldShow={() => !nativeBookingNote.active} />
       </KeyboardAvoidingView>
       <EmailOtpModal
         visible={loginEmailOtpModalVisible && !!loginEmailCompletionSentTo}

@@ -7,6 +7,8 @@ type KeyboardNextToolbarProps = {
   onNext: () => void;
   label?: string;
   shouldShow?: (focusedInput: TextInput | null) => boolean;
+  /** 'keyboard' (default): rely on the keyboard's return key, draw nothing. 'floating': the legacy pill. */
+  appearance?: 'keyboard' | 'floating';
 };
 
 const MIN_KEYBOARD_HEIGHT = 80;
@@ -23,6 +25,7 @@ export function KeyboardNextToolbar({
   onNext,
   label = 'Next',
   shouldShow,
+  appearance = 'keyboard',
 }: KeyboardNextToolbarProps) {
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [visible, setVisible] = useState(false);
@@ -107,6 +110,12 @@ export function KeyboardNextToolbar({
   }, [keyboardHeight, visible]);
 
   if (Platform.OS === 'web' || !visible) return null;
+
+  // Back office: the keyboard's own return key already reads "next" and moves to the next field,
+  // so nothing is drawn over the keyboard.
+  if (appearance === 'keyboard') return null;
+
+
 
   return (
     <View pointerEvents="box-none" style={styles.overlay}>
