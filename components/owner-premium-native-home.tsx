@@ -3,7 +3,7 @@ import { OwnerBrandMark } from './salon-brand-mark';
 import React, { memo, useEffect, useState } from 'react';
 import { Platform, Pressable, StatusBar, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import Svg, { Circle, Defs, LinearGradient, RadialGradient, Stop } from 'react-native-svg';
+import Svg, { Circle, Defs, Ellipse, LinearGradient, Path, RadialGradient, Stop } from 'react-native-svg';
 import { SalonCodeBadge } from './ui/salon-code-badge';
 import { HapticTouchable } from './ui/haptic-touchable';
 import { NativeSettingsPopup } from './native-settings-popup';
@@ -21,11 +21,47 @@ export const NativeHomeClock=memo(function HomeClock({today}:{today:string}){
  return <Text style={{color:p.muted,fontFamily:sans,fontSize:11,letterSpacing:.6}}>{date.toLocaleUpperCase('it')} · {clock}</Text>;
 });
 /** Small raised disc behind an icon: solid fill, warm rim, top light and a soft drop. */
+/** Home: one distinct muted accent per icon, [night, light]. */
+const HOME_ACCENTS:Record<string,[string,string]>={
+ 'person-outline':['#A9ABD9','#5B5E9A'],'people-outline':['#86C2BE','#3E7C7A'],
+ 'calendar-outline':['#D6B27A','#8C6A35'],'receipt-outline':['#D99A92','#A35A52'],
+ 'stats-chart-outline':['#9CC5A3','#4E7A55'],'pie-chart-outline':['#BFA6D4','#7A5C8E'],
+ 'storefront-outline':['#C9AA8C','#7E6247'],'qr-code-outline':['#9DBAD6','#4D6E8F'],
+ 'bag-handle-outline':['#D69AB0','#9A4F67'],'time-outline':['#BFC38A','#6F7440'],
+};
+export function homeAccent(icon:string,night:boolean){const a=HOME_ACCENTS[icon];return a?(night?a[0]:a[1]):undefined;}
 /** `accent` (6-digit hex) gives a section its own muted colour: tinted disc, matching ring and icon. */
 export function NativeMedal({icon,size=40,tint,iconSize,accent}:{icon:React.ComponentProps<typeof Ionicons>['name'];size?:number;tint?:string;iconSize?:number;accent?:string}){
  const {palette:p}=useAccessAppearance();
- return <View style={{width:size,height:size,borderRadius:size/2,backgroundColor:accent?`${accent}${p.night?'2E':'24'}`:tint??(p.night?'#3A352C':'#F3E7D3'),borderWidth:1,borderColor:accent?`${accent}${p.night?'73':'66'}`:p.night?'rgba(216,194,155,.3)':'rgba(150,118,72,.26)',alignItems:'center',justifyContent:'center',shadowColor:p.night?'#000000':'#6E542E',shadowOpacity:p.night?.35:.16,shadowRadius:5,shadowOffset:{width:0,height:3},elevation:2}}>
-  <View pointerEvents="none" style={{position:'absolute',top:1,left:size*.18,right:size*.18,height:size*.42,borderTopLeftRadius:size/2,borderTopRightRadius:size/2,backgroundColor:p.night?'rgba(255,255,255,.07)':'rgba(255,255,255,.55)'}}/>
+ const id=React.useId().replace(/:/g,'');
+ // Enamel medallion: radial body in the section colour, gradient rim (light top, colour bottom),
+ // a crisp crescent specular on top and a real offset shadow. Light theme runs at lower opacity.
+ const hue=accent??(p.night?'#D8C29B':'#8F6D3B');
+ const n=p.night;
+ const r=size/2;
+ return <View style={{width:size,height:size,borderRadius:r,alignItems:'center',justifyContent:'center',backgroundColor:tint??(n?'#26292A':'#FBF8F3'),shadowColor:n?'#000000':'#4A3A24',shadowOpacity:n?.45:.14,shadowRadius:n?6:5,shadowOffset:{width:0,height:3},elevation:3}}>
+  <Svg width={size} height={size} style={StyleSheet.absoluteFill} pointerEvents="none">
+   <Defs>
+    <RadialGradient id={`b${id}`} cx="35%" cy="28%" r="80%">
+     <Stop offset="0" stopColor={hue} stopOpacity={n?.42:.30}/>
+     <Stop offset=".6" stopColor={hue} stopOpacity={n?.20:.22}/>
+     <Stop offset="1" stopColor={hue} stopOpacity={n?.32:.40}/>
+    </RadialGradient>
+    <LinearGradient id={`r${id}`} x1="0" y1="0" x2="0" y2="1">
+     <Stop offset="0" stopColor="#FFFFFF" stopOpacity={n?.42:.95}/>
+     <Stop offset=".45" stopColor={hue} stopOpacity={n?.45:.32}/>
+     <Stop offset="1" stopColor={hue} stopOpacity={n?.85:.55}/>
+    </LinearGradient>
+    <LinearGradient id={`s${id}`} x1="0" y1="0" x2="0" y2="1">
+     <Stop offset="0" stopColor="#FFFFFF" stopOpacity={n?.55:1}/>
+     <Stop offset="1" stopColor="#FFFFFF" stopOpacity={n?.08:.35}/>
+    </LinearGradient>
+   </Defs>
+   <Circle cx={r} cy={r} r={r-.75} fill={`url(#b${id})`} stroke={`url(#r${id})`} strokeWidth={1.25}/>
+   <Path d={`M ${size*.2} ${size*.3} A ${r*.84} ${r*.84} 0 0 1 ${size*.8} ${size*.3} Q ${r} ${size*.2} ${size*.2} ${size*.3} Z`} fill={`url(#s${id})`}/>
+   {/* Soft inner shade at the base gives the enamel volume. */}
+   <Ellipse cx={r} cy={size*.86} rx={size*.30} ry={size*.10} fill={hue} fillOpacity={n?.16:.10}/>
+  </Svg>
   <Ionicons name={icon} size={iconSize??Math.round(size*.48)} color={accent??p.ink}/>
  </View>;
 }
@@ -57,13 +93,13 @@ export const OwnerPremiumNativeHome=memo(function OwnerPremiumNativeHome(props:P
  const [open,setOpen]=useState<'results'|'indicators'|'invite'|null>(null);
  const quick=(title:string,icon:React.ComponentProps<typeof Ionicons>['name'],hint:string,action:()=>void)=><NativeHomeQuickAction title={title} icon={icon} hint={hint} onPress={action}/>;
  const heading=(title:string)=> <Text accessibilityRole="header" style={[s.heading,{color:p.ink}]}>{title}</Text>;
- const peopleRow=(label:string,icon:React.ComponentProps<typeof Ionicons>['name'],value:string,onPress:()=>void)=><Pressable accessibilityRole="button" accessibilityLabel={`Apri ${label}`} onPress={onPress} style={({pressed})=>[s.peopleRow,{opacity:pressed?.6:1}]}><NativeMedal icon={icon} size={36} iconSize={18}/><Text style={[s.rowTitle,{color:p.ink,marginLeft:3}]}>{label}</Text><Text numberOfLines={1} style={[s.rowSummary,{color:p.muted}]}>{value}</Text><Ionicons name="chevron-forward" size={15} color={p.muted}/></Pressable>;
+ const peopleRow=(label:string,icon:React.ComponentProps<typeof Ionicons>['name'],value:string,onPress:()=>void)=><Pressable accessibilityRole="button" accessibilityLabel={`Apri ${label}`} onPress={onPress} style={({pressed})=>[s.peopleRow,{opacity:pressed?.6:1}]}><NativeMedal icon={icon} size={36} iconSize={18} accent={homeAccent(icon,p.night)}/><Text style={[s.rowTitle,{color:p.ink,marginLeft:3}]}>{label}</Text><Text numberOfLines={1} style={[s.rowSummary,{color:p.muted}]}>{value}</Text><Ionicons name="chevron-forward" size={15} color={p.muted}/></Pressable>;
  return <View style={{gap:12}}>
  {focused?<StatusBar barStyle={p.night?'light-content':'dark-content'}/>:null}
  {props.reminder}
  <View style={s.brandRow}><Pressable accessibilityLabel="SalonPro" onLongPress={props.onAdmin} style={{width:154,height:64,justifyContent:'center'}}><OwnerBrandMark compact /></Pressable><Pressable onPress={toggle} accessibilityRole="button" accessibilityLabel={p.night?'Attiva tema chiaro':'Attiva tema scuro'} hitSlop={8} style={[s.theme,{backgroundColor:p.field,borderColor:p.border}]}><Ionicons name={p.night?'sunny-outline':'moon-outline'} size={19} color={p.ink}/></Pressable></View>
  <View style={{gap:5}}><NativeHomeClock today={props.today}/><Text accessibilityRole="header" style={[s.title,{color:p.ink}]}>Il tuo salone, oggi.</Text></View>
- <Glass style={{padding:15}}><View style={s.incomeRow}><View style={{flex:1,minWidth:0,gap:3}}><Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={.85} style={[s.income,{color:p.ink}]}>{props.income}</Text><Text style={[s.copy,{color:p.muted}]}>Incassi confermati</Text></View><Availability value={props.available}/></View><View style={{height:StyleSheet.hairlineWidth,backgroundColor:p.line,marginVertical:13}}/><View style={{flexDirection:'row'}}>{([{label:'Appuntamenti',value:props.appointments,icon:'calendar-outline',tint:p.night?'rgba(216,194,155,.16)':'#F0E5D1'},{label:'Da saldare',value:props.unpaid,icon:'receipt-outline',tint:p.night?'rgba(201,150,88,.2)':'#F8E6C8'},{label:'Clienti',value:props.clients,icon:'people-outline',tint:p.night?'rgba(216,194,155,.16)':'#F0E5D1'}] as const).map((item,i)=><View key={item.label} style={[s.mini,{borderLeftWidth:i?StyleSheet.hairlineWidth:0,borderLeftColor:p.line}]}><NativeMedal icon={item.icon} size={32} iconSize={16} tint={item.tint}/><View style={{flex:1,minWidth:0}}><Text style={[s.miniValue,{color:p.ink}]}>{item.value}</Text><Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={.7} style={[s.miniLabel,{color:p.muted}]}>{item.label}</Text></View></View>)}</View></Glass>
+ <Glass style={{padding:15}}><View style={s.incomeRow}><View style={{flex:1,minWidth:0,gap:3}}><Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={.85} style={[s.income,{color:p.ink}]}>{props.income}</Text><Text style={[s.copy,{color:p.muted}]}>Incassi confermati</Text></View><Availability value={props.available}/></View><View style={{height:StyleSheet.hairlineWidth,backgroundColor:p.line,marginVertical:13}}/><View style={{flexDirection:'row'}}>{([{label:'Appuntamenti',value:props.appointments,icon:'calendar-outline',tint:p.night?'rgba(216,194,155,.16)':'#F0E5D1'},{label:'Da saldare',value:props.unpaid,icon:'receipt-outline',tint:p.night?'rgba(201,150,88,.2)':'#F8E6C8'},{label:'Clienti',value:props.clients,icon:'people-outline',tint:p.night?'rgba(216,194,155,.16)':'#F0E5D1'}] as const).map((item,i)=><View key={item.label} style={[s.mini,{borderLeftWidth:i?StyleSheet.hairlineWidth:0,borderLeftColor:p.line}]}><NativeMedal icon={item.icon} size={32} iconSize={16} accent={homeAccent(item.icon,p.night)}/><View style={{flex:1,minWidth:0}}><Text style={[s.miniValue,{color:p.ink}]}>{item.value}</Text><Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={.7} style={[s.miniLabel,{color:p.muted}]}>{item.label}</Text></View></View>)}</View></Glass>
  <View style={s.sectionRow}>{heading('Adesso')}<Pressable accessibilityRole="button" onPress={props.onAgenda} style={{flexDirection:'row',alignItems:'center',minHeight:34}}><Text style={[s.copy,{color:p.muted}]}>Agenda</Text><Ionicons name="chevron-forward" size={15} color={p.muted}/></Pressable></View>
  {props.priority}
  <Glass><Pressable onPress={props.onRequests} accessibilityRole="button" accessibilityLabel="Apri richieste da confermare" style={s.notice}>{props.pending==='0'||props.pending==='—'?<View style={{width:10,height:10,borderWidth:1.4,borderRadius:5,borderColor:p.muted}}/>:<View style={{width:10,height:10,borderRadius:5,backgroundColor:'#C9505A'}}/>}<Text style={[s.copy,{color:p.ink,flex:1,fontSize:14,lineHeight:20}]}>{props.pending==='0'?'Nessuna richiesta da confermare':props.pending==='1'?'1 richiesta da confermare':`${props.pending} richieste da confermare`}</Text><Ionicons name="chevron-forward" size={16} color={p.muted}/></Pressable></Glass>
@@ -75,7 +111,7 @@ export const OwnerPremiumNativeHome=memo(function OwnerPremiumNativeHome(props:P
  {quick('Indicatori','pie-chart-outline','Servizi e andamento',()=>setOpen('indicators'))}
  {quick('Profilo salone','storefront-outline','Dati e personalizzazione',props.onProfile)}
  {quick('Invita i clienti','qr-code-outline','Link e codice QR',()=>{props.onInvite();setOpen('invite');})}
- {quick('Orari e disponibilità','calendar-outline','Settimana, ferie ed eccezioni',props.onAvailability)}
+ {quick('Orari e disponibilità','time-outline','Settimana, ferie ed eccezioni',props.onAvailability)}
  {props.shop}
  </View>
  <Text style={{color:p.muted,fontFamily:sans,fontSize:12,lineHeight:17,textAlign:'center',marginTop:1}}>* Disponibilità stimata sulle fasce dell’agenda</Text>
@@ -110,7 +146,7 @@ export function NativeHomeResults({pending,legacy,settled,bookings,unpaid,focus}
 }
 export function NativeHomeQuickAction({title,icon,hint,onPress,attention=false}:{title:string;icon:React.ComponentProps<typeof Ionicons>['name'];hint:string;onPress:()=>void;attention?:boolean}){
  const {palette:p}=useAccessAppearance();
- return <Pressable accessibilityRole="button" accessibilityLabel={`Apri ${title}${attention?', attività da gestire':''}`} onPress={onPress} style={({pressed})=>({width:'48%',flexGrow:1,minHeight:112,padding:14,borderRadius:19,borderWidth:1,borderColor:p.border,backgroundColor:p.night?'rgba(48,49,47,.9)':'rgba(255,253,250,.88)',opacity:pressed?.65:1,gap:7,shadowColor:'#302419',shadowOpacity:p.night?.28:.08,shadowRadius:14,shadowOffset:{width:0,height:6},elevation:3})}><View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'flex-start'}}><NativeMedal icon={icon} size={40} iconSize={20}/>{attention?<View style={{width:7,height:7,borderRadius:4,backgroundColor:'#D94E58'}}/>:<Ionicons name="chevron-forward" size={14} color={p.muted}/>}</View><Text style={{fontFamily:sans,fontSize:15,fontWeight:'600',color:p.ink}}>{title}</Text><Text style={{fontFamily:sans,fontSize:12,lineHeight:17,color:p.muted}}>{hint}</Text></Pressable>;
+ return <Pressable accessibilityRole="button" accessibilityLabel={`Apri ${title}${attention?', attività da gestire':''}`} onPress={onPress} style={({pressed})=>({width:'48%',flexGrow:1,minHeight:112,padding:14,borderRadius:19,borderWidth:1,borderColor:p.border,backgroundColor:p.night?'rgba(48,49,47,.9)':'rgba(255,253,250,.88)',opacity:pressed?.65:1,gap:7,shadowColor:'#302419',shadowOpacity:p.night?.28:.08,shadowRadius:14,shadowOffset:{width:0,height:6},elevation:3})}><View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'flex-start'}}><NativeMedal icon={icon} size={40} iconSize={20} accent={homeAccent(icon,p.night)}/>{attention?<View style={{width:7,height:7,borderRadius:4,backgroundColor:'#D94E58'}}/>:<Ionicons name="chevron-forward" size={14} color={p.muted}/>}</View><Text style={{fontFamily:sans,fontSize:15,fontWeight:'600',color:p.ink}}>{title}</Text><Text style={{fontFamily:sans,fontSize:12,lineHeight:17,color:p.muted}}>{hint}</Text></Pressable>;
 }
 export function NativeHomeBackdrop(){const {palette:p}=useAccessAppearance();return <View pointerEvents="none" style={StyleSheet.absoluteFill}><AccessBackdrop/><View style={[StyleSheet.absoluteFill,{backgroundColor:p.night?'rgba(0,0,0,.46)':'rgba(248,245,240,.16)'}]}/></View>;}
 const s=StyleSheet.create({glass:{borderWidth:1,borderRadius:19,shadowColor:'#302419',shadowOffset:{width:0,height:3},shadowRadius:9},brandRow:{flexDirection:'row',alignItems:'center',justifyContent:'space-between',height:64},theme:{width:36,height:36,alignItems:'center',justifyContent:'center',borderRadius:18,borderWidth:1},title:{fontFamily:serif,fontSize:27,lineHeight:34,letterSpacing:-.6},heading:{fontFamily:serif,fontSize:21,lineHeight:27},incomeRow:{flexDirection:'row',alignItems:'center',gap:12},income:{fontFamily:sans,fontSize:32,lineHeight:40,fontWeight:'600',fontVariant:['tabular-nums'],letterSpacing:-1},copy:{fontFamily:sans,fontSize:12,lineHeight:18},mini:{flex:1,minWidth:0,flexDirection:'row',alignItems:'center',gap:6,paddingHorizontal:5},miniIcon:{width:29,height:29,alignItems:'center',justifyContent:'center',borderRadius:15},miniValue:{fontFamily:sans,fontSize:19,fontWeight:'600',lineHeight:24,fontVariant:['tabular-nums']},miniLabel:{fontFamily:sans,fontSize:11,lineHeight:15},sectionRow:{flexDirection:'row',alignItems:'center',justifyContent:'space-between',marginBottom:-6},peopleRow:{minHeight:58,padding:13,flexDirection:'row',alignItems:'center',gap:9},rowTitle:{fontFamily:sans,fontSize:15},rowSummary:{fontFamily:sans,fontSize:13,flex:1,textAlign:'right'},notice:{minHeight:43,paddingHorizontal:13,paddingVertical:10,flexDirection:'row',alignItems:'center',gap:10},finance:{fontFamily:sans,fontSize:17,fontWeight:'600',lineHeight:23,fontVariant:['tabular-nums']}});
