@@ -49830,8 +49830,6 @@ null
         style={[
           styles.weekStickyOperatorHeaderOverlay,
           IS_WEB && styles.weekStickyOperatorHeaderOverlayWeb,
-          // App: nessuna tessera dietro ai nomi, solo una fascia tenue del colore pagina.
-          !IS_WEB && { backgroundColor: availabilityPalette.night ? 'rgba(24,26,27,.92)' : 'rgba(246,242,235,.94)' },
           {
             top: weekStickyOperatorHeaderTop,
             left: weekStickyOperatorHeaderFrame.left,
@@ -49926,7 +49924,7 @@ null
                         });
 
                         return (
-                          <View key={`week-sticky-lane-${day.value}-${lane.key}`} style={[styles.weekPlannerLaneHeaderCard,{width:operatorLaneWidth,height:WEEK_PLANNER_LANE_HEADER_HEIGHT,minHeight:WEEK_PLANNER_LANE_HEADER_HEIGHT,padding:0,borderRadius:0,borderTopRightRadius:weekVisibleDates.length===1&&lane.key===operatorLaneDefinitions[operatorLaneDefinitions.length-1]?.key?AGENDA_PREMIUM_GRID_RADIUS-1:0,borderWidth:0,borderRightWidth:0,borderBottomWidth:0,borderColor:availabilityPalette.line,backgroundColor:'transparent'}]}><AgendaPremiumOperatorHeading bare width={operatorLaneWidth} name={laneInfo.label} role={laneInfo.meta} photo={laneHeaderOperator?.fotoUri} accent={laneTone.borderColor} unavailable={isLaneOperatorUnavailableOnDay} historical={isHistoricalLaneDisabled}/></View>
+                          <View key={`week-sticky-lane-${day.value}-${lane.key}`} style={[styles.weekPlannerLaneHeaderCard,{width:operatorLaneWidth,height:WEEK_PLANNER_LANE_HEADER_HEIGHT,minHeight:WEEK_PLANNER_LANE_HEADER_HEIGHT,padding:0,borderRadius:0,borderTopRightRadius:weekVisibleDates.length===1&&lane.key===operatorLaneDefinitions[operatorLaneDefinitions.length-1]?.key?AGENDA_PREMIUM_GRID_RADIUS-1:0,borderWidth:0,borderRightWidth:0,borderBottomWidth:0,borderColor:availabilityPalette.line,backgroundColor:'transparent'}]}><AgendaPremiumOperatorHeading width={operatorLaneWidth} name={laneInfo.label} role={laneInfo.meta} photo={laneHeaderOperator?.fotoUri} accent={laneTone.borderColor} unavailable={isLaneOperatorUnavailableOnDay} historical={isHistoricalLaneDisabled}/></View>
                         );
                       })}
                     </View>

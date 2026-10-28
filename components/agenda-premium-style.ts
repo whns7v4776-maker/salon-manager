@@ -223,8 +223,8 @@ export function createAgendaPremiumStyles<T extends Record<string,any>>(base:T,t
  patch('weekPlannerTimeLabelMarker',{color:p.ink,fontWeight:'500'});
  patch('weekPlannerTimeTextMinor',{color:p.muted,fontSize:web?11:10,lineHeight:14,fontWeight:'400'});
  patch('weekPlannerTimeTextHour',{color:p.ink,fontSize:web?12:11,lineHeight:15,fontWeight:'500'});
- // Floating names, no tile: a fade from the page colour keeps them readable over the grid.
- patch('weekStickyOperatorHeaderOverlayWeb',{backgroundColor:'transparent',backgroundImage:p.night?'linear-gradient(to bottom, rgba(22,24,25,.98) 0%, rgba(22,24,25,.98) 86%, rgba(22,24,25,0) 100%)':'linear-gradient(to bottom, rgba(246,242,235,.99) 0%, rgba(246,242,235,.99) 86%, rgba(246,242,235,0) 100%)',backdropFilter:'none',boxShadow:'none'} as any);
+ // Il banner che compare è la stessa tessera arrotondata dell'intestazione: nessuna fascia squadrata dietro.
+ patch('weekStickyOperatorHeaderOverlayWeb',{backgroundColor:'transparent',backgroundImage:'none',backdropFilter:'none',boxShadow:'none'} as any);
  // The current-time indicator uses the same action tone as the controls.
  patch('weekPlannerCurrentTimeRailGlow',{top:-1,height:4,backgroundColor:'rgba(237,155,148,.08)'});
  patch('weekPlannerCurrentTimeLine',{height:1.25,backgroundColor:'#ED9B94'});
