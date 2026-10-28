@@ -1328,7 +1328,7 @@ const NATIVE_COMPACT_CARD_DRAG_HOLD_MS = 360;
 const NATIVE_RESIZE_MOVE_JS_THROTTLE_MS = 48;
 const NATIVE_WEEK_AUTOSCROLL_UP_INTENT_DISTANCE = 10;
 const NATIVE_WEEK_AUTOSCROLL_TARGET_KEY = '__native-autoscroll__';
-const WEEK_PLANNER_LANE_HEADER_HEIGHT = IS_WEB?72:40;
+const WEEK_PLANNER_LANE_HEADER_HEIGHT = IS_WEB?72:48;
 const WEEK_PLANNER_LANE_HEADER_HALF_SPACER = WEEK_PLANNER_LANE_HEADER_HEIGHT/2;
 const WEEK_PLANNER_ROLE_TEXT_COLORS: Record<string, string> = {
   barber: '#9A4A00',
@@ -46349,7 +46349,7 @@ export default function AgendaScreen() {
             onAll={()=>setAgendaOperatorFilter(null)} onToggle={id=>setAgendaOperatorFilter(current=>toggleAgendaOperator(current,id,operatori.map(op=>op.id)))}/></View>:null}
           {!IS_WEB?<View style={{flex:1,minWidth:0,overflow:'hidden'}}><AgendaPremiumOperatorFilters inline operators={operatori} selected={agendaFilteredOperators} locked={agendaVisibleOperatorCount>1}
             onAll={()=>setAgendaOperatorFilter(null)} onToggle={id=>setAgendaOperatorFilter(current=>toggleAgendaOperator(current,id,operatori.map(op=>op.id)))}/></View>:null}
-          {IS_WEB?<View {...{dataSet:{agendaSearchHost:'true'}}} style={{flex:1,minWidth:120,zIndex:100}}>{agendaSearchPanel}</View>:<HapticTouchable accessibilityRole="button" accessibilityLabel="Cerca appuntamento" onPress={()=>{setNativeAgendaSearchExpanded(true);setCampoAttivo('ricerca');}} style={{minWidth:40,minHeight:44,justifyContent:'center',alignItems:'center',borderRadius:12,borderWidth:1,borderColor:availabilityPalette.border,backgroundColor:availabilityPalette.field}}><Ionicons name="search-outline" size={20} color={availabilityPalette.ink}/></HapticTouchable>}
+          {IS_WEB?<View style={{flex:1,minWidth:120,zIndex:100,flexDirection:'row',alignItems:'center',gap:10}}><View {...{dataSet:{agendaSearchHost:'true'}}} style={{flex:1,minWidth:0}}>{agendaSearchPanel}</View><InfoButton size={42} accessibilityLabel="Come funziona l’Agenda" onPress={()=>{const next=!(daySelectionGuideOpen||weekAgendaGuideOpen);setDaySelectionGuideOpen(next);setWeekAgendaGuideOpen(next);}}/></View>:<HapticTouchable accessibilityRole="button" accessibilityLabel="Cerca appuntamento" onPress={()=>{setNativeAgendaSearchExpanded(true);setCampoAttivo('ricerca');}} style={{minWidth:40,minHeight:44,justifyContent:'center',alignItems:'center',borderRadius:12,borderWidth:1,borderColor:availabilityPalette.border,backgroundColor:availabilityPalette.field}}><Ionicons name="search-outline" size={20} color={availabilityPalette.ink}/></HapticTouchable>}
         </View>
         <View
           ref={weekPlannerOverlayHostRef}
@@ -46393,7 +46393,7 @@ export default function AgendaScreen() {
             }
           }}
         >
-          {nativeScrubberHeight > 0 && <View style={{ position: 'absolute', top: effectivePlannerDayHeaderHeight - nativeScrubberHeight, left: WEEK_PLANNER_TIME_COL_TOTAL, right: 0, zIndex: 1000, elevation: 1000, alignItems: 'center' }} pointerEvents="box-none">
+          {nativeScrubberHeight > 0 && <View style={{ position: 'absolute', top: effectivePlannerDayHeaderHeight - 8, left: WEEK_PLANNER_TIME_COL_TOTAL, right: 0, zIndex: 1000, elevation: 1000, alignItems: 'center' }} pointerEvents="box-none">
             <View accessibilityRole="adjustable" accessibilityLabel="Scorri colonne operatori" hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               accessibilityActions={[{ name: 'increment', label: 'Colonne successive' }, { name: 'decrement', label: 'Colonne precedenti' }]}
               onAccessibilityAction={(event) => { const direction = event.nativeEvent.actionName === 'increment' ? 1 : -1; weekPlannerHorizontalRef.current?.scrollTo({ x: Math.max(0, Math.min(weekPlannerHorizontalMetrics.maxScrollX, weekHorizontalScrollPosRef.current + direction * weekVisibleColWidth)), animated: true }); }}
@@ -46401,8 +46401,8 @@ export default function AgendaScreen() {
               onResponderGrant={(event) => { const progress = Math.max(0, Math.min(1, event.nativeEvent.locationX / WEEK_PLANNER_NATIVE_SCROLL_CUE_INNER_WIDTH)); weekPlannerHorizontalRef.current?.scrollTo({ x: progress * weekPlannerHorizontalMetrics.maxScrollX, animated: false }); }}
               onResponderMove={(event) => { const progress = Math.max(0, Math.min(1, event.nativeEvent.locationX / WEEK_PLANNER_NATIVE_SCROLL_CUE_INNER_WIDTH)); weekPlannerHorizontalRef.current?.scrollTo({ x: progress * weekPlannerHorizontalMetrics.maxScrollX, animated: false }); }}
               style={{ width: WEEK_PLANNER_NATIVE_SCROLL_CUE_INNER_WIDTH, height: 16, alignItems: 'center', justifyContent: 'center' }}>
-              <View pointerEvents="none" style={{ position: 'absolute', height: 2, width: '100%', borderRadius: 2, backgroundColor: availabilityPalette.line }} />
-              <Reanimated.View pointerEvents="none" style={[{ height: 3, borderRadius: 2, backgroundColor: availabilityPalette.muted }, weekPlannerNativeScrollCueThumbStyle]} />
+              <View pointerEvents="none" style={{ position: 'absolute', height: 6, width: '100%', borderRadius: 3, borderWidth: 1, borderColor: availabilityPalette.night ? 'rgba(216,194,155,.22)' : 'rgba(150,118,72,.22)', backgroundColor: availabilityPalette.night ? '#26292A' : '#F3EDE3' }} />
+              <Reanimated.View pointerEvents="none" style={[{ height: 4, borderRadius: 2, backgroundColor: availabilityPalette.night ? '#D8C29B' : '#8F6D3B', shadowColor: availabilityPalette.night ? '#D8C29B' : '#6E542E', shadowOpacity: .45, shadowRadius: 3, shadowOffset: { width: 0, height: 0 } }, weekPlannerNativeScrollCueThumbStyle]} />
             </View>
           </View>}
           <AgendaLiveSignalProvider enabled={shouldRunNativeAgendaWork}>
@@ -50198,7 +50198,7 @@ null
                     full:fullAgendaDates.has(day.value),pending:stablePendingRequestsCountByDate[day.value]??0,
                   }))}
                   dayCountControl={<HapticTouchable
-                    style={{minHeight:responsive.width<600?36:42,paddingHorizontal:responsive.width<600?8:12,flexDirection:'row',alignItems:'center',justifyContent:'center',gap:responsive.width<600?4:7,borderRadius:responsive.width<600?10:12,borderWidth:1,borderColor:availabilityPalette.border,backgroundColor:availabilityPalette.field}}
+                    style={{minHeight:!IS_WEB?30:responsive.width<600?36:42,paddingHorizontal:!IS_WEB?10:responsive.width<600?8:12,flexDirection:'row',alignItems:'center',justifyContent:'center',gap:responsive.width<600?4:7,borderRadius:!IS_WEB?9:responsive.width<600?10:12,borderWidth:1,borderColor:availabilityPalette.border,backgroundColor:availabilityPalette.field}}
                     onPressIn={markWeekVisibleDaysPickerDirectPress} onPress={openWeekVisibleDaysPicker}
                     immediatePress pressInDuration={42} pressOutDuration={62} activeOpacity={0.88}
                     accessibilityRole="button" accessibilityLabel={`Scegli i giorni visibili. Vista attuale ${weekEffectiveVisibleDays} ${weekEffectiveVisibleDays===1?'giorno':'giorni'}`}>
