@@ -44,7 +44,7 @@ export function NativeServiceCatalogCard({name,role,price,originalPrice,duration
 }) {
   const {palette:p}=useAccessAppearance();
   const [expanded,setExpanded]=useState(false);
-  return <View style={{backgroundColor:p.night?'#242D29':'#F7F5EE',borderColor:p.border,borderWidth:1,borderRadius:20,overflow:'hidden'}}><PremiumServiceContent name={name} role={role} price={price} originalPrice={originalPrice} duration={duration} accent={accent} phases={phases} linked={linked} badge={badge} online={online} operators={operators} expanded={expanded} onToggle={()=>setExpanded(v=>!v)} onEdit={onEdit} onArchive={onArchive} onDelete={onDelete}/></View>;
+  return <View style={{backgroundColor:p.night?'rgba(38,41,43,.92)':'rgba(255,253,250,.9)',borderColor:p.night?p.border:'rgba(122,100,70,.2)',borderWidth:1,borderRadius:20,overflow:'hidden',shadowColor:'#000',shadowOpacity:p.night?.3:.07,shadowRadius:12,shadowOffset:{width:0,height:5}}}><View pointerEvents="none" style={{position:'absolute',left:0,top:18,bottom:18,width:3,borderTopRightRadius:2,borderBottomRightRadius:2,backgroundColor:accent}}/><PremiumServiceContent name={name} role={role} price={price} originalPrice={originalPrice} duration={duration} accent={accent} phases={phases} linked={linked} badge={badge} online={online} operators={operators} expanded={expanded} onToggle={()=>setExpanded(v=>!v)} onEdit={onEdit} onArchive={onArchive} onDelete={onDelete}/></View>;
 }
 
 export function NativeOperatorCatalogCard({name,role,availability,photo,services,onEdit,onArchive,onDelete}:{name:string;role:string;availability:string;photo?:string;services:string[];onEdit:()=>void;onArchive:()=>void;onDelete:()=>void}){
