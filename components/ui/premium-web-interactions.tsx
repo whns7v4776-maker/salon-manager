@@ -72,6 +72,7 @@ export function PremiumWebInteractions({night}:{night:boolean}){
  /* Bottom-bar feedback belongs to the outer tab; its visual layers stay inert. */
  @media(hover:hover) and (pointer:fine){
   html body [data-premium-bottom-bar="true"] [role="tab"]:hover {outline:none!important;box-shadow:none!important;background:transparent!important;filter:none!important;}
+  html body [data-premium-bottom-bar="true"] [role="tab"][data-premium-text-action="true"][data-premium-text-action="true"][data-premium-text-action="true"]:hover {box-shadow:none!important;background-color:transparent!important;}
   html body [data-premium-bottom-bar="true"] [role="tab"] *:hover,
   html body [data-premium-bottom-bar="true"] [role="tab"] *:focus-visible {outline:none!important;box-shadow:none!important;filter:none!important;}
  }

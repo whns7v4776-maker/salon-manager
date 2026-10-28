@@ -877,7 +877,20 @@ export function OnboardingModal({
   onComplete,
 }: OnboardingModalProps) {
   const {palette:p}=useAccessAppearance();
-  const styles=useSettingsWebStyles(baseOnboardingStyles,true);
+  const themedStyles=useSettingsWebStyles(baseOnboardingStyles,true);
+  // The header floats over the live app and the CTA sits on the sheet surface:
+  // both need solid fills on every platform, not the themed translucent field.
+  const styles=React.useMemo(()=>{
+    const chip={backgroundColor:p.night?'#24282A':'#FBF8F2',borderColor:p.night?'rgba(237,230,215,.22)':'rgba(120,100,70,.18)',borderWidth:1,shadowColor:'#2A2118',shadowOpacity:p.night?.3:.12,shadowRadius:10,shadowOffset:{width:0,height:3},elevation:3};
+    return {...themedStyles,
+      overlayBadge:{...themedStyles.overlayBadge,...chip},
+      overlayBadgeText:{...themedStyles.overlayBadgeText,color:p.ink,fontWeight:'600'},
+      skipButton:{...themedStyles.skipButton,...chip},
+      skipText:{...themedStyles.skipText,color:p.ink,fontWeight:'600'},
+      primaryButton:{...themedStyles.primaryButton,backgroundColor:p.action,borderWidth:0,shadowColor:'#2A2118',shadowOpacity:p.night?.25:.16,shadowRadius:12,shadowOffset:{width:0,height:5},elevation:4},
+      primaryButtonText:{...themedStyles.primaryButtonText,color:p.actionText,fontWeight:'600'},
+    } as unknown as typeof themedStyles;
+  },[themedStyles,p]);
   const { width, height } = useWindowDimensions();
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isClosingFlow, setIsClosingFlow] = useState(false);
