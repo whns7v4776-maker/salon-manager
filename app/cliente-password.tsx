@@ -828,7 +828,7 @@ export default function ClientePasswordScreen() {
         onRequestClose={handleSuccessContinue}
       >
         <View style={styles.successModalBackdrop}>
-          <DockedSheetSurface accessibilityRole="alert" style={styles.successModalCard}>
+          <DockedSheetSurface webDocked={false} accessibilityRole="alert" style={styles.successModalCard}>
             <View style={styles.successModalIcon}>
               <Ionicons name="checkmark" size={28} color="#ffffff" />
             </View>

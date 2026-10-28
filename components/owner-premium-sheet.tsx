@@ -4,6 +4,7 @@ import React from 'react';
 import { Modal, Platform, Pressable, ScrollView, Text, useWindowDimensions, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAccessAppearance } from './access-premium';
+import { useWebSheetDrag, WebSheetGrabber } from './ui/web-sheet-grabber';
 
 type Props = React.PropsWithChildren<{ title: string; icon: React.ComponentProps<typeof Ionicons>['name']; onClose: () => void; dismissDisabled?: boolean; footer?: React.ReactNode; scrollRef?: React.MutableRefObject<ScrollView | null>; kind?: 'profile' | 'invite' | 'shop' | 'requests' | 'customer'; }>;
 /** Web-only presentation inside an existing modal; business callbacks stay with the caller. */
@@ -11,8 +12,10 @@ export function OwnerPremiumSheetFrame({ title, icon, onClose, dismissDisabled, 
   const { palette: p } = useAccessAppearance();
   const { height, width } = useWindowDimensions();
   const compactRequests=width<600;
-  return <View {...{ onClick: (event: React.MouseEvent) => event.stopPropagation() }} style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: width<480?12:20, paddingVertical:16, backgroundColor: p.night ? 'rgba(0,0,0,.54)' : 'rgba(40,35,29,.28)', backdropFilter: 'blur(8px)' } as any}>
-    <View {...{ dataSet: { premiumSheet: kind } }} style={{ width: '100%', maxWidth: kind === 'customer' ? 600 : kind === 'requests' ? 760 : 1120, maxHeight: Math.max(120, height - 32), flexShrink: 1, borderTopLeftRadius: 26, borderTopRightRadius: 26, borderBottomLeftRadius:26, borderBottomRightRadius:26, borderWidth: 1, borderColor: p.border, backgroundColor: p.night ? 'rgba(27,30,31,.97)' : 'rgba(248,245,240,.97)', boxShadow: '0 -12px 80px rgba(20,16,12,.18), inset 0 1px 0 rgba(255,255,255,.5)', overflow: 'hidden', ...popupGlass(p) } as any}>
+  const webDrag=useWebSheetDrag(onClose, dismissDisabled);
+  return <View {...{ onClick: (event: React.MouseEvent) => event.stopPropagation() }} style={{ flex: 1, justifyContent: 'flex-end', alignItems: 'stretch', paddingHorizontal: 0, paddingTop: 24, backgroundColor: p.night ? 'rgba(0,0,0,.54)' : 'rgba(40,35,29,.28)', backdropFilter: 'blur(8px)' } as any}>
+    <View {...{ dataSet: { premiumSheet: kind } }} style={{ width: '100%', maxWidth: '100%', maxHeight: Math.max(120, height - 24), flexShrink: 1, borderTopLeftRadius: 26, borderTopRightRadius: 26, borderBottomLeftRadius:0, borderBottomRightRadius:0, borderBottomWidth: 0, ...webDrag.sheetStyle, borderWidth: 1, borderColor: p.border, backgroundColor: p.night ? 'rgba(27,30,31,.97)' : 'rgba(248,245,240,.97)', boxShadow: '0 -12px 80px rgba(20,16,12,.18), inset 0 1px 0 rgba(255,255,255,.5)', overflow: 'hidden', ...popupGlass(p) } as any}>
+      <WebSheetGrabber handlers={webDrag.handlers} />
       {React.createElement('style', null, `
 [data-premium-sheet] { --sheet-ink:${p.ink}; --sheet-muted:${p.muted}; --sheet-line:${p.night ? '#ffffff1c' : '#BDB2A333'}; --sheet-field:${p.night ? 'rgba(255,255,255,.04)' : 'rgba(255,255,255,.55)'}; }
 [data-premium-sheet] :is([aria-label="Svuota campo"],[aria-label^="Rimuovi altro numero"]) { background:transparent!important; border:0!important; border-radius:0!important; box-shadow:none!important; width:28px!important; height:28px!important; }

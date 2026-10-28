@@ -20,10 +20,10 @@ export function nativeHomeStyles<T extends Record<string,any>>(base:T,p:Palette)
  patch('container',{backgroundColor:'transparent'});
  patch('content',{paddingBottom:152});
  patch('sectionCard',{backgroundColor:p.surface,borderColor:p.border,borderWidth:1,borderRadius:19,padding:15,marginBottom:12});
- for(const key of ['priorityCard','priorityCardGlassBlue','priorityCardAndroidPremium','priorityCardGlassBlueAndroid'])patch(key,{backgroundColor:p.night?'rgba(131,117,163,.16)':'rgba(234,228,247,.64)',borderColor:p.border,borderWidth:1,borderRadius:17,padding:14,marginBottom:0,marginTop:0,shadowOpacity:0});
+ for(const key of ['priorityCard','priorityCardGlassBlue','priorityCardAndroidPremium','priorityCardGlassBlueAndroid'])patch(key,{backgroundColor:p.night?'rgba(216,194,155,.10)':'rgba(240,229,209,.62)',borderColor:p.border,borderWidth:1,borderRadius:17,padding:14,marginBottom:0,marginTop:0,shadowOpacity:0});
  for(const key of ['priorityTitle','priorityTitleGlassBlue','priorityTitleAndroidPremium'])patch(key,{color:p.ink,fontFamily:Platform.OS==='ios'?'System':'sans-serif',fontSize:17,lineHeight:23,fontWeight:'600',textAlign:'left',alignSelf:'stretch'});
- for(const key of ['priorityText','priorityTextGlassBlue','priorityTextAndroidPremium'])patch(key,{color:p.muted,fontSize:12,lineHeight:18,fontWeight:'400',textAlign:'left'});
- for(const key of ['priorityEyebrow','priorityEyebrowGlassBlue','priorityEyebrowAndroidPremium'])patch(key,{color:p.muted,fontSize:9,lineHeight:13,letterSpacing:1.2,textAlign:'left',alignSelf:'stretch'});
+ for(const key of ['priorityText','priorityTextGlassBlue','priorityTextAndroidPremium'])patch(key,{color:p.muted,fontSize:13,lineHeight:19,fontWeight:'400',textAlign:'left',alignSelf:'stretch',width:'100%',maxWidth:'100%'});
+ for(const key of ['priorityEyebrow','priorityEyebrowGlassBlue','priorityEyebrowAndroidPremium'])patch(key,{color:p.night?'#D8C29B':'#8F6D3B',fontSize:10,lineHeight:14,fontWeight:'600',letterSpacing:1.2,textAlign:'left',alignSelf:'stretch'});
  patch('sectionCardDark',{backgroundColor:p.night?'rgba(179,145,93,.10)':'rgba(246,233,211,.5)',borderColor:p.border,borderWidth:1,borderRadius:17,padding:14,marginBottom:12});
  patch('sectionTitleDark',{color:p.ink}); patch('sectionTextDark',{color:p.muted});
  for(const key of ['operatorModalCard','customerInsightModalCard'])patch(key,{backgroundColor:p.night?'#202325':'#F5F1EB',borderColor:p.border});

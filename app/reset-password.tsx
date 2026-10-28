@@ -409,7 +409,7 @@ export default function ResetPasswordScreen() {
         }}
       >
         <View style={styles.feedbackModalBackdrop}>
-          <DockedSheetSurface
+          <DockedSheetSurface webDocked={false}
             accessibilityRole="alert"
             style={[
               styles.feedbackModalCard,

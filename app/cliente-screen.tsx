@@ -33781,7 +33781,7 @@ function ClienteFrontendScreenContent({ nativeInitialTab }: ClienteFrontendScree
             accessibilityRole="button"
             accessibilityLabel="Chiudi informazioni servizio"
           />
-          <DockedSheetSurface onClose={() => setServiceInfoDetails(null)} style={[styles.serviceInfoModalCard, isWeb && styles.serviceInfoModalCardWeb]}>
+          <DockedSheetSurface webDocked={false} onClose={() => setServiceInfoDetails(null)} style={[styles.serviceInfoModalCard, isWeb && styles.serviceInfoModalCardWeb]}>
             {Platform.OS !== 'web' ? <NativeSheetHandle style={{width:36,height:4,borderRadius:2,backgroundColor:'#D6DFE9',alignSelf:'center',marginBottom:8}} /> : null}
             <View style={styles.serviceInfoModalHeader}>
               <View style={styles.serviceInfoModalIcon}>

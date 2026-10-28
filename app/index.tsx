@@ -4004,7 +4004,7 @@ function PremiumClientLandingScreen() {
       }}>
         <View style={{ flex: 1, justifyContent: 'flex-end', alignItems: 'center', padding: 28, paddingBottom: 0 }}>
           <TouchableOpacity accessibilityRole="button" accessibilityLabel="Chiudi opzioni salone" activeOpacity={1} onPress={() => setSavedSalonActionsCode(null)} style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(15,23,42,0.25)' }]} />
-          <DockedSheetSurface accessibilityViewIsModal style={{ width: '100%', maxWidth: 320, backgroundColor: '#FFFFFF', borderRadius: 22, padding: 16, borderWidth: 1, borderColor: '#E5EAF1', shadowColor: '#172B46', shadowOpacity: 0.16, shadowRadius: 24, shadowOffset: { width: 0, height: 10 }, elevation: 12 }}>
+          <DockedSheetSurface webDocked={false} accessibilityViewIsModal style={{ width: '100%', maxWidth: 320, backgroundColor: '#FFFFFF', borderRadius: 22, padding: 16, borderWidth: 1, borderColor: '#E5EAF1', shadowColor: '#172B46', shadowOpacity: 0.16, shadowRadius: 24, shadowOffset: { width: 0, height: 10 }, elevation: 12 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 14 }}>
               <AccessSalonBadge salonCode={savedSalonActionsCode ?? ''} name={savedSalonActionsCode ?? ''} size={38} />
               <View style={{ flex: 1 }}><Text style={{ fontSize: 10, fontWeight: '700', letterSpacing: 0.8, color: '#7B899C', marginBottom: 3 }}>SALONE SALVATO</Text><Text numberOfLines={2} style={{ fontSize: 14, fontWeight: '600', color: '#23364F' }}>{savedSalonActionsCode}</Text></View>

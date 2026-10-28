@@ -9,6 +9,7 @@ import { NativeHomeIndicators, NativeHomeInvite, NativeHomeResults, NativeHomeQu
 import { nativeHomeStyles } from '../../components/owner-premium-native-style';
 import { OwnerPremiumDashboard } from '../../components/owner-premium-dashboard';
 import { HomeCustomersCard, HomeOperatorsCard, type HomeCustomerRow, type HomeOperatorRow } from '../../components/owner-home-people-web';
+import { CustomerInsightPanel, OperatorAgendaPanel, type AgendaOperator } from '../../components/owner-people-panels';
 import { useAccessAppearance } from '../../components/access-premium';
 import { OwnerPremiumHomeHeading, OwnerPremiumHomeCss, OwnerPremiumHomeRegion, webHomePart, premiumHomeStyles } from '../../components/owner-premium-web';
 import { ShopEntry } from "../../components/shop/shop-entry";
@@ -818,6 +819,7 @@ export default function HomeScreen() {
   const [isOperatorAgendaSystemDialogOpen, setIsOperatorAgendaSystemDialogOpen] = useState(false);
   const [showCustomerInsightsModal, setShowCustomerInsightsModal] = useState(false);
   const [selectedCustomerInsightId, setSelectedCustomerInsightId] = useState<string | null>(null);
+  const [customerInsightDetailOpen, setCustomerInsightDetailOpen] = useState(false);
   const [customerInsightSearchQuery, setCustomerInsightSearchQuery] = useState('');
   const [customerAppointmentFilter, setCustomerAppointmentFilter] = useState<
     'all' | 'today' | 'future' | 'past'
@@ -1391,6 +1393,23 @@ export default function HomeScreen() {
   );
   const shouldHoldOperatorInsightMetrics = shouldHoldOwnerHomeData;
   const operatorBoardPreview = operatorDailyBoards.filter((item) => item.totalAssigned > 0).slice(0, 3);
+  const agendaPanelOperators = useMemo<AgendaOperator[]>(
+    () =>
+      operatorDailyBoards.map((item) => ({
+        id: item.operator.id,
+        name: item.operator.nome,
+        role: item.operator.mestiere ?? '',
+        photoUri: item.operator.fotoUri,
+        openTasks: item.openTasks,
+        nextTime: item.nextItem?.ora ?? null,
+        timeline: item.timeline,
+      })),
+    [operatorDailyBoards]
+  );
+  const agendaPanelDateLabel = useMemo(
+    () => new Intl.DateTimeFormat('it-IT', { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date(`${oggi}T12:00:00`)),
+    [oggi]
+  );
   const homeOperatorRows = useMemo<HomeOperatorRow[]>(
     () =>
       operatorDailyBoards.map((item) => ({
@@ -1932,6 +1951,7 @@ export default function HomeScreen() {
     setCustomerInsightSearchQuery('');
     setCustomerAppointmentFilter('all');
     setSelectedCustomerInsightId(customerInsightBoards[0]?.boardKey ?? null);
+    setCustomerInsightDetailOpen(false);
     setShowCustomerInsightsModal(true);
   }, [customerInsightBoards]);
 
@@ -1939,6 +1959,7 @@ export default function HomeScreen() {
     setCustomerInsightSearchQuery('');
     setCustomerAppointmentFilter('all');
     setSelectedCustomerInsightId(customerKey);
+    setCustomerInsightDetailOpen(true);
     setShowCustomerInsightsModal(true);
   }, []);
 
@@ -4231,7 +4252,6 @@ admin: (showAdminPanel ? (
         }, includeBottomSafeArea:false, bottomSafeAreaSpacing:0} : {})} style={styles.operatorModalCard}>
             {Platform.OS==='web'?<OwnerWebSheetHeader title={selectedOperatorBoard?`Appuntamenti di ${selectedOperatorBoard.operator.nome}`:'Agenda operatori'} subtitle="Appuntamenti, richieste e lavoro da chiudere." closeLabel="Chiudi agenda operatori" onClose={()=>setShowOperatorAgendaModal(false)}/>:(            <View style={[styles.operatorModalHeader, { marginBottom: 8 }]}>
               <View style={styles.operatorModalHeaderTextWrap}>
-                <Text style={[styles.operatorModalEyebrow, { fontSize: 10, marginBottom: 3 }]}>Live operatori</Text>
                 <Text style={[styles.operatorModalTitle, { fontSize: Platform.OS === 'web' ? 27 : 24, marginBottom: 3 }]}>
                   {selectedOperatorBoard
                     ? `Appuntamenti di ${selectedOperatorBoard.operator.nome}`
@@ -4257,183 +4277,20 @@ admin: (showAdminPanel ? (
             </View>
 
 )}
-            <View style={styles.operatorModalToolbar}>
-              {Platform.OS !== 'web' ? <Text style={{width:'100%',fontSize:11,lineHeight:16,color:premiumPalette.muted}}>Periodo del report · PDF o stampa</Text> : null}
-              <View style={styles.operatorModalScopeRow}>
-                {([
-                  { key: 'day', label: 'Giorno' },
-                  { key: 'week', label: 'Settimana' },
-                  { key: 'month', label: 'Mese' },
-                ] as const).map((item) => {
-                  const active = operatorAgendaPrintScope === item.key;
-                  return (
-                    <HapticTouchable
-                      key={item.key}
-                      style={[
-                        styles.operatorModalScopeChip,
-                        active && styles.operatorModalScopeChipActive,
-                      ]}
-                      onPress={() => setOperatorAgendaPrintScope(item.key)}
-                      pressScale={0.98}
-                      pressOpacity={0.96}
-                    >
-                      <Text
-                        style={[
-                          styles.operatorModalScopeChipText,
-                          active && styles.operatorModalScopeChipTextActive,
-                        ]}
-                      >
-                        {item.label}
-                      </Text>
-                    </HapticTouchable>
-                  );
-                })}
-              </View>
-              <HapticTouchable
-                style={[
-                  styles.operatorModalToolbarButton,
-                  isOperatorAgendaSystemDialogOpen && styles.operatorModalToolbarButtonDisabled,
-                ]}
-                onPress={exportOperatorAgendaPdf}
-                disabled={isOperatorAgendaSystemDialogOpen}
-                pressScale={0.98}
-                pressOpacity={0.96}
-              >
-                <Ionicons
-                  name="document-text-outline"
-                  size={16}
-                  color={isOperatorAgendaSystemDialogOpen ? '#94A3B8' : premiumPalette.ink}
-                />
-                <Text
-                  style={[
-                    styles.operatorModalToolbarButtonText,
-                    isOperatorAgendaSystemDialogOpen && styles.operatorModalToolbarButtonTextDisabled,
-                  ]}
-                >
-                  PDF
-                </Text>
-              </HapticTouchable>
-              {Platform.OS !== 'web' ? (
-                <HapticTouchable
-                  style={[
-                    styles.operatorModalToolbarButton,
-                    isOperatorAgendaSystemDialogOpen && styles.operatorModalToolbarButtonDisabled,
-                  ]}
-                  onPress={printOperatorAgenda}
-                  disabled={isOperatorAgendaSystemDialogOpen}
-                  pressScale={0.98}
-                  pressOpacity={0.96}
-                >
-                  <Ionicons
-                    name="print-outline"
-                    size={16}
-                    color={isOperatorAgendaSystemDialogOpen ? '#94A3B8' : premiumPalette.ink}
-                  />
-                  <Text
-                    style={[
-                      styles.operatorModalToolbarButtonText,
-                      isOperatorAgendaSystemDialogOpen && styles.operatorModalToolbarButtonTextDisabled,
-                    ]}
-                  >
-                    Stampa
-                  </Text>
-                </HapticTouchable>
-              ) : null}
-            </View>
-
-            <ScrollView
-              style={styles.operatorModalScroll}
-              {...webHomePart("insight-scroll")} contentContainerStyle={[styles.operatorModalScrollContent, Platform.OS !== 'web' && {paddingBottom:homeSheetInsets.bottom+8}]}
-              showsVerticalScrollIndicator
-              indicatorStyle="black"
-            >
-              {visibleOperatorBoards.length === 0 ? (
-                <View style={styles.operatorModalEmptyCard}>
-                  <Text style={styles.operatorModalEmptyTitle}>Nessun operatore disponibile</Text>
-                  <Text style={styles.operatorModalEmptyText}>
-                    Appena aggiungi gli operatori in servizi, qui comparira il loro punto operativo live.
-                  </Text>
-                </View>
-              ) : (
-                visibleOperatorBoards.map((item) => (
-                  <View {...webHomePart("operator-detail")} key={item.operator.id} style={styles.operatorModalBoard}>
-                    <View style={styles.operatorModalBoardHeader}>
-                      <View style={styles.operatorModalBoardIdentity}>
-                        <View style={styles.operatorModalBoardAvatar}>
-                          {item.operator.fotoUri ? (
-                            <Image source={{ uri: item.operator.fotoUri }} style={styles.operatorModalBoardAvatarImage} />
-                          ) : (
-                            <Ionicons name="person-outline" size={20} color={Platform.OS === 'web' ? premiumPalette.ink : "#1E293B"} />
-                          )}
-                        </View>
-                        <View style={styles.operatorModalBoardTextWrap}>
-                          <Text style={styles.operatorModalBoardName}>{item.operator.nome}</Text>
-                          <Text style={styles.operatorModalBoardRole}>{item.operator.mestiere}</Text>
-                        </View>
-                      </View>
-
-                      <View style={styles.operatorModalBoardCounters}>
-                        <View style={styles.operatorModalCounterPill}>
-                          <Text style={styles.operatorModalCounterValue}>{item.openTasks}</Text>
-                          <Text style={styles.operatorModalCounterLabel}>da fare</Text>
-                        </View>
-                        <View style={styles.operatorModalCounterPillSoft}>
-                          <Text style={styles.operatorModalCounterValueSoft}>{item.totalAssigned}</Text>
-                          <Text style={styles.operatorModalCounterLabelSoft}>totali</Text>
-                        </View>
-                      </View>
-                    </View>
-
-                    {item.timeline.length === 0 ? (
-                      <View style={styles.operatorModalBoardEmpty}>
-                        <Text style={styles.operatorModalBoardEmptyTitle}>Agenda libera oggi</Text>
-                        <Text style={styles.operatorModalBoardEmptyText}>
-                          Nessun appuntamento o richiesta assegnata in questa giornata.
-                        </Text>
-                      </View>
-                    ) : (
-                      <View style={styles.operatorModalTimeline}>
-                        {item.timeline.map((entry) => (
-                          <View key={entry.id} style={styles.operatorModalTimelineRow}>
-                            <View style={styles.operatorModalTimeBadge}>
-                              <Text style={styles.operatorModalTimeBadgeText}>{entry.ora}</Text>
-                            </View>
-
-                            <View style={styles.operatorModalTimelineContent}>
-                              <View style={styles.operatorModalTimelineTopRow}>
-                                <Text style={styles.operatorModalTimelineTitle}>{entry.title}</Text>
-                                <View
-                                  style={[
-                                    styles.operatorModalStatusPill,
-                                    entry.tone === 'request' && styles.operatorModalStatusPillRequest,
-                                    entry.tone === 'done' && styles.operatorModalStatusPillDone,
-                                    entry.tone === 'cash' && styles.operatorModalStatusPillCash,
-                                    entry.tone === 'muted' && styles.operatorModalStatusPillMuted,
-                                  ]}
-                                >
-                                  <Text
-                                    style={[
-                                      styles.operatorModalStatusPillText,
-                                      entry.tone === 'request' && styles.operatorModalStatusPillTextRequest,
-                                      entry.tone === 'done' && styles.operatorModalStatusPillTextDone,
-                                      entry.tone === 'cash' && styles.operatorModalStatusPillTextCash,
-                                      entry.tone === 'muted' && styles.operatorModalStatusPillTextMuted,
-                                    ]}
-                                  >
-                                    {entry.badge}
-                                  </Text>
-                                </View>
-                              </View>
-                              <Text style={styles.operatorModalTimelineSubtitle}>{entry.subtitle}</Text>
-                            </View>
-                          </View>
-                        ))}
-                      </View>
-                    )}
-                  </View>
-                ))
-              )}
-            </ScrollView>
+            <OperatorAgendaPanel
+              operators={agendaPanelOperators}
+              selectedId={selectedOperatorBoardId}
+              onSelect={setSelectedOperatorBoardId}
+              dateLabel={agendaPanelDateLabel}
+              totalOpen={totalOperatorOpenTasks}
+              totalRequests={totalOperatorPendingRequests}
+              scope={operatorAgendaPrintScope}
+              onScope={setOperatorAgendaPrintScope}
+              onPdf={exportOperatorAgendaPdf}
+              onPrint={Platform.OS !== 'web' ? printOperatorAgenda : undefined}
+              exportBusy={isOperatorAgendaSystemDialogOpen}
+              bottomInset={Platform.OS !== 'web' ? homeSheetInsets.bottom : 0}
+            />
           </DockedSheetSurface>
         </View>
       </Modal>
@@ -4451,7 +4308,6 @@ admin: (showAdminPanel ? (
           <DockedSheetSurface {...(Platform.OS !== 'web' ? {onClose: () => setShowCustomerInsightsModal(false), includeBottomSafeArea:false, bottomSafeAreaSpacing:0} : {})} style={styles.customerInsightModalCard}>
             {Platform.OS==='web'?<OwnerWebSheetHeader title="Clienti del salone" subtitle="Storico, agenda e servizi richiesti." closeLabel="Chiudi appuntamenti cliente" onClose={()=>setShowCustomerInsightsModal(false)}/>:(            <View style={styles.operatorModalHeader}>
               <View style={styles.operatorModalHeaderTextWrap}>
-                <Text style={styles.operatorModalEyebrow}>Focus clienti</Text>
                 <Text style={styles.operatorModalTitle}>{Platform.OS === 'web' ? 'Dettagli appuntamenti clienti' : 'Clienti del salone'}</Text>
                 <Text style={styles.operatorModalText}>
                   {Platform.OS === 'web' ? 'Cerca il cliente e consulta storico, agenda attiva, spesa totale e servizi più richiesti.' : 'Storico, prossimi appuntamenti e servizi.'}
@@ -4473,293 +4329,26 @@ admin: (showAdminPanel ? (
             </View>
 
 )}
-            <DeferredCustomerInsightSearchInput
-              active={showCustomerInsightsModal}
-              value={customerInsightSearchQuery}
-              onCommit={setCustomerInsightSearchQuery}
-            />
-
-            <FlatList
-              horizontal
-              style={styles.customerInsightPickerScroll}
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.customerInsightPickerRow}
-              data={filteredCustomerInsightBoards}
-              extraData={selectedCustomerInsightBoard?.boardKey}
-              keyExtractor={(item) => item.boardKey}
-              initialNumToRender={8}
-              maxToRenderPerBatch={8}
-              windowSize={3}
-              keyboardShouldPersistTaps="handled"
-              renderItem={({ item }) => {
-                const selected = item.boardKey === selectedCustomerInsightBoard?.boardKey;
-
-                return (
-                  <HapticTouchable
-                    key={item.boardKey}
-                    style={[
-                      styles.customerInsightPickerChip,
-                      selected && styles.customerInsightPickerChipActive,
-                    ]}
-                    onPress={() => setSelectedCustomerInsightId(item.boardKey)}
-                    pressScale={0.98}
-                    pressOpacity={0.98}
-                  >
-                    <Text
-                      style={[
-                        styles.customerInsightPickerChipTitle,
-                        selected && styles.customerInsightPickerChipTitleActive,
-                      ]}
-                      numberOfLines={Platform.OS === 'web' ? 1 : 2}
-                      adjustsFontSizeToFit={Platform.OS === 'web'}
-                      minimumFontScale={0.78}
-                      allowFontScaling={false}
-                    >
-                      {item.customer.nome}
-                    </Text>
-                    <Text
-                      style={[
-                        styles.customerInsightPickerChipMeta,
-                        selected && styles.customerInsightPickerChipMetaActive,
-                      ]}
-                      numberOfLines={1}
-                      allowFontScaling={false}
-                    >
-                      {item.totalAppointments} appunt.
-                    </Text>
-                  </HapticTouchable>
-                );
+            <CustomerInsightPanel
+              search={<DeferredCustomerInsightSearchInput
+                active={showCustomerInsightsModal}
+                value={customerInsightSearchQuery}
+                onCommit={setCustomerInsightSearchQuery}
+              />}
+              boards={filteredCustomerInsightBoards}
+              selected={selectedCustomerInsightBoard}
+              detailOpen={customerInsightDetailOpen}
+              onSelect={(key) => {
+                setSelectedCustomerInsightId(key);
+                setCustomerAppointmentFilter('all');
+                setCustomerInsightDetailOpen(true);
               }}
+              onBack={() => setCustomerInsightDetailOpen(false)}
+              filter={customerAppointmentFilter}
+              onFilter={setCustomerAppointmentFilter}
+              reserveCash={reserveCashAmounts}
+              bottomInset={Platform.OS !== 'web' ? homeSheetInsets.bottom : 0}
             />
-
-            <ScrollView
-              style={styles.operatorModalScroll}
-              contentContainerStyle={[styles.operatorModalScrollContent, Platform.OS !== 'web' && {paddingBottom:homeSheetInsets.bottom+8}]}
-              showsVerticalScrollIndicator
-              indicatorStyle="black"
-            >
-              {!selectedCustomerInsightBoard ? (
-                <View style={styles.operatorModalEmptyCard}>
-                  <Text style={styles.operatorModalEmptyTitle}>Nessun cliente trovato</Text>
-                  <Text style={styles.operatorModalEmptyText}>
-                    Prova con nome, telefono, email o uno dei servizi già fatti.
-                  </Text>
-                </View>
-              ) : (
-                <View {...webHomePart("customer-detail")} style={styles.customerInsightBoard}>
-                  <View style={styles.customerInsightBoardHeader}>
-                    <View style={styles.customerInsightBoardIdentity}>
-                      <Text style={styles.customerInsightBoardName}>
-                        {selectedCustomerInsightBoard.customer.nome}
-                      </Text>
-                      <Text style={styles.customerInsightBoardContacts}>
-                        {[
-                          selectedCustomerInsightBoard.customer.telefono,
-                          selectedCustomerInsightBoard.customer.email ?? '',
-                          selectedCustomerInsightBoard.customer.instagram
-                            ? `@${selectedCustomerInsightBoard.customer.instagram}`
-                            : '',
-                        ]
-                          .filter(Boolean)
-                          .join(' · ') || 'Contatti non disponibili'}
-                      </Text>
-                    </View>
-                    <View style={styles.customerInsightSpendBadge}>
-                      <Text style={styles.customerInsightSpendBadgeValue}>
-                        € {selectedCustomerInsightBoard.totalSpent.toFixed(2)}
-                      </Text>
-                      <Text style={styles.customerInsightSpendBadgeLabel}>spesa servizi</Text>
-                    </View>
-                  </View>
-
-                  <View {...webHomePart("customer-stats")} style={styles.customerInsightStatsGrid}>
-                    <View style={styles.customerInsightStatCard}>
-                      <Text style={styles.customerInsightStatValue}>
-                        {selectedCustomerInsightBoard.pastAppointments}
-                      </Text>
-                      <Text style={styles.customerInsightStatLabel}>Passati</Text>
-                    </View>
-                    <View style={styles.customerInsightStatCard}>
-                      <Text style={styles.customerInsightStatValue}>
-                        {selectedCustomerInsightBoard.todayAppointments}
-                      </Text>
-                      <Text style={styles.customerInsightStatLabel}>Oggi</Text>
-                    </View>
-                    <View style={styles.customerInsightStatCard}>
-                      <Text style={styles.customerInsightStatValue}>
-                        {selectedCustomerInsightBoard.futureAppointments}
-                      </Text>
-                      <Text style={styles.customerInsightStatLabel}>Futuri</Text>
-                    </View>
-                    <View style={styles.customerInsightStatCard}>
-                      <Text style={styles.customerInsightStatValue}>
-                        {reserveCashAmounts?'Riservato':`€ ${selectedCustomerInsightBoard.averageTicket.toFixed(0)}`}
-                      </Text>
-                      <Text style={styles.customerInsightStatLabel}>Ticket medio</Text>
-                    </View>
-                    <View style={styles.customerInsightStatCard}>
-                      <Text style={styles.customerInsightStatValue}>
-                        {selectedCustomerInsightBoard.completedAppointments}
-                      </Text>
-                      <Text style={styles.customerInsightStatLabel}>Completati</Text>
-                    </View>
-                    <View style={styles.customerInsightStatCard}>
-                      <Text style={styles.customerInsightStatValue}>
-                        {reserveCashAmounts?'Riservato':`€ ${selectedCustomerInsightBoard.collectedSpent.toFixed(0)}`}
-                      </Text>
-                      <Text style={styles.customerInsightStatLabel}>Incassato</Text>
-                    </View>
-                  </View>
-
-                  <View style={styles.customerInsightHighlightsRow}>
-                    <View style={styles.customerInsightHighlightCard}>
-                      <Text style={styles.customerInsightHighlightLabel}>Prossimo</Text>
-                      <Text style={styles.customerInsightHighlightValue}>
-                        {selectedCustomerInsightBoard.nextAppointment
-                          ? `${formatDateLabel(
-                              selectedCustomerInsightBoard.nextAppointment.data ?? oggi
-                            )} · ${selectedCustomerInsightBoard.nextAppointment.ora}`
-                          : 'Nessun futuro'}
-                      </Text>
-                      <Text style={styles.customerInsightHighlightSubvalue}>
-                        {selectedCustomerInsightBoard.nextAppointment?.servizio ?? '—'}
-                      </Text>
-                    </View>
-
-                    <View style={styles.customerInsightHighlightCard}>
-                      <Text style={styles.customerInsightHighlightLabel}>Ultimo</Text>
-                      <Text style={styles.customerInsightHighlightValue}>
-                        {selectedCustomerInsightBoard.latestAppointment
-                          ? `${formatDateLabel(
-                              selectedCustomerInsightBoard.latestAppointment.data ?? oggi
-                            )} · ${selectedCustomerInsightBoard.latestAppointment.ora}`
-                          : 'Nessuno storico'}
-                      </Text>
-                      <Text style={styles.customerInsightHighlightSubvalue}>
-                        {selectedCustomerInsightBoard.latestAppointment?.servizio ?? '—'}
-                      </Text>
-                    </View>
-                  </View>
-
-                  <View {...webHomePart("customer-services")} style={styles.customerInsightServicesCard}>
-                    <Text style={styles.customerInsightSectionTitle}>Servizi fruiti</Text>
-                    {selectedCustomerInsightBoard.serviceStats.length === 0 ? (
-                      <Text style={styles.customerInsightSectionEmpty}>
-                        Nessun servizio completato registrato.
-                      </Text>
-                    ) : (
-                      <View style={styles.customerInsightServiceList}>
-                        {selectedCustomerInsightBoard.serviceStats.slice(0, 6).map((item) => (
-                          <View key={`${selectedCustomerInsightBoard.boardKey}-${item.serviceName}`} style={styles.customerInsightServiceRow}>
-                            <Text style={styles.customerInsightServiceName}>{item.serviceName}</Text>
-                            <Text style={styles.customerInsightServiceMeta}>
-                              {item.count}x · € {item.total.toFixed(2)}
-                            </Text>
-                          </View>
-                        ))}
-                      </View>
-                    )}
-                  </View>
-
-                  <View {...webHomePart("customer-timeline")} style={styles.customerInsightTimelineCard}>
-                    <Text style={styles.customerInsightSectionTitle}>Lista appuntamenti</Text>
-                    <View style={premiumFilterStyles.panel}>
-                      <View style={premiumFilterStyles.icon} accessibilityLabel="Filtri appuntamenti">
-                        <Ionicons name="funnel-outline" size={18} color={premiumPalette.muted} />
-                      </View>
-                      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={premiumFilterStyles.viewport} contentContainerStyle={styles.customerInsightFilterRow} keyboardShouldPersistTaps="handled">
-                      {customerAppointmentFilterOptions.map((option) => {
-                        const active = customerAppointmentFilter === option.key;
-
-                        return (
-                          <HapticTouchable
-            key={`${selectedCustomerInsightBoard.boardKey}-${option.key}`}
-                            style={[
-                              styles.customerInsightFilterChip,
-                              active && styles.customerInsightFilterChipActive,
-                            ]}
-                            onPress={() => setCustomerAppointmentFilter(option.key)}
-                            accessibilityRole="button"
-                            accessibilityState={{ selected: active }}
-                            pressScale={0.98}
-                            pressOpacity={0.98}
-                          >
-                            <Text
-                              style={[
-                                styles.customerInsightFilterChipText,
-                                active && styles.customerInsightFilterChipTextActive,
-                              ]}
-                            >
-                              {option.label}
-                            </Text>
-                            <Text
-                              style={[
-                                styles.customerInsightFilterChipCount,
-                                active && styles.customerInsightFilterChipCountActive,
-                              ]}
-                            >
-                              {option.count}
-                            </Text>
-                            {active && (
-                              <View style={styles.customerInsightFilterSeal} pointerEvents="none">
-                                <FilterCheckmark />
-                              </View>
-                            )}
-                          </HapticTouchable>
-                        );
-                      })}
-                      </ScrollView>
-                    </View>
-
-                    {visibleCustomerTimeline.length === 0 ? (
-                      <Text style={styles.customerInsightSectionEmpty}>
-                        Nessun appuntamento in questo filtro.
-                      </Text>
-                    ) : (
-                    <View style={styles.customerInsightTimeline}>
-                      {visibleCustomerTimeline.map((entry) => (
-                        <View key={`${selectedCustomerInsightBoard.boardKey}-${entry.id}`} style={styles.customerInsightTimelineRow}>
-                          <View style={styles.customerInsightDateBadge}>
-                            <Text style={styles.customerInsightDateBadgeDay}>{entry.dateLabel}</Text>
-                            <Text style={styles.customerInsightDateBadgeTime}>{entry.ora}</Text>
-                          </View>
-
-                          <View style={styles.customerInsightTimelineContent}>
-                            <View style={styles.customerInsightTimelineTopRow}>
-                              <Text style={styles.customerInsightTimelineTitle}>{entry.title}</Text>
-                              <View
-                                style={[
-                                  styles.customerInsightPhasePill,
-                                  entry.tone === 'future' && styles.customerInsightPhasePillFuture,
-                                  entry.tone === 'today' && styles.customerInsightPhasePillToday,
-                                  entry.tone === 'past' && styles.customerInsightPhasePillPast,
-                                  entry.tone === 'muted' && styles.customerInsightPhasePillMuted,
-                                ]}
-                              >
-                                <Text
-                                  style={[
-                                    styles.customerInsightPhasePillText,
-                                    entry.tone === 'future' && styles.customerInsightPhasePillTextFuture,
-                                    entry.tone === 'today' && styles.customerInsightPhasePillTextToday,
-                                    entry.tone === 'past' && styles.customerInsightPhasePillTextPast,
-                                    entry.tone === 'muted' && styles.customerInsightPhasePillTextMuted,
-                                  ]}
-                                >
-                                  {entry.phase}
-                                </Text>
-                              </View>
-                            </View>
-                            <Text style={styles.customerInsightTimelineSubtitle}>{entry.subtitle}</Text>
-                            <Text style={styles.customerInsightTimelineStatus}>{entry.badge}</Text>
-                          </View>
-                        </View>
-                      ))}
-                    </View>
-                    )}
-                  </View>
-                </View>
-              )}
-            </ScrollView>
           </DockedSheetSurface>
         </View>
       </CustomerInsightsOverlay>

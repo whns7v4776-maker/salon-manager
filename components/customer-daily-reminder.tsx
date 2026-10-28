@@ -75,7 +75,7 @@ export function CustomerDailyReminder({ salonCode, email, phone, salonName }: { 
     finally { setDismissing(false); }
   };
   return <Modal supportedOrientations={TABLET_MODAL_ORIENTATIONS} visible={focused && !!reminder} transparent animationType="fade" onRequestClose={close}>
-    <View style={s.overlay}><DockedSheetSurface {...(Platform.OS !== 'web' ? {onClose: close} : {})} style={s.card}>
+    <View style={s.overlay}><DockedSheetSurface webDocked={false} {...(Platform.OS !== 'web' ? {onClose: close} : {})} style={s.card}>
       <Text style={s.eyebrow}>AVVISO DEL SALONE</Text>
       {!!salonName && <Text style={s.salon}>{salonName}</Text>}
       <ScrollView style={s.scroll}><Text style={s.title}>{reminder?.title}</Text><Text style={s.body}>{reminder?.body}</Text><CommunicationPoster path={reminder?.image_path} /></ScrollView>
