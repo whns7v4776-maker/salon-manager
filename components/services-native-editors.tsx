@@ -1,5 +1,5 @@
 import { PremiumChoiceRow } from './ui/premium-choice-row';
-import { premiumSectionAccent } from './premium-section-accent';
+import { NativeMedal } from './owner-premium-native-home';
 import { PremiumSearchToolbar } from './ui/premium-search-toolbar';
 import React, { useState } from 'react';
 import { Image, Pressable, ScrollView, TextInput, View } from 'react-native';
@@ -11,20 +11,30 @@ import { ServicesSelect } from './services-profession-filter';
 import { NativeDatePickerModal } from './ui/native-date-picker-modal';
 import type { ServicesWebEditForm } from './services-web-edit-form';
 
+const SECTION_LOOKS: [RegExp, React.ComponentProps<typeof Ionicons>['name'], string, string][] = [
+  [/dati/i, 'cut-outline', '#A9ABD9', '#5B5E9A'], [/prenotazione|posa/i, 'globe-outline', '#86C2BE', '#3E7C7A'],
+  [/promo/i, 'sparkles-outline', '#D69AB0', '#9A4F67'], [/profilo/i, 'person-outline', '#A9ABD9', '#5B5E9A'],
+  [/competen/i, 'ribbon-outline', '#D6B27A', '#8C6A35'], [/disponib/i, 'calendar-outline', '#86C2BE', '#3E7C7A'],
+  [/azioni/i, 'settings-outline', '#C9AA8C', '#7E6247'],
+];
 function EditorSection({ title, open, onPress, children }: React.PropsWithChildren<{ title: string; open: boolean; onPress: () => void }>) {
   const { palette: p } = useAccessAppearance();
+  const found = SECTION_LOOKS.find(([match]) => match.test(title));
+  const look: [React.ComponentProps<typeof Ionicons>['name'], string, string] = found ? [found[1], found[2], found[3]] : ['ellipse-outline', '#C9AA8C', '#7E6247'];
   return <View style={{ gap: 12, borderBottomWidth: 1, borderBottomColor: p.line, paddingBottom: 15 }}>
-    <Pressable accessibilityRole="button" accessibilityLabel={title} accessibilityState={{ expanded: open }} onPress={onPress} style={{ ...premiumSectionAccent(p.night,title), flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 46 }}><Text style={{ flex: 1, color: p.ink, fontSize: 18, lineHeight: 25, fontFamily: nativeSerif }}>{title}</Text><Ionicons name={open ? 'chevron-up' : 'chevron-down'} size={18} color={p.muted} /></Pressable>
+    <Pressable accessibilityRole="button" accessibilityLabel={title} accessibilityState={{ expanded: open }} onPress={onPress} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 52 }}><NativeMedal icon={look[0]} size={38} iconSize={17} accent={p.night ? look[1] : look[2]} /><Text style={{ flex: 1, color: p.ink, fontSize: 18, lineHeight: 25, fontFamily: nativeSerif }}>{title}</Text><Ionicons name={open ? 'chevron-up' : 'chevron-down'} size={18} color={p.muted} /></Pressable>
     <View style={{ display: open ? 'flex' : 'none', gap: 13 }}>{children}</View>
   </View>;
 }
 
 function useEditorControls() {
   const { palette: p } = useAccessAppearance();
-  const button = (label: string, onPress: () => void, disabled = false, primary = false) => <Pressable accessibilityRole="button" disabled={disabled} onPress={onPress} style={{ maxWidth: '100%', alignSelf: 'flex-start', minHeight: 44, borderWidth: 1, borderColor: p.border, backgroundColor: primary ? p.action : p.field, paddingHorizontal: 14, paddingVertical: 11, borderRadius: 12, opacity: disabled ? .4 : 1 }}><Text style={{ color: primary ? p.actionText : p.ink, fontSize: 14, lineHeight: 20 }}>{label}</Text></Pressable>;
-  const field = (label: string, value: string, onChangeText: (v: string) => void, numeric = false, multiline = false) => <PremiumSearchToolbar enabled={/cerca/i.test(label)}><View style={{ gap: 7 }}><Text style={{ color: p.muted, fontSize: 13 }}>{label}</Text><TextInput accessibilityLabel={label} value={value} onChangeText={onChangeText} keyboardType={numeric ? 'decimal-pad' : 'default'} multiline={multiline} textAlignVertical={multiline ? 'top' : 'center'} style={{ minHeight: multiline ? 80 : 48, fontSize: 16, color: p.ink, padding: 13, backgroundColor: p.field, borderWidth: 1, borderColor: p.line, borderRadius: 12 }} /></View></PremiumSearchToolbar>;
-  const check = (label: string, checked: boolean, onPress: () => void) => <Pressable accessibilityRole="checkbox" accessibilityState={{ checked }} onPress={onPress} style={{ flexDirection: 'row', gap: 11, alignItems: 'center', minHeight: 46, paddingVertical: 9 }}><Ionicons name={checked ? 'checkbox-outline' : 'square-outline'} size={22} color={p.ink} /><Text style={{ flex: 1, color: p.ink, fontSize: 14, lineHeight: 21 }}>{label}</Text></Pressable>;
-  return { p, button, field, check };
+  const button = (label: string, onPress: () => void, disabled = false, primary = false) => <Pressable accessibilityRole="button" disabled={disabled} onPress={onPress} style={{ maxWidth: '100%', alignSelf: 'flex-start', minHeight: 44, borderWidth: 1, borderColor: primary ? p.action : (p.night ? p.border : 'rgba(122,100,70,.24)'), backgroundColor: primary ? p.action : p.field, paddingHorizontal: 14, paddingVertical: 11, borderRadius: 12, opacity: disabled ? .4 : 1 }}><Text style={{ color: primary ? p.actionText : p.ink, fontSize: 14, lineHeight: 20 }}>{label}</Text></Pressable>;
+  const field = (label: string, value: string, onChangeText: (v: string) => void, numeric = false, multiline = false) => <PremiumSearchToolbar enabled={/cerca/i.test(label)}><View style={{ gap: 7 }}><Text style={{ color: p.muted, fontSize: 13 }}>{label}</Text><TextInput accessibilityLabel={label} value={value} onChangeText={onChangeText} keyboardType={numeric ? 'decimal-pad' : 'default'} multiline={multiline} textAlignVertical={multiline ? 'top' : 'center'} style={{ minHeight: multiline ? 80 : 48, fontSize: 16, color: p.ink, padding: 13, backgroundColor: p.night ? p.field : '#FFFDF9', borderWidth: 1, borderColor: p.night ? p.line : 'rgba(122,100,70,.26)', borderRadius: 12 }} /></View></PremiumSearchToolbar>;
+  const check = (label: string, checked: boolean, onPress: () => void) => <Pressable accessibilityRole="checkbox" accessibilityState={{ checked }} onPress={onPress} style={{ flexDirection: 'row', gap: 11, alignItems: 'center', minHeight: 46, paddingVertical: 9 }}><Ionicons name={checked ? 'checkbox' : 'square-outline'} size={22} color={checked ? (p.night ? '#D6B27A' : '#7A6446') : p.muted} /><Text style={{ flex: 1, color: p.ink, fontSize: 14, lineHeight: 21 }}>{label}</Text></Pressable>;
+  // Footer pair: quiet Annulla, primary action takes the remaining width.
+  const footerButton = (label: string, onPress: () => void, disabled = false, primary = false) => <Pressable accessibilityRole="button" disabled={disabled} onPress={onPress} style={{ flex: primary ? 1 : undefined, minHeight: 50, paddingHorizontal: 18, borderRadius: 14, borderWidth: 1, borderColor: primary ? p.action : (p.night ? p.border : 'rgba(122,100,70,.24)'), backgroundColor: primary ? p.action : p.field, alignItems: 'center', justifyContent: 'center', opacity: disabled ? .45 : 1 }}><Text style={{ color: primary ? p.actionText : p.ink, fontSize: 15, fontWeight: '600' }}>{label}</Text></Pressable>;
+  return { p, button, field, check, footerButton };
 }
 
 function NativeEditorFrame({ title, onClose, embedded, children, footer }: React.PropsWithChildren<{ title: string; onClose: () => void; embedded: boolean; footer: React.ReactNode }>) {
@@ -32,17 +42,17 @@ function NativeEditorFrame({ title, onClose, embedded, children, footer }: React
   const insets = useSafeAreaInsets();
   if (embedded) return <View style={{ gap: 16 }}>{children}{footer}</View>;
   return <View style={{ flex: 1, minHeight: 0 }}>
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 18, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: p.line }}><Text accessibilityRole="header" style={{ flex: 1, color: p.ink, fontSize: 24, lineHeight: 31, fontFamily: nativeSerif }}>{title}</Text><Pressable accessibilityRole="button" accessibilityLabel={`Chiudi ${title}`} onPress={onClose} style={{ width: 40, height: 40, borderRadius: 13, alignItems: 'center', justifyContent: 'center', backgroundColor: p.field, borderWidth: 1, borderColor: p.border }}><Ionicons name="close-outline" size={22} color={p.ink} /></Pressable></View>
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 18, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: p.line }}><NativeMedal icon={/operatore/i.test(title) ? 'person-outline' : 'cut-outline'} size={42} iconSize={19} accent={p.night ? '#D6B27A' : '#8C6A35'} /><Text accessibilityRole="header" style={{ flex: 1, color: p.ink, fontSize: 24, lineHeight: 31, fontFamily: nativeSerif }}>{title}</Text><Pressable accessibilityRole="button" accessibilityLabel={`Chiudi ${title}`} onPress={onClose} style={{ width: 40, height: 40, borderRadius: 13, alignItems: 'center', justifyContent: 'center', backgroundColor: p.field, borderWidth: 1, borderColor: p.border }}><Ionicons name="close-outline" size={22} color={p.ink} /></Pressable></View>
     <ScrollView keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" contentContainerStyle={{ padding: 18, gap: 14 }}>{children}</ScrollView>
     <View style={{ paddingHorizontal: 18, paddingTop: 12, paddingBottom: 12 + insets.bottom, borderTopWidth: 1, borderTopColor: p.line }}>{footer}</View>
   </View>;
 }
 
 export function NativeServiceEditor(m: React.ComponentProps<typeof ServicesWebEditForm> & {error?:string}) {
-  const { p, button, field } = useEditorControls();
+  const { p, button, field, footerButton } = useEditorControls();
   const [section, setSection] = useState('Dati del servizio');
   const [newRole, setNewRole] = useState<string | null>(null);
-  const footer = <View style={{ gap: 10 }}>{m.error ? <Text accessibilityRole="alert" style={{ color: p.night ? '#F5BBBB' : '#A53636', fontSize: 14 }}>{m.error}</Text> : null}<Text style={{ color: p.muted, fontSize: 13 }}>{m.price || '0'} € · {m.duration || '0'} min</Text><View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>{button(m.saving ? 'Salvataggio in corso' : 'Salva servizio', m.onSave, !m.canSave || m.saving, true)}{button('Annulla', m.onClose, m.saving)}</View></View>;
+  const footer = <View style={{ gap: 10 }}>{m.error ? <Text accessibilityRole="alert" style={{ color: p.night ? '#F5BBBB' : '#A53636', fontSize: 14 }}>{m.error}</Text> : null}<Text style={{ color: p.muted, fontSize: 13 }}>{m.price || '0'} € · {m.duration || '0'} min</Text><View style={{ flexDirection: 'row', gap: 10 }}>{footerButton('Annulla', m.onClose, m.saving)}{footerButton(m.saving ? 'Salvataggio…' : 'Salva servizio', m.onSave, !m.canSave || m.saving, true)}</View></View>;
   return <NativeEditorFrame title={m.title??'Modifica servizio'} onClose={m.onClose} embedded={m.title === 'Nuovo servizio'} footer={footer}>
     {m.headerExtra}
     <EditorSection title="Dati del servizio" open={section === 'Dati del servizio'} onPress={() => setSection(section === 'Dati del servizio' ? '' : 'Dati del servizio')}>
@@ -58,12 +68,12 @@ export function NativeServiceEditor(m: React.ComponentProps<typeof ServicesWebEd
 
 type OperatorModel = { roleColor?: (role: string) => string; title: string; name: string; role: string; roles: string[]; photo?: string; onName: (v: string) => void; onRole: (v: string) => void; onPhoto: () => void; onRemovePhoto: () => void; mode: string; onMode: (v: 'all_role' | 'selected') => void; services: { id: string; name: string; role?: string; selected: boolean; onToggle: () => void }[]; days: { value: number; label: string }[]; weekdays: number[]; onDay: (v: number) => void; start: string; end: string; onStart: (v: string) => void; onEnd: (v: string) => void; canAddRange: boolean; onAddRange: () => void; ranges: { id: string; label: string; onRemove: () => void }[]; onArchive?: () => void; onDelete?: () => void; onClose: () => void; onSave: () => void; valid: boolean; saving: boolean; error?: string };
 export function NativeOperatorEditor({ model: m }: { model: OperatorModel }) {
-  const { p, button, field, check } = useEditorControls();
+  const { p, button, field, check, footerButton } = useEditorControls();
   const [section, setSection] = useState('Profilo');
   const [customRole, setCustomRole] = useState(false);
   const [query, setQuery] = useState('');
   const [date, setDate] = useState<'start' | 'end' | null>(null);
-  const footer = <View style={{ gap: 10 }}>{m.error ? <Text accessibilityRole="alert" style={{ color: p.night ? '#F5BBBB' : '#A53636', fontSize: 14 }}>{m.error}</Text> : null}<View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>{button(m.saving ? 'Salvataggio in corso' : 'Salva operatore', m.onSave, !m.valid || m.saving, true)}{button('Annulla', m.onClose, m.saving)}</View></View>;
+  const footer = <View style={{ gap: 10 }}>{m.error ? <Text accessibilityRole="alert" style={{ color: p.night ? '#F5BBBB' : '#A53636', fontSize: 14 }}>{m.error}</Text> : null}<View style={{ flexDirection: 'row', gap: 10 }}>{footerButton('Annulla', m.onClose, m.saving)}{footerButton(m.saving ? 'Salvataggio…' : 'Salva operatore', m.onSave, !m.valid || m.saving, true)}</View></View>;
   return <><NativeEditorFrame title={m.title} onClose={m.onClose} embedded={m.title === 'Nuovo operatore'} footer={footer}>
     <EditorSection title="Profilo" open={section === 'Profilo'} onPress={() => setSection(section === 'Profilo' ? '' : 'Profilo')}>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12, alignItems: 'center' }}>{m.photo ? <Image source={{ uri: m.photo }} style={{ width: 52, height: 52, borderRadius: 16 }} /> : <View style={{ width: 52, height: 52, borderRadius: 16, backgroundColor: p.field, alignItems: 'center', justifyContent: 'center' }}><Ionicons name="person-outline" color={p.ink} size={26} /></View>}{button(m.photo ? 'Cambia foto' : 'Aggiungi foto', m.onPhoto)}{m.photo ? button('Rimuovi foto', m.onRemovePhoto) : null}</View>
