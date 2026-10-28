@@ -211,6 +211,10 @@ export function premiumHomeStyles<T extends Record<string, any>>(base: T, p: Ret
   patch('operatorAgendaPreviewLeftWeb',{flexBasis:160,flexGrow:1,minWidth:0});
   patch('operatorAgendaPreviewMetricsWeb',{marginLeft:'auto',flexShrink:0});
   for(const key of ['operatorAgendaPreviewNameWeb','operatorAgendaPreviewRoleWeb'])patch(key,{whiteSpace:'normal',overflow:'visible',textOverflow:'clip'});
+  patch('operatorAgendaPreviewName',{fontSize:15,lineHeight:20,fontWeight:'700',color:p.ink});
+  patch('operatorAgendaPreviewRole',{fontSize:12,lineHeight:17,fontWeight:'500',color:p.muted});
+  patch('operatorAgendaPreviewMetric',{fontSize:13,lineHeight:18,fontWeight:'700'});
+  patch('operatorAgendaPreviewMetricSoft',{fontSize:12,lineHeight:17,fontWeight:'500',color:p.muted});
   return premiumWebCardStyles(result,p) as T;
 }
 

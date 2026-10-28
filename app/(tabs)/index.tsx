@@ -8,6 +8,7 @@ import { SalonBrandPlacementSettings } from '../../components/salon-brand-placem
 import { NativeHomeIndicators, NativeHomeInvite, NativeHomeResults, NativeHomeQuickAction, OwnerPremiumNativeHome } from '../../components/owner-premium-native-home';
 import { nativeHomeStyles } from '../../components/owner-premium-native-style';
 import { OwnerPremiumDashboard } from '../../components/owner-premium-dashboard';
+import { HomeCustomersCard, HomeOperatorsCard, type HomeCustomerRow, type HomeOperatorRow } from '../../components/owner-home-people-web';
 import { useAccessAppearance } from '../../components/access-premium';
 import { OwnerPremiumHomeHeading, OwnerPremiumHomeCss, OwnerPremiumHomeRegion, webHomePart, premiumHomeStyles } from '../../components/owner-premium-web';
 import { ShopEntry } from "../../components/shop/shop-entry";
@@ -1166,7 +1167,7 @@ export default function HomeScreen() {
     }
 
     return {
-      label: 'Buona disponibilita',
+      label: 'Buona disponibilità',
       tone: styles.statusCalm,
       textTone: styles.statusCalmText,
     };
@@ -1390,6 +1391,19 @@ export default function HomeScreen() {
   );
   const shouldHoldOperatorInsightMetrics = shouldHoldOwnerHomeData;
   const operatorBoardPreview = operatorDailyBoards.filter((item) => item.totalAssigned > 0).slice(0, 3);
+  const homeOperatorRows = useMemo<HomeOperatorRow[]>(
+    () =>
+      operatorDailyBoards.map((item) => ({
+        id: item.operator.id,
+        name: item.operator.nome,
+        role: item.operator.mestiere ?? '',
+        photoUri: item.operator.fotoUri,
+        openTasks: item.openTasks,
+        pendingRequests: item.pendingRequests.length,
+        nextTime: item.nextItem?.ora ?? null,
+      })),
+    [operatorDailyBoards]
+  );
   const visibleOperatorBoards = useMemo(
     () =>
       selectedOperatorBoardId
@@ -1820,6 +1834,25 @@ export default function HomeScreen() {
   const totalCustomerDeliveredSpendCompact = `€${Math.round(totalCustomerDeliveredSpend).toLocaleString(
     'it-IT'
   )}`;
+  const homeUpcomingCustomers = useMemo<HomeCustomerRow[]>(() => {
+    const dayFormatter = new Intl.DateTimeFormat('it-IT', { weekday: 'short', day: 'numeric', month: 'short' });
+    const isAhead = (date: string, ora: string) => {
+      if (date !== oggi) return date > oggi;
+      const [hours, minutes] = ora.split(':').map(Number);
+      return hours * 60 + minutes >= currentTimeMinutes;
+    };
+    return customerInsightBoards
+      .filter((item) => item.nextAppointment && isAhead(item.nextAppointment.data ?? oggi, item.nextAppointment.ora))
+      .map((item) => ({ item, date: item.nextAppointment!.data ?? oggi, ora: item.nextAppointment!.ora }))
+      .sort((first, second) => first.date.localeCompare(second.date) || first.ora.localeCompare(second.ora))
+      .slice(0, 3)
+      .map(({ item, date, ora }) => ({
+        key: item.boardKey,
+        name: item.customer.nome.trim(),
+        when: `${date === oggi ? 'Oggi' : dayFormatter.format(new Date(`${date}T12:00:00`)).replace(/\./g, '')} · ${ora}`,
+        service: item.nextAppointment!.servizio,
+      }));
+  }, [currentTimeMinutes, customerInsightBoards, oggi]);
   const filteredCustomerInsightBoards = useMemo(() => {
     const query = lowerItalian(customerInsightSearchQuery.trim());
 
@@ -3401,452 +3434,21 @@ priority: (<View {...webHomePart("priority")}
               </>
             )}
           </View>),
-operators: (<View {...webHomePart("operators")}
-          style={[
-            styles.sectionCard,
-            styles.operatorAgendaCard,
-            responsive.isDesktop && styles.desktopWideCard,
-          ]}
-        >
-          <View {...webHomePart("people-header")} style={styles.operatorAgendaCardHeader}>
-            <View style={styles.operatorAgendaCardTextWrap}>
-              <Text
-                style={styles.operatorAgendaCardTitle}
-              >
-                {Platform.OS === 'web' ? 'Operatori' : 'Appuntamenti per operatore'}
-              </Text>
-            </View>
-            <HapticTouchable
-              style={styles.operatorAgendaCardAction}
-              onPress={openOperatorAgendaModalForAll}
-              accessibilityRole="button" accessibilityLabel="Apri agenda operatori"
-              immediatePress
-              pressScale={0.98}
-              pressOpacity={0.96}
-            >
-              {Platform.OS!=='web'?<Text style={styles.operatorAgendaCardActionText}>Apri</Text>:null}
-              <Ionicons name="chevron-forward" size={18} color={premiumPalette.ink} />
-            </HapticTouchable>
-          </View>
-          <Text {...webHomePart("people-caption")} style={[styles.operatorAgendaCardText, styles.insightDescription]}>
-            {Platform.OS === 'web' ? 'Il lavoro di oggi, per operatore.' : 'Il lavoro di oggi, operatore per operatore. Apri per vedere tutti i dettagli.'}
-          </Text>
-
-          <View {...webHomePart("people-stats")} style={styles.operatorAgendaStatsRow}>
-            <View style={[styles.operatorAgendaStatPill, styles.operatorAgendaStatPillSky]}>
-              {shouldHoldOperatorInsightMetrics ? (
-                <>
-                  <></>
-                  <></>
-                </>
-              ) : (
-                <>
-                  <Text
-                    style={[
-                      styles.operatorAgendaStatValue,
-                      hasWideWebMetricCards && styles.operatorAgendaStatValueWebWide,
-                    ]}
-                    numberOfLines={1}
-                    ellipsizeMode="clip"
-                    adjustsFontSizeToFit
-                    minimumFontScale={0.72}
-                  >
-                    {operatori.length}
-                  </Text>
-                  <Text
-                    style={[
-                      styles.operatorAgendaStatLabel,
-                      hasWideWebMetricCards && styles.operatorAgendaStatLabelWebWide,
-                    ]}
-                    numberOfLines={Platform.OS === 'web' ? 1 : 2}
-                    ellipsizeMode="clip"
-                    adjustsFontSizeToFit
-                    minimumFontScale={0.78}
-                  >
-                    Operatori
-                  </Text>
-                </>
-              )}
-            </View>
-            <View style={[styles.operatorAgendaStatPill, styles.operatorAgendaStatPillMint]}>
-              {shouldHoldOperatorInsightMetrics ? (
-                <>
-                  <></>
-                  <></>
-                </>
-              ) : (
-                <>
-                  <Text
-                    style={[
-                      styles.operatorAgendaStatValue,
-                      hasWideWebMetricCards && styles.operatorAgendaStatValueWebWide,
-                    ]}
-                    numberOfLines={1}
-                    ellipsizeMode="clip"
-                    adjustsFontSizeToFit
-                    minimumFontScale={0.72}
-                  >
-                    {totalOperatorOpenTasks}
-                  </Text>
-                  <Text
-                    style={[
-                      styles.operatorAgendaStatLabel,
-                      hasWideWebMetricCards && styles.operatorAgendaStatLabelWebWide,
-                    ]}
-                    numberOfLines={Platform.OS === 'web' ? 1 : 2}
-                    ellipsizeMode="clip"
-                    adjustsFontSizeToFit
-                    minimumFontScale={0.78}
-                  >
-                    Da fare
-                  </Text>
-                </>
-              )}
-            </View>
-            <View style={[styles.operatorAgendaStatPill, styles.operatorAgendaStatPillLavender]}>
-              {shouldHoldOperatorInsightMetrics ? (
-                <>
-                  <></>
-                  <></>
-                </>
-              ) : (
-                <>
-                  <Text
-                    style={[
-                      styles.operatorAgendaStatValue,
-                      hasWideWebMetricCards && styles.operatorAgendaStatValueWebWide,
-                    ]}
-                    numberOfLines={1}
-                    ellipsizeMode="clip"
-                    adjustsFontSizeToFit
-                    minimumFontScale={0.72}
-                  >
-                    {totalOperatorPendingRequests}
-                  </Text>
-                  <Text
-                    style={[
-                      styles.operatorAgendaStatLabel,
-                      hasWideWebMetricCards && styles.operatorAgendaStatLabelWebWide,
-                    ]}
-                    numberOfLines={Platform.OS === 'web' ? 1 : 2}
-                    ellipsizeMode="clip"
-                    adjustsFontSizeToFit
-                    minimumFontScale={0.78}
-                  >
-                    Richieste
-                  </Text>
-                </>
-              )}
-            </View>
-          </View>
-
-          {operatori.length === 0 ? (
-            <View style={styles.operatorAgendaEmptyState}>
-              <Text style={styles.operatorAgendaEmptyTitle}>Nessun operatore configurato</Text>
-              <Text style={styles.operatorAgendaEmptyText}>
-                Aggiungi gli operatori nella sezione servizi e qui vedrai subito carico e appuntamenti.
-              </Text>
-            </View>
-          ) : operatorBoardPreview.length === 0 ? null : (
-            <View style={styles.operatorAgendaPreviewStack}>
-              {operatorBoardPreview.map((item) => (
-                <HapticTouchable
-                  key={item.operator.id}
-                  style={[
-                    styles.operatorAgendaPreviewRow,
-                    Platform.OS === 'web' && styles.operatorAgendaPreviewRowWeb,
-                    Platform.OS !== 'web' && styles.operatorAgendaPreviewRowNative,
-                  ]}
-                  onPress={() => openOperatorAgendaModalForOperator(item.operator.id)}
-                  immediatePress
-                  pressScale={0.987}
-                  pressOpacity={0.98}
-                >
-                  {Platform.OS !== 'web' ? (
-                    <View style={styles.operatorAgendaPreviewLeftNative}>
-                      <View
-                        style={[
-                          styles.operatorAgendaPreviewAvatar,
-                          styles.operatorAgendaPreviewAvatarNative,
-                        ]}
-                      >
-                        {item.operator.fotoUri ? (
-                          <Image
-                            source={{ uri: item.operator.fotoUri }}
-                            style={styles.operatorAgendaPreviewAvatarImage}
-                          />
-                        ) : (
-                          <Ionicons name="person" size={17} color={premiumPalette.ink} />
-                        )}
-                      </View>
-                      <View
-                        style={[
-                          styles.operatorAgendaPreviewIdentity,
-                          styles.operatorAgendaPreviewIdentityNative,
-                        ]}
-                      >
-                        <View
-                          style={[
-                            styles.operatorAgendaPreviewTextWrap,
-                            styles.operatorAgendaPreviewTextWrapNative,
-                          ]}
-                        >
-                          <Text
-                            style={[
-                              styles.operatorAgendaPreviewName,
-                              styles.operatorAgendaPreviewNameNative,
-                            ]}
-                            numberOfLines={1}
-                            adjustsFontSizeToFit
-                            minimumFontScale={0.78}
-                          >
-                            {item.operator.nome}
-                          </Text>
-                          <Text
-                            style={[
-                              styles.operatorAgendaPreviewRole,
-                              styles.operatorAgendaPreviewRoleNative,
-                            ]}
-                            numberOfLines={1}
-                            adjustsFontSizeToFit
-                            minimumFontScale={0.78}
-                          >
-                            {item.operator.mestiere}
-                          </Text>
-                        </View>
-                      </View>
-                    </View>
-                  ) : (
-                    <View style={styles.operatorAgendaPreviewLeftWeb}>
-                      <View
-                        style={[
-                          styles.operatorAgendaPreviewAvatar,
-                          styles.operatorAgendaPreviewAvatarWeb,
-                        ]}
-                      >
-                        {item.operator.fotoUri ? (
-                          <Image
-                            source={{ uri: item.operator.fotoUri }}
-                            style={styles.operatorAgendaPreviewAvatarImage}
-                          />
-                        ) : (
-                          <Ionicons name="person-outline" size={20} color={Platform.OS === 'web' ? premiumPalette.ink : "#1E293B"} />
-                        )}
-                      </View>
-                      <View
-                        style={[
-                          styles.operatorAgendaPreviewIdentity,
-                          styles.operatorAgendaPreviewIdentityWeb,
-                        ]}
-                      >
-                        <View
-                          style={[
-                            styles.operatorAgendaPreviewTextWrap,
-                            styles.operatorAgendaPreviewTextWrapWeb,
-                          ]}
-                        >
-                          <Text
-                            style={[
-                              styles.operatorAgendaPreviewName,
-                              styles.operatorAgendaPreviewNameWeb,
-                            ]}
-                            numberOfLines={undefined}
-                          >
-                            {item.operator.nome}
-                          </Text>
-                          <Text
-                            style={[
-                              styles.operatorAgendaPreviewRole,
-                              styles.operatorAgendaPreviewRoleWeb,
-                            ]}
-                            numberOfLines={undefined}
-                          >
-                            {item.operator.mestiere}
-                          </Text>
-                        </View>
-                      </View>
-                    </View>
-                  )}
-
-                  <View
-                    style={[
-                      styles.operatorAgendaPreviewMetrics,
-                      Platform.OS === 'web' && styles.operatorAgendaPreviewMetricsWeb,
-                      Platform.OS !== 'web' && styles.operatorAgendaPreviewMetricsNative,
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.operatorAgendaPreviewMetric,
-                        Platform.OS === 'web' && styles.operatorAgendaPreviewMetricWeb,
-                        Platform.OS !== 'web' && styles.operatorAgendaPreviewMetricNative,
-                      ]}
-                      numberOfLines={1}
-                    >
-                      {item.openTasks} da fare
-                    </Text>
-                    <Text
-                      style={[
-                        styles.operatorAgendaPreviewMetricSoft,
-                        Platform.OS === 'web' && styles.operatorAgendaPreviewMetricSoftWeb,
-                        Platform.OS !== 'web' && styles.operatorAgendaPreviewMetricSoftNative,
-                      ]}
-                      numberOfLines={1}
-                      adjustsFontSizeToFit
-                      minimumFontScale={0.78}
-                    >
-                      {item.nextItem ? `${item.nextItem.ora} prossimo` : 'nessun orario'}
-                    </Text>
-                  </View>
-                </HapticTouchable>
-              ))}
-            </View>
-          )}
-        </View>),
-customers: (<View {...webHomePart("customers")}
-          style={[
-            styles.sectionCard,
-            styles.customerInsightsCard,
-            responsive.isDesktop && styles.desktopWideCard,
-          ]}
-        >
-          <View {...webHomePart("people-header")} style={styles.operatorAgendaCardHeader}>
-            <View style={styles.operatorAgendaCardTextWrap}>
-              <Text
-                style={styles.operatorAgendaCardTitle}
-              >
-                {Platform.OS === 'web' ? 'Clienti' : 'Appuntamenti per cliente'}
-              </Text>
-            </View>
-            <CustomerInsightsOpenButton
-              style={styles.operatorAgendaCardAction}
-              onPress={openCustomerInsightsModalForAll}
-              accessibilityLabel="Apri dettagli clienti"
-            >
-              {Platform.OS!=='web'?<Text style={styles.operatorAgendaCardActionText}>Apri</Text>:null}
-              <Ionicons name="chevron-forward" size={18} color={premiumPalette.ink} />
-            </CustomerInsightsOpenButton>
-          </View>
-          <Text {...webHomePart("people-caption")} style={[styles.operatorAgendaCardText, styles.insightDescription]}>
-            {Platform.OS === 'web' ? 'Storico, agenda e totale servizi.' : 'Cerca un cliente: appuntamenti passati e futuri, quelli di oggi e totale servizi.'}
-          </Text>
-
-          <View {...webHomePart("people-stats")} style={styles.operatorAgendaStatsRow}>
-            <View style={[styles.operatorAgendaStatPill, styles.operatorAgendaStatPillPlum]}>
-              {shouldHoldCustomerInsightMetrics ? (
-                <>
-                  <></>
-                  <></>
-                </>
-              ) : (
-                <>
-                  <Text
-                    style={[
-                      styles.operatorAgendaStatValue,
-                      hasWideWebMetricCards && styles.operatorAgendaStatValueWebWide,
-                    ]}
-                    numberOfLines={1}
-                    ellipsizeMode="clip"
-                    adjustsFontSizeToFit
-                    minimumFontScale={0.72}
-                  >
-                    {customerInsightBoards.reduce((total, item) => total + item.pastAppointments, 0)}
-                  </Text>
-                  <Text
-                    style={[
-                      styles.operatorAgendaStatLabel,
-                      hasWideWebMetricCards && styles.operatorAgendaStatLabelWebWide,
-                    ]}
-                    numberOfLines={Platform.OS === 'web' ? 1 : 2}
-                    ellipsizeMode="clip"
-                    adjustsFontSizeToFit
-                    minimumFontScale={0.78}
-                  >
-                    App. passati
-                  </Text>
-                </>
-              )}
-            </View>
-            <View style={[styles.operatorAgendaStatPill, styles.operatorAgendaStatPillSun]}>
-              {shouldHoldCustomerInsightMetrics ? (
-                <>
-                  <></>
-                  <></>
-                </>
-              ) : (
-                <>
-                  <Text
-                    style={[
-                      styles.operatorAgendaStatValue,
-                      hasWideWebMetricCards && styles.operatorAgendaStatValueWebWide,
-                    ]}
-                    numberOfLines={1}
-                    ellipsizeMode="clip"
-                    adjustsFontSizeToFit
-                    minimumFontScale={0.72}
-                  >
-                    {customerInsightBoards.reduce((total, item) => total + item.futureAppointments, 0)}
-                  </Text>
-                  <Text
-                    style={[
-                      styles.operatorAgendaStatLabel,
-                      hasWideWebMetricCards && styles.operatorAgendaStatLabelWebWide,
-                    ]}
-                    numberOfLines={Platform.OS === 'web' ? 1 : 2}
-                    ellipsizeMode="clip"
-                    adjustsFontSizeToFit
-                    minimumFontScale={0.78}
-                  >
-                    App. futuri
-                  </Text>
-                </>
-              )}
-            </View>
-            <View
-              style={[
-                styles.operatorAgendaStatPill,
-                styles.operatorAgendaStatPillRose,
-              ]}
-            >
-              {shouldHoldCustomerInsightMetrics ? (
-                <>
-                  <></>
-                  <></>
-                </>
-              ) : (
-                <>
-                  <Text
-                    style={[
-                      styles.operatorAgendaStatValue,
-                      styles.operatorAgendaStatValueCompact,
-                      hasWideWebMetricCards && styles.operatorAgendaStatValueWebWide,
-                    ]}
-                    numberOfLines={1}
-                    ellipsizeMode="clip"
-                    adjustsFontSizeToFit
-                    minimumFontScale={0.72}
-                  >
-                    {totalCustomerDeliveredSpendCompact}
-                  </Text>
-                  <Text
-                    style={[
-                      styles.operatorAgendaStatLabel,
-                      hasWideWebMetricCards && styles.operatorAgendaStatLabelWebWide,
-                    ]}
-                    numberOfLines={Platform.OS === 'web' ? 1 : 2}
-                    ellipsizeMode="clip"
-                    adjustsFontSizeToFit
-                    minimumFontScale={0.78}
-                  >
-                    Tot servizi
-                  </Text>
-                </>
-              )}
-            </View>
-          </View>
-
-
-        </View>),
+operators: (<HomeOperatorsCard
+          rows={homeOperatorRows}
+          totalOpen={totalOperatorOpenTasks}
+          totalRequests={totalOperatorPendingRequests}
+          loading={shouldHoldOperatorInsightMetrics}
+          onOpenAll={openOperatorAgendaModalForAll}
+          onOpenOperator={openOperatorAgendaModalForOperator}
+        />),
+customers: (<HomeCustomersCard
+          upcoming={homeUpcomingCustomers}
+          footer={shouldHoldCustomerInsightMetrics ? '' : `${numeroClienti} ${numeroClienti === 1 ? 'cliente' : 'clienti'} in rubrica${reserveCashAmounts ? '' : ` · ${totalCustomerDeliveredSpendCompact} di servizi`}`}
+          loading={shouldHoldCustomerInsightMetrics}
+          onOpenAll={openCustomerInsightsModalForAll}
+          onOpenCustomer={openCustomerInsightsModalForCustomer}
+        />),
 focus: (<View {...webHomePart("focus")} style={[styles.sectionCardDark, responsive.isDesktop && styles.desktopWideCard]}>
           <Text style={[styles.sectionTitleDark, styles.sectionTitleCentered]}>
             {tApp(appLanguage, 'home_quick_focus')}

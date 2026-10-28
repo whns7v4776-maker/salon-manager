@@ -155,7 +155,7 @@ const translations = {
     home_collected: 'Saldati',
     home_bookings: 'Prenotazioni',
     home_smart_indicators: 'Indicatori intelligenti',
-    home_top_service: 'Servizio piu richiesto',
+    home_top_service: 'Servizio più richiesto',
     home_top_duration: 'Durata tipo top',
     home_average_ticket: 'Incasso medio confermato',
     home_quick_focus: 'Focus rapido',
