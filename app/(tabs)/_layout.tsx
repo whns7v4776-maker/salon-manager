@@ -4672,7 +4672,7 @@ function BottomTabBar({
   const tabCount = visibleRoutes.length || 1;
   // Android's native view applies the system inset before drawing its children,
   // including the first frame and changes between gestures and three buttons.
-  const tabBarBottomOffset = IS_WEB ? (compactWebBar ? 6 : TAB_BAR_OUTER_BOTTOM_IOS) : IS_ANDROID ? ANDROID_TAB_BAR_SAFE_GAP : Math.max(safeAreaInsets.bottom, 8);
+  const tabBarBottomOffset = IS_WEB ? (compactWebBar ? 6 : TAB_BAR_OUTER_BOTTOM_IOS) : IS_ANDROID ? ANDROID_TAB_BAR_SAFE_GAP : Math.max(safeAreaInsets.bottom - 10, 8); // iOS: un filo più bassa, sempre sopra l'indicatore Home
   const tabBarHorizontalPadding =
     compactWebBar ? 8 : IS_WEB ? 16 : 6;
   const availableBarWidth = Math.max(
@@ -5707,6 +5707,8 @@ function BottomTabBar({
               ...(IS_WEB ? {
                 marginTop: -(compactWebBar ? tabBarHeight - 4 : Math.min(tabBarHeight - 14, indicatorRenderWidth + 10)) / 2,
                 marginBottom: 0,
+                // Web: selezione a capsula, non un riquadro.
+                borderRadius: 999,
               } : {}),
               ...(!IS_WEB ? {
                 height: Math.min(tabBarHeight - 8, indicatorRenderWidth + 18),
@@ -5871,7 +5873,7 @@ function BottomTabBar({
                   ...(compactWebBar ? {
                     '--salon-tab-hover-width': `${tabItemWidth - 4}px`,
                     '--salon-tab-hover-height': `${tabBarHeight - 4}px`,
-                    '--salon-tab-hover-radius': '19px',
+                    '--salon-tab-hover-radius': '999px',
                   } as any : {}),
                   width: tabItemWidth,
                   paddingVertical: tabItemVerticalPadding,

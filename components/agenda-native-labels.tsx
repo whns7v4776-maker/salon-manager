@@ -13,10 +13,10 @@ export function NativeAgendaCaption({label,icon,color,textStyle,bold=false}:{lab
   {pressed?<Text style={{fontSize:18,lineHeight:22,color,marginLeft:4}}>+</Text>:<View style={{width:icon?20:0,flexShrink:0}}/>}
  </View>;
 }
-export function NativeAgendaOperatorHeading({name,meta,photo,accent,unavailable,width,night,ink,muted}:{name:string;meta:string;photo?:string|null;accent:string;unavailable:boolean;width:number;night:boolean;ink:string;muted:string}) {
+export function NativeAgendaOperatorHeading({name,meta,photo,accent,unavailable,width,night,ink,muted,bare=false}:{name:string;meta:string;photo?:string|null;accent:string;unavailable:boolean;width:number;night:boolean;ink:string;muted:string;bare?:boolean}) {
  const size=width<190?26:32,side=size+10;
  return <View style={{width:'100%',height:'100%',overflow:'hidden',flexDirection:'row',alignItems:'center',justifyContent:'center',paddingHorizontal:width<190?10:16}}>
-  <AgendaOperatorSurface night={night}/>
+  {bare?null:<AgendaOperatorSurface night={night}/>}
   <View style={{width:side,alignItems:'center',justifyContent:'center',flexShrink:0}}>
    <View style={{width:size,height:size,borderRadius:size/2,overflow:'hidden',alignItems:'center',justifyContent:'center',backgroundColor:night?'#3A352C':'#F3E7D3',borderWidth:1,borderColor:night?'rgba(216,194,155,.32)':'rgba(150,118,72,.3)',opacity:unavailable?.55:1}}>
     {photo?.trim()?<Image source={{uri:photo}} style={{width:size,height:size}}/>:<Text style={{fontSize:size===26?14:16,color:ink,fontFamily:'Georgia',includeFontPadding:false}}>{name.trim().charAt(0).toLocaleUpperCase('it')}</Text>}

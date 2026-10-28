@@ -42,15 +42,15 @@ export function AgendaPremiumOperatorChoice({name,photo,status,selected,availabl
   {selected?<Ionicons name="checkmark-circle" size={17} color={accent}/>:null}
  </>;
 }
-export function AgendaPremiumOperatorHeading({name,role,photo,accent,unavailable,historical=false,width=240}:{name:string;role:string;photo?:string|null;accent:string;unavailable:boolean;historical?:boolean;width?:number}){
+export function AgendaPremiumOperatorHeading({name,role,photo,accent,unavailable,historical=false,width=240,bare=false}:{name:string;role:string;photo?:string|null;accent:string;unavailable:boolean;historical?:boolean;width?:number;bare?:boolean}){
  const p=useSolidAgendaPalette();
  const compact=width<190;
  const meta=historical?'Archiviato':unavailable?'Non attivo oggi':role;
- if(!web)return <NativeAgendaOperatorHeading name={name} meta={meta} photo={photo} accent={accent} unavailable={unavailable} width={width} night={p.night} ink={p.ink} muted={p.muted}/>;
+ if(!web)return <NativeAgendaOperatorHeading name={name} meta={meta} photo={photo} accent={accent} unavailable={unavailable} width={width} night={p.night} ink={p.ink} muted={p.muted} bare={bare}/>;
  const photoSize=compact?26:web?44:32;
  const textWidth=Math.max(30,Math.min(width-2*(photoSize+12),Math.max(50,name.length*(web?(compact?12:16):12)*.6,meta.length*(web?11:9)*.55)));
  return <View style={{flexDirection:'row',alignItems:'center',justifyContent:'center',gap:compact?8:11,width:'100%',height:'100%',paddingHorizontal:compact?8:12,paddingVertical:web?6:2,overflow:'hidden'}}>
-  <AgendaOperatorSurface night={p.night}/>
+  {bare?null:<AgendaOperatorSurface night={p.night}/>}
   <View style={{width:photoSize,height:photoSize,borderRadius:photoSize/2,overflow:'hidden',backgroundColor:p.night?'#3A352C':'#F3E7D3',borderWidth:1,borderColor:p.night?'rgba(216,194,155,.32)':'rgba(150,118,72,.3)',...(web?{boxShadow:p.night?'inset 0 1px 0 rgba(255,255,255,.12),0 3px 8px rgba(0,0,0,.35)':'inset 0 1px 0 #ffffffcc,0 3px 8px rgba(110,84,46,.16)'}:{}),position:'absolute',left:Math.max(14,width/2-textWidth/2-photoSize-11),opacity:unavailable?.55:1,alignItems:'center',justifyContent:'center',flexShrink:0}}>
    {photo?.trim()?<Image source={{uri:photo}} style={{width:'100%',height:'100%'}}/>:<Text style={{color:p.ink,fontSize:compact?14:18,fontFamily:'Georgia'}}>{name.trim().charAt(0).toLocaleUpperCase('it')}</Text>}
   </View>
