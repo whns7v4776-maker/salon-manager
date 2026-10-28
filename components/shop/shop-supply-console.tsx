@@ -1,3 +1,6 @@
+import { NativeMedal } from '../owner-premium-native-home';
+import { useAccessAppearance } from '../access-premium';
+import { useOwnerShopUI } from '../owner-premium-shop-style';
 import { ShopSwitch } from './shop-switch';
 import { ShopNavigation } from "./shop-navigation";
 import React, { useCallback, useEffect, useRef, useState } from "react";
@@ -10,7 +13,7 @@ import {
   shopNumber,
   type ShopProduct,
 } from "../../src/lib/shop-inventory";
-import { shopUI as s, shopDate } from "../../src/lib/shop-pickup";
+import { shopDate } from "../../src/lib/shop-pickup";
 import {
   bucketLabel,
   purchaseDate,
@@ -71,6 +74,7 @@ function SupplierPicker({
   onChange: (s: Supplier) => void;
   disabled: boolean;
 }) {
+  const s = useOwnerShopUI();
   const [open, setOpen] = useState(false),
     [query, setQuery] = useState(""),
     [items, setItems] = useState<Supplier[]>([]),
@@ -149,6 +153,8 @@ export function ShopSupplyConsole({
   enabled: boolean;
   onBusy: (busy: boolean) => void;
 }) {
+  const s = useOwnerShopUI();
+  const night = useAccessAppearance().palette.night;
   const [mode, setMode] = useState<"reorder" | "orders" | "suppliers">(
       "reorder",
     ),
@@ -476,7 +482,7 @@ export function ShopSupplyConsole({
   };
   const heading = (
     <>
-      {busy && <ActivityIndicator color="#285B78" />}
+      {busy && <ActivityIndicator color="#9C8461" />}
       {!!error && (
         <Text style={s.error} accessibilityRole="alert">
           {error}
@@ -702,7 +708,7 @@ export function ShopSupplyConsole({
                 gap: 10,
                 paddingVertical: 10,
                 borderBottomWidth: 1,
-                borderColor: "#D8E5EE",
+                borderColor: night ? "rgba(255,255,255,.1)" : "rgba(122,100,70,.16)",
               }}
             >
               <Text style={s.label}>{l.product.name}</Text>
@@ -1129,7 +1135,7 @@ export function ShopSupplyConsole({
             onPress={() => void task(refresh, () => {})}
           />
         ) : (
-          <ActivityIndicator color="#285B78" />
+          <ActivityIndicator color="#9C8461" />
         )}
       </View>
     );
@@ -1143,7 +1149,10 @@ export function ShopSupplyConsole({
     <View style={s.stack}>
       {heading}
       <View style={s.card}>
-        <Text style={s.title}>Acquisti, senza perdere il conto</Text>
+        <View style={s.row}>
+          <NativeMedal icon="business-outline" size={42} iconSize={19} accent={night ? "#C9AA8C" : "#7E6247"} />
+          <Text style={[s.title, s.grow]}>Acquisti, senza perdere il conto</Text>
+        </View>
         <Text style={s.copy}>
           Dal riordino alla consegna: fornitori, merce in arrivo e carichi
           tracciati.

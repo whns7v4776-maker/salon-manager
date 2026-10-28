@@ -1,3 +1,6 @@
+import { NativeMedal } from '../owner-premium-native-home';
+import { useAccessAppearance } from '../access-premium';
+import { useOwnerShopUI } from '../owner-premium-shop-style';
 import { ShopSwitch } from './shop-switch';
 import { ShopNavigation } from "./shop-navigation";
 import React, { useCallback, useEffect, useRef, useState } from "react";
@@ -8,7 +11,6 @@ import { supabase } from "../../src/lib/supabase";
 import { useShopRefresh, notifyShopChanged } from "../../src/lib/use-shop-refresh";
 import { benefitOperationId } from "../../src/lib/service-packages";
 import { shopMoney, shopNumber } from "../../src/lib/shop-inventory";
-import { shopUI as s } from "../../src/lib/shop-pickup";
 import {
   bucketName,
   quantityUnit,
@@ -36,6 +38,8 @@ export function ShopStockControl({
   workspaceId: string;
   onBusy: (value: boolean) => void;
 }) {
+  const s = useOwnerShopUI();
+  const night = useAccessAppearance().palette.night;
   const [doseInputs, setDoseInputs] = useState<Record<string, string>>({});
   const [mode, setMode] = useState<Mode>("count");
   const [data, setData] = useState<StockControl | null>(null),
@@ -222,7 +226,7 @@ export function ShopStockControl({
   );
   const status = (
     <>
-      {busy && <ActivityIndicator color="#285B78" />}
+      {busy && <ActivityIndicator color="#9C8461" />}
       {!!error && (
         <View style={s.card}>
           <Text accessibilityRole="alert" style={s.error}>
@@ -248,7 +252,7 @@ export function ShopStockControl({
     return (
       <View style={s.stack}>
         {status}
-        {!error && <ActivityIndicator color="#285B78" />}
+        {!error && <ActivityIndicator color="#9C8461" />}
       </View>
     );
   const enabled = data.settings.enabled;
@@ -597,7 +601,7 @@ export function ShopStockControl({
       {status}
       <View style={s.card}>
         <View style={s.row}>
-          <Ionicons name="shield-checkmark-outline" size={28} color="#285B78" />
+          <NativeMedal icon="shield-checkmark-outline" size={42} iconSize={19} accent={night ? "#9DBAD6" : "#4D6E8F"} />
           <Text style={[s.title, s.grow]}>Ogni scorta, sotto controllo</Text>
         </View>
         <Text style={s.copy}>

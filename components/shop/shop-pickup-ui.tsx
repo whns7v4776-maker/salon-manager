@@ -1,7 +1,6 @@
 import { useCustomerShopStyles } from './customer-shop-theme';
 import { PremiumSearchToolbar } from '../ui/premium-search-toolbar';
 import { ShopAttentionDot } from "./shop-attention";
-import {ShopSectionToneContext} from './shop-section-tone';
 import React from "react";
 import { Text, TextInput, View } from "react-native";
 import { HapticTouchable } from "../ui/haptic-touchable";
@@ -24,8 +23,7 @@ export function ShopButton({
   primary?: boolean;
   attention?: boolean;
 }) {
-  const s = useCustomerShopStyles();
-  const tone=React.useContext(ShopSectionToneContext);
+  const s = useCustomerShopStyles(true);
   return (
     <HapticTouchable
       accessibilityRole="button"
@@ -33,9 +31,9 @@ export function ShopButton({
       accessibilityState={{ disabled }}
       disabled={disabled}
       onPress={onPress}
-      style={[s.button, primary && s.primary, tone && {backgroundColor:primary ? tone.soft : "#FFFFFF",borderColor:tone.border}, disabled && s.disabled]}
+      style={[s.button, primary && s.primary, disabled && s.disabled]}
     >
-      <Text style={[s.buttonText, primary && !disabled && s.white, tone && !disabled && {color:tone.ink}]}>
+      <Text style={[s.buttonText, primary && !disabled && s.white]}>
         {title}
       </Text>
       <ShopAttentionDot active={attention}/>
@@ -59,7 +57,7 @@ export function ShopField({
   disabled?: boolean;
   multiline?: boolean;
 }) {
-  const s = useCustomerShopStyles();
+  const s = useCustomerShopStyles(true);
   return (
     <PremiumSearchToolbar enabled={/cerca/i.test(label)}><View style={{ gap: 7 }}>
       <Text style={s.label}>{label}</Text>
@@ -90,7 +88,7 @@ export function OrderSummary({
   owner?: boolean;
   children?: React.ReactNode;
 }) {
-  const s = useCustomerShopStyles();
+  const s = useCustomerShopStyles(true);
   return (
     <View style={s.card}>
       <View style={s.row}>

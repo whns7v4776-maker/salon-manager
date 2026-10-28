@@ -288,7 +288,7 @@ export function ShopConsole({
         >
           <Text
             style={{
-              color:id===value?premiumPalette.actionText:premiumPalette.ink,
+              color:premiumPalette.ink,
               fontWeight: "600",
             }}
           >
@@ -450,8 +450,8 @@ export function ShopConsole({
                 {notice}
               </Text>
             ) : null}
-            {busy ? <ActivityIndicator color="#285B78" /> : null}
-            {!data && !error ? <ActivityIndicator color="#285B78" /> : null}
+            {busy ? <ActivityIndicator color="#9C8461" /> : null}
+            {!data && !error ? <ActivityIndicator color="#9C8461" /> : null}
             {scanning ? (
               <>
                 <Text style={s.title}>Inquadra il barcode</Text>

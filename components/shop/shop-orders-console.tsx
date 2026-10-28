@@ -1,3 +1,6 @@
+import { NativeMedal } from '../owner-premium-native-home';
+import { useAccessAppearance } from '../access-premium';
+import { useOwnerShopUI } from '../owner-premium-shop-style';
 import { ShopSwitch } from './shop-switch';
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Switch, Text, View } from "react-native";
@@ -6,7 +9,6 @@ import { supabase } from "../../src/lib/supabase";
 import { useShopRefresh, notifyShopChanged } from "../../src/lib/use-shop-refresh";
 import { shopNumber } from "../../src/lib/shop-inventory";
 import {
-  shopUI as s,
   type StoreSettings,
   type StoreOrder,
   type StoreReward,
@@ -26,6 +28,8 @@ export function ShopOrdersConsole({
   workspaceId: string;
   onBusy: (v: boolean) => void;
 }) {
+  const s = useOwnerShopUI();
+  const night = useAccessAppearance().palette.night;
   const [data, setData] = useState<Console | null>(null),
     [page, setPage] = useState(0),
     [error, setError] = useState(""),
@@ -142,7 +146,7 @@ export function ShopOrdersConsole({
         />
       </View>
     ) : (
-      <ActivityIndicator color="#285B78" />
+      <ActivityIndicator color="#9C8461" />
     );
   return (
     <View style={s.stack}>
@@ -152,19 +156,24 @@ export function ShopOrdersConsole({
         </Text>
       )}
       {!!notice && <Text style={s.copy}>{notice}</Text>}
-      {busy && <ActivityIndicator color="#285B78" />}
+      {busy && <ActivityIndicator color="#9C8461" />}
       <View style={s.card}>
-        <Text style={s.title}>La vetrina dei tuoi prodotti</Text>
+        <View style={s.row}>
+          <NativeMedal icon="storefront-outline" size={42} iconSize={19} accent={night ? "#D6B27A" : "#8C6A35"} />
+          <Text style={[s.title, s.grow]}>La vetrina dei tuoi prodotti</Text>
+        </View>
         <Text style={s.copy}>
           Pubblica i prodotti scelti e prepara i ritiri. Il saldo viene
           registrato soltanto quando consegni l’ordine.
         </Text>
         <View style={s.row}>
-          <Text style={[s.badge, s.grow]}>
-            {data.settings.enabled && data.settings.storefront_enabled
-              ? "Visibile ai clienti"
-              : "Vetrina non visibile"}
-          </Text>
+          <View style={s.grow}>
+            <Text style={[s.badge, { alignSelf: "flex-start" }]}>
+              {data.settings.enabled && data.settings.storefront_enabled
+                ? "Visibile ai clienti"
+                : "Vetrina non visibile"}
+            </Text>
+          </View>
           <ShopButton
             title="Impostazioni shop"
             disabled={busy}

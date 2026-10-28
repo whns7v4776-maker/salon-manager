@@ -1,10 +1,10 @@
+import { useOwnerShopUI } from '../owner-premium-shop-style';
 import React, { useState } from "react";
 import { Platform, Text, View } from "react-native";
 import {
   purchaseDocumentHtml,
   type PurchaseOrder,
 } from "../../src/lib/shop-purchasing";
-import { shopUI as s } from "../../src/lib/shop-pickup";
 import { ShopButton } from "./shop-pickup-ui";
 export function PurchaseDocument({
   order,
@@ -13,6 +13,7 @@ export function PurchaseDocument({
   order: PurchaseOrder;
   salonName: string;
 }) {
+  const s = useOwnerShopUI();
   const [busy, setBusy] = useState(false),
     [error, setError] = useState("");
   const exportDocument = async () => {
