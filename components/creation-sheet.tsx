@@ -117,7 +117,7 @@ export function CreationSheet({ title, icon, onClose, children, scrollRef, onRev
   if (Platform.OS === 'web' && premiumWeb) return <OwnerPremiumSheetFrame title={title} icon={icon} onClose={onClose} dismissDisabled={dismissDisabled} scrollRef={scrollRef} footer={footer} kind={premiumKind}>{children}</OwnerPremiumSheetFrame>;
   return <CreationSheetLayout.Provider value={sheetLayout}><CustomerSheetFrame animateBackdrop={animatePresentation} onClose={onClose} dismissDisabled={dismissDisabled}>
     <Animated.View entering={animatePresentation && !stableKeyboardScroll ? SlideInDown.duration(280) : undefined} style={[styles.sheet, premiumNative && {backgroundColor:premiumPalette.night?'#202325':'#F5F1EB',borderColor:premiumPalette.border,borderWidth:1}, dockStyle, Platform.OS !== 'web' && { paddingBottom: 0 }, fillAvailableHeight && Platform.OS !== 'web' && styles.expandedSheet, keyboardOpen && { paddingBottom: 0 }]}>
-      {premiumNative?<AccessGlassReflection/>:null}
+      {premiumNative?<AccessGlassReflection subtle/>:null}
       <NativeSheetHandle style={[styles.handle,premiumNative && {backgroundColor:premiumPalette.line}]} />
       <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
       <View style={[styles.header,premiumNative && {borderBottomColor:premiumPalette.line}]}>

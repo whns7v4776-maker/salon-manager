@@ -74,7 +74,9 @@ export function AccessBackdrop() {
 }
 
 /** Static specular layer: no pointer handlers, timers or layout measurements. */
-export function AccessGlassReflection() {
+/** `subtle`: popups and sheets. A soft top glow and a crisp top edge only; the diagonal crest and
+ *  the arc are dropped because on tall sheets they stretch into a streak that splits the cards. */
+export function AccessGlassReflection({ subtle = false }: { subtle?: boolean } = {}) {
   const { palette: p } = useAccessAppearance();
   const id = `glass-${useId().replace(/[^a-zA-Z0-9]/g, '')}`;
   return <View pointerEvents="none" accessible={false} style={{ ...StyleSheet.absoluteFillObject, borderRadius: 22, overflow: 'hidden' }}>
@@ -96,8 +98,8 @@ export function AccessGlassReflection() {
         </LinearGradient>
       </Defs>
       <Rect width="1000" height="500" fill={`url(#${id})`} />
-      <Rect width="1000" height="500" fill={`url(#${id}-crest)`} />
-      <Path d="M-100 430 Q440 310 1100 500" fill="none" stroke="#F5E8D0" strokeOpacity={p.night ? 0.09 : 0.32} strokeWidth="1" />
+      {subtle ? null : <Rect width="1000" height="500" fill={`url(#${id}-crest)`} />}
+      {subtle ? null : <Path d="M-100 430 Q440 310 1100 500" fill="none" stroke="#F5E8D0" strokeOpacity={p.night ? 0.09 : 0.32} strokeWidth="1" />}
       <Path d="M22 1 H978" stroke="#FFFFFF" strokeOpacity={p.night ? 0.36 : 0.9} strokeWidth="1.5" />
       <Path d="M1 22 V478" stroke="#FFFFFF" strokeOpacity={p.night ? 0.12 : 0.45} strokeWidth="1" />
     </Svg>

@@ -3,7 +3,6 @@ import { PremiumFitLabel } from './ui/premium-fit-label';
 import { PremiumSectionHeader } from './ui/premium-section-heading';
 import { TABLET_MODAL_ORIENTATIONS } from '../src/lib/tablet-modal-orientations';
 import {NativeReadableText as Text, NativePremiumIcon as Ionicons} from './owner-native-premium';
-import { WelcomeSalonIcon } from './welcome-salon-icon';
 import { useCustomerPremiumStyles, useCustomerPremiumColor } from './owner-premium-customers-style';
 
 import React, { useEffect, useState } from 'react';
@@ -285,9 +284,7 @@ function CustomerWelcomeSettingsCardBody({
     >
       <View {...(Platform.OS==='web'?{dataSet:{customerWelcomeHeader:'true'}}:{})} style={[styles.header, wideWebLayout && styles.headerWideWeb]}>
         <View style={[styles.iconRail, wideWebLayout && styles.sideRailWideWeb]}>
-          <View style={styles.icon}>
-            <WelcomeSalonIcon size={25} color={premiumColor("#176B52")} />
-          </View>
+          <NativeMedal icon="storefront-outline" size={44} iconSize={20} accent={outerAppearance.palette.night ? '#8FBF9A' : '#3F7A4D'} />
         </View>
         <View
           style={[

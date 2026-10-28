@@ -4839,9 +4839,7 @@ export default function ClientiScreen() {
                   isDesktopWebLayout && styles.communicationLeadDesktop,
                 ]}
               >
-                <View style={styles.communicationIcon}>
-                  <Ionicons name="megaphone-outline" size={22} color={customerPalette.ink} />
-                </View>
+                <NativeMedal icon="megaphone-outline" size={44} iconSize={20} accent={customerPalette.night ? '#B9A3D6' : '#6E5590'} />
               </View>
               <View
                 style={[

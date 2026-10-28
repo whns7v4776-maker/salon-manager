@@ -2,6 +2,8 @@ import { useCustomerPremiumStyles } from './owner-premium-customers-style';
 import React from "react";
 import { Platform, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { NativeMedal } from "./owner-premium-native-home";
+import { useAccessAppearance } from "./access-premium";
 import { HapticTouchable } from "./ui/haptic-touchable";
 export function BenefitsEntryCard({ onPress, compactWeb=false }: { compactWeb?:boolean; onPress: (section?: "settings" | "packages" | "points" | "gifts") => void }) {
  const s=useCustomerPremiumStyles(baseCustomerComponentStyles);
@@ -9,13 +11,12 @@ export function BenefitsEntryCard({ onPress, compactWeb=false }: { compactWeb?:b
   const { width } = useWindowDimensions();
   const compact = width < 600;
   const CardSurface=Platform.OS==='web'?View:HapticTouchable;
+  const night = useAccessAppearance().palette.night;
   return (
     <CardSurface {...(Platform.OS!=='web'?{onPress:()=>onPress("settings"),accessibilityRole:"button" as const,accessibilityLabel:"Apri Pacchetti e vantaggi del salone"}:{})} style={[s.card, compact && s.compact,compactWeb&&{padding:20,gap:14,marginBottom:0,minHeight:224,flex:1,borderRadius:18}]}>
       <View style={s.topline}>
         <View style={s.brand}>
-          <View style={[s.gift,compactWeb&&{width:40,height:40,borderRadius:12}]}>
-            <Ionicons name="gift-outline" size={compactWeb?24:28} color="#AC3654" />
-          </View>
+          <NativeMedal icon="gift-outline" size={compactWeb?40:48} iconSize={compactWeb?19:22} accent={night?'#D99AAE':'#A23F5F'} />
           <Text style={s.eyebrow}>DEDICATO AI TUOI CLIENTI</Text>
         </View>
         
