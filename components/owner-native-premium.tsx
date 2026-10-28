@@ -1,4 +1,5 @@
 import { useOwnerViewport } from '../src/context/OwnerViewportContext';
+import { OwnerBrandMark } from './salon-brand-mark';
 import React, { createContext, forwardRef, useContext } from 'react';
 import { Platform, Pressable, StatusBar, StyleSheet, Text as RNText, View, type TextProps } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -33,7 +34,7 @@ export function NativeSectionHeader({title, subtitle, action, onPress}: {
   return <View style={{gap: 12, marginTop: -9, marginBottom: 16}}>
     {focused ? <StatusBar barStyle={p.night ? 'light-content' : 'dark-content'}/> : null}
     {!sidebar ? <View style={{flexDirection:'row', alignItems:'center', justifyContent:'space-between', minHeight:64}}>
-      <View style={{width:154, flexShrink:1}}><AccessWordmark compact/></View>
+      <View style={{width:154, flexShrink:1}}><OwnerBrandMark compact/></View>
       <Pressable onPress={toggle} accessibilityRole="button" accessibilityLabel={p.night?'Attiva tema chiaro':'Attiva tema scuro'}
         style={{width:40,height:40,flexShrink:0,borderRadius:20,borderWidth:1,borderColor:p.border,backgroundColor:p.field,alignItems:'center',justifyContent:'center'}}>
         <Ionicons name={p.night?'sunny-outline':'moon-outline'} size={20} color={p.ink}/>

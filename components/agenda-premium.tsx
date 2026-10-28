@@ -1,4 +1,5 @@
 import {AgendaSlotFeedbackContext} from './agenda-slot-feedback';
+import { OwnerBrandMark } from './salon-brand-mark';
 import {NativeAgendaCaption,NativeAgendaOperatorHeading} from './agenda-native-labels';
 import {AgendaOperatorSurface,AgendaStateRule} from './agenda-approved-surface';
 import {WebHorizontalScrollRail} from './ui/web-horizontal-scroll-rail';
@@ -66,9 +67,9 @@ export function AgendaPremiumHeader({date,time,review,onAvailability}:{date:stri
  const {palette:p,toggle}=useAccessAppearance();const {width}=useWindowDimensions();const wide=web&&width>=1000,compact=width<600;
  const dateLine=<View style={{flexDirection:'row',alignItems:'center',flexWrap:'wrap',gap:8}}><Text style={{fontSize:wide?16:14,lineHeight:wide?23:20,color:p.ink}}>{date}</Text>{time?<View accessibilityLabel={`Ora attuale ${time}`} style={{flexDirection:'row',alignItems:'center',gap:6,flexShrink:0}}><View style={{width:3,height:3,borderRadius:2,backgroundColor:p.muted,opacity:.7}}/><Text style={{fontSize:wide?15:14,lineHeight:wide?23:20,color:p.muted,fontVariant:['tabular-nums']}}>{time}</Text></View>:null}</View>;
  // Same rhythm as the native Home: wordmark row, small date · time, serif title.
- if(!web)return <View style={{gap:5,marginTop:-20,marginBottom:12}}>
-  <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',height:64}}>
-   <View style={{width:154,flexShrink:1}}><AccessWordmark compact/></View>
+ if(!web)return <View style={{gap:5,marginTop:-13,marginBottom:12}}>
+  <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',minHeight:64,marginBottom:6}}>
+   <View style={{width:154,flexShrink:1}}><OwnerBrandMark compact/></View>
    <Pressable accessibilityRole="button" accessibilityLabel={p.night?'Attiva tema chiaro':'Attiva tema scuro'} onPress={toggle} style={{width:40,height:40,borderRadius:20,borderWidth:1,borderColor:p.border,backgroundColor:p.field,alignItems:'center',justifyContent:'center'}}><Ionicons name={p.night?'sunny-outline':'moon-outline'} size={20} color={p.ink}/></Pressable>
   </View>
   <Text style={{color:p.muted,fontSize:11,letterSpacing:.6}}>{date.toLocaleUpperCase('it')}{time?` · ${time}`:''}</Text>

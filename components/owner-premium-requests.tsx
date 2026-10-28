@@ -1,4 +1,5 @@
 import { useOwnerViewport } from '../src/context/OwnerViewportContext';
+import { OwnerBrandMark } from './salon-brand-mark';
 import {NativeReadableText as Text, NativePremiumIcon as Ionicons} from './owner-native-premium';
 import { OwnerStartupSkeletonPulse, OwnerStartupSkeletonItem } from '../src/context/OwnerStartupLoadingContext';
 import React from 'react';
@@ -15,7 +16,7 @@ export const NativeRequestsHeader=React.memo(function NativeRequestsHeader({toda
  const sidebar=useOwnerViewport()?.sidebar;
  return <View style={{gap:12,marginTop:-9,marginBottom:16}}>
  {focused?<StatusBar barStyle={p.night?'light-content':'dark-content'}/>:null}
- {!sidebar?<View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',height:64}}><AccessWordmark compact/><Pressable accessibilityRole="button" accessibilityLabel={p.night?'Attiva tema chiaro':'Attiva tema scuro'} onPress={toggle} hitSlop={8} style={{width:36,height:36,borderRadius:18,borderWidth:1,borderColor:p.border,backgroundColor:p.field,alignItems:'center',justifyContent:'center'}}><Ionicons name={p.night?'sunny-outline':'moon-outline'} size={19} color={p.ink}/></Pressable></View>:null}
+ {!sidebar?<View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',height:64}}><OwnerBrandMark compact/><Pressable accessibilityRole="button" accessibilityLabel={p.night?'Attiva tema chiaro':'Attiva tema scuro'} onPress={toggle} hitSlop={8} style={{width:36,height:36,borderRadius:18,borderWidth:1,borderColor:p.border,backgroundColor:p.field,alignItems:'center',justifyContent:'center'}}><Ionicons name={p.night?'sunny-outline':'moon-outline'} size={19} color={p.ink}/></Pressable></View>:null}
  <View style={{gap:5}}><NativeHomeClock today={today}/><Text accessibilityRole="header" style={{fontFamily:Platform.OS==='ios'?'Georgia':'serif',fontSize:27,lineHeight:34,letterSpacing:-.6,color:p.ink}}>Richieste</Text><Text style={{fontFamily:sans,fontSize:13,lineHeight:19,color:p.muted}}>Le prenotazioni, sotto controllo.</Text></View>
  <RequestsWebSummary pending={pending} handled={handled} cancelledBySalon={cancelledBySalon??cancelled} cancelledByClient={cancelledByClient??"—"}/>
  </View>;
