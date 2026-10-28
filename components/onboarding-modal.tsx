@@ -3,6 +3,7 @@ import { useAccessAppearance } from './access-premium';
 import { useSettingsWebStyles } from './settings-web-styles';
 import { popupGlass } from './premium-web-surfaces';
 import { DockedSheetSurface } from './ui/docked-sheet-surface';
+import { WebPagePortal } from './ui/web-page-portal';
 import { Ionicons } from '@expo/vector-icons';
 import React, { useEffect, useState } from 'react';
 import {
@@ -975,7 +976,7 @@ export function OnboardingModal({
   };
 
   return (
-    <NativePremiumScope.Provider value={true}><View {...(Platform.OS==='web'?{dataSet:{settingsTour:'true'}}:{})} style={styles.modalRoot} accessibilityViewIsModal>
+    <WebPagePortal><NativePremiumScope.Provider value={true}><View {...(Platform.OS==='web'?{dataSet:{settingsTour:'true'}}:{})} style={styles.modalRoot} accessibilityViewIsModal>
       <View style={[styles.scrim,Platform.OS==='web'&&{backgroundColor:p.night?'rgba(0,0,0,.54)':'rgba(40,35,29,.28)',backdropFilter:'blur(8px)'} as any]} />
       <View pointerEvents="none" style={[styles.scrimVignetteTop,Platform.OS==='web'&&{display:'none'}]} />
       <View pointerEvents="none" style={[styles.scrimVignetteBottom,Platform.OS==='web'&&{display:'none'}]} />
@@ -1015,6 +1016,7 @@ export function OnboardingModal({
           ]}
         >
           <DockedSheetSurface
+            {...(Platform.OS === 'web' ? { onClose: () => { void handleClose(); }, dismissDisabled: isClosingFlow || !allowSkip } : {})}
             style={[
               styles.cardShell,
               Platform.OS==='web'&&popupGlass(p),
@@ -1039,7 +1041,7 @@ export function OnboardingModal({
               bounces={false}
               scrollEnabled
             >
-              <View style={styles.cardAccent} />
+              {Platform.OS !== 'web' ? <View style={styles.cardAccent} /> : null}
 
 
               <View style={styles.copyBlock}>
@@ -1101,7 +1103,7 @@ export function OnboardingModal({
           </DockedSheetSurface>
         </View>
       </SafeAreaView>
-    </View></NativePremiumScope.Provider>
+    </View></NativePremiumScope.Provider></WebPagePortal>
   );
 }
 
