@@ -5,6 +5,7 @@ import { NativeSheetHandle } from './ui/native-sheet-drag';
 import React, { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Keyboard, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableWithoutFeedback, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { NativeMedal } from './owner-premium-native-home';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CustomerSheetFrame, useCustomerSheetDockStyle } from './customer-sheet-frame';
 import { HapticTouchable } from './ui/haptic-touchable';
@@ -25,10 +26,12 @@ export function useCreationSheetLayout(footer: React.ReactNode): boolean {
 }
 
 /** Native creation forms share the customer sheets' keyboard and safe-area frame. */
-export function CreationSheet({ title, icon, onClose, children, scrollRef, onRevealFocusedField, animatePresentation = false, keepFocusedFieldVisible = true, fillAvailableHeight = true, dismissDisabled = false, iconTone, footer, stableKeyboardScroll = false, premiumWeb = false, premiumKind = 'shop' }: React.PropsWithChildren<{
+export function CreationSheet({ title, icon, onClose, children, scrollRef, onRevealFocusedField, animatePresentation = false, keepFocusedFieldVisible = true, fillAvailableHeight = true, dismissDisabled = false, iconTone, footer, stableKeyboardScroll = false, premiumWeb = false, iconAccent, premiumKind = 'shop' }: React.PropsWithChildren<{
   footer?: React.ReactNode;
   premiumWeb?: boolean;
   premiumKind?: 'shop' | 'customer';
+  /** Hex accent: renders the header icon as an enamel medallion. */
+  iconAccent?: string;
   stableKeyboardScroll?: boolean;
   dismissDisabled?: boolean;
   iconTone?: {ink:string;soft:string};
@@ -118,7 +121,7 @@ export function CreationSheet({ title, icon, onClose, children, scrollRef, onRev
       <NativeSheetHandle style={[styles.handle,premiumNative && {backgroundColor:premiumPalette.line}]} />
       <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
       <View style={[styles.header,premiumNative && {borderBottomColor:premiumPalette.line}]}>
-        <View style={[styles.icon,premiumNative && {backgroundColor:premiumPalette.field},iconTone && {backgroundColor:iconTone.soft}]}><Ionicons name={icon} size={22} color={premiumNative?premiumPalette.ink:iconTone?.ink ?? "#29465B"} /></View>
+        {iconAccent ? <NativeMedal icon={icon} size={44} iconSize={20} accent={iconAccent} /> : <View style={[styles.icon,premiumNative && {backgroundColor:premiumPalette.field},iconTone && {backgroundColor:iconTone.soft}]}><Ionicons name={icon} size={22} color={premiumNative?premiumPalette.ink:iconTone?.ink ?? "#29465B"} /></View>}
         <Text accessibilityRole="header" style={[styles.title,premiumNative && {color:premiumPalette.ink,fontFamily:Platform.OS==='ios'?'Georgia':'serif',fontSize:23,fontWeight:'400'}]}>{title}</Text>
         <HapticTouchable onPress={onClose} accessibilityRole="button" accessibilityLabel="Chiudi senza svuotare i campi" style={[styles.close,premiumNative && {width:40,height:40,borderRadius:13,backgroundColor:premiumPalette.field,borderWidth:1,borderColor:premiumPalette.border,flexDirection:'row',gap:5}]}>
           

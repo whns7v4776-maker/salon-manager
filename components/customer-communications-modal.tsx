@@ -5,6 +5,9 @@ import { TABLET_MODAL_ORIENTATIONS } from '../src/lib/tablet-modal-orientations'
 import { NativeReadableText as Text } from './owner-native-premium';
 import { useCustomerPremiumColor, useCustomerPremiumStyles } from './owner-premium-customers-style';
 import { CustomerPopupClose } from './customer-popup-close';
+import { CustomerPopupSkin } from './customer-popup-skin';
+import { NativeMedal } from './owner-premium-native-home';
+import { useAccessAppearance } from './access-premium';
 import { CustomerSheetFrame, useCustomerSheetDockStyle } from "./customer-sheet-frame";
 import { CommunicationPosterPicker } from "./communication-poster";
 import { supabase } from "../src/lib/supabase";
@@ -303,7 +306,11 @@ function CompactChoiceRow({ children, style }: React.PropsWithChildren<{style: i
   return <PremiumChoiceRow style={style}>{children}</PremiumChoiceRow>;
 }
 
-export function CustomerCommunicationsModal({
+/** Skinned popup: richer light-theme edges, fields and bronze selection. */
+export function CustomerCommunicationsModal(props: React.ComponentProps<typeof CustomerCommunicationsModalBody>) {
+  return <CustomerPopupSkin><CustomerCommunicationsModalBody {...props} /></CustomerPopupSkin>;
+}
+function CustomerCommunicationsModalBody({
   visible,
   clients,
   onClose,
@@ -312,6 +319,7 @@ export function CustomerCommunicationsModal({
   clients: CommunicationClient[];
   onClose: () => void;
 }) {
+ const premiumNight=useAccessAppearance().palette.night;
  const premiumColor=useCustomerPremiumColor();
 
  const styles=useCustomerPremiumStyles(baseCustomerComponentStyles);
@@ -828,9 +836,9 @@ export function CustomerCommunicationsModal({
       <CustomerSheetFrame {...(Platform.OS !== 'web' ? {onClose: resetAndClose, dismissDisabled: sending || uploadingPoster || savingTemplate || !!deletingTemplateId} : {})}>
         <View style={[styles.card, dockStyle, Platform.OS !== "web" && {flex:1,minHeight:0}, keyboardOpen && {paddingBottom:0}] }>
           <View style={styles.header}>
+            <View style={{ marginRight: 12 }}><NativeMedal icon={section==="scheduled"?"time-outline":section==="popups"?"albums-outline":"megaphone-outline"} size={42} iconSize={19} accent={premiumNight?"#B9A3D6":"#6E5590"} /></View>
             <View style={styles.headerText}>
-              <Text style={styles.eyebrow}>CLIENTI</Text>
-              <Text style={styles.title}>{section==="scheduled"?"Comunicazioni programmate":section==="popups"?"Popup ai clienti":period.enabled?"Nuovo popup":"Nuova comunicazione push"}</Text>
+              <Text numberOfLines={2} style={[styles.title,{fontSize:21,lineHeight:26}]}>{section==="scheduled"?"Comunicazioni programmate":section==="popups"?"Popup ai clienti":period.enabled?"Nuovo popup":"Nuova comunicazione"}</Text>
             </View>
             <CustomerPopupClose style={styles.closeButton} onPress={resetAndClose}>
               <Ionicons name="close" size={22} color={premiumColor("#172033","color")} />

@@ -7,6 +7,9 @@ import { WelcomeSalonIcon } from './welcome-salon-icon';
 import { useCustomerPremiumStyles, useCustomerPremiumColor } from './owner-premium-customers-style';
 
 import React, { useEffect, useState } from 'react';
+import { Appearance } from './access-appearance-context';
+import { CustomerPopupSkin } from './customer-popup-skin';
+import { NativeMedal } from './owner-premium-native-home';
 import { Alert, Keyboard, Modal, Platform, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { CreationSheet } from './creation-sheet';
 import type { SalonWorkspace } from '../src/lib/platform';
@@ -18,12 +21,19 @@ const DEFAULT_WELCOME_TITLE = 'Benvenuto da {salone}!';
 const DEFAULT_WELCOME_MESSAGE =
   'Ciao {nome}, siamo felici di averti con noi. Da qui puoi consultare i servizi e prenotare i tuoi appuntamenti.';
 
-export function CustomerWelcomeSettingsCard({
+/** Skinned editor popup; the page card itself keeps the page palette (`outerAppearance`). */
+export function CustomerWelcomeSettingsCard(props: Omit<React.ComponentProps<typeof CustomerWelcomeSettingsCardBody>, 'outerAppearance'>) {
+  const outerAppearance = React.useContext(Appearance);
+  return <CustomerPopupSkin><CustomerWelcomeSettingsCardBody {...props} outerAppearance={outerAppearance} /></CustomerPopupSkin>;
+}
+function CustomerWelcomeSettingsCardBody({
+  outerAppearance,
   workspace,
   ready,
   wideWebLayout = false,
   onSave,
 }: {
+  outerAppearance: React.ContextType<typeof Appearance>;
   workspace: SalonWorkspace;
   ready: boolean;
   wideWebLayout?: boolean;
@@ -32,7 +42,21 @@ export function CustomerWelcomeSettingsCard({
   ) => Promise<void>;
 }) {
  const premiumColor=useCustomerPremiumColor();
- const styles=useCustomerPremiumStyles(baseCustomerComponentStyles);
+ const baseStyles=useCustomerPremiumStyles(baseCustomerComponentStyles);
+ const pal=React.useContext(Appearance).palette;
+ // Editor skin: defined switch, bronze primary action, notification-like preview.
+ const bronze=pal.night?'#9C8461':'#6F5A3E';
+ const styles=React.useMemo(()=>({...baseStyles,
+  toggleRow:{...baseStyles.toggleRow,backgroundColor:pal.field,borderColor:pal.border,borderWidth:1},
+  toggleRowActive:{backgroundColor:pal.night?'rgba(156,132,97,.12)':'rgba(122,100,70,.08)',borderColor:pal.night?'rgba(216,194,155,.4)':'rgba(111,90,62,.35)'},
+  toggle:{width:50,height:30,borderRadius:15,padding:3,justifyContent:'center' as const,backgroundColor:pal.night?'#3A3D3E':'#D8CFC2'},
+  toggleActive:{backgroundColor:bronze},
+  toggleKnob:{width:24,height:24,borderRadius:12,backgroundColor:'#FFFDF8',shadowColor:'#000',shadowOpacity:.22,shadowRadius:3,shadowOffset:{width:0,height:1}},
+  toggleKnobActive:{alignSelf:'flex-end' as const},
+  saveButton:{...baseStyles.saveButton,backgroundColor:bronze,borderWidth:0,borderRadius:14,minHeight:50,justifyContent:'center' as const},
+  saveButtonDisabled:{backgroundColor:'transparent',borderWidth:1,borderColor:pal.border,opacity:1},
+  saveButtonText:{...baseStyles.saveButtonText,color:'#FFF8EC',fontWeight:'600' as const},
+ }) as unknown as typeof baseStyles & Record<string,any>,[baseStyles,pal,bronze]);
 
   const [enabled, setEnabled] = useState(workspace.clientWelcomeEnabled !== false);
   const [title, setTitle] = useState(
@@ -211,18 +235,21 @@ export function CustomerWelcomeSettingsCard({
             dell’attività.
           </Text>
 
-          <View style={styles.preview}>
-            <PremiumSectionHeader tone={0} style={{flexDirection:"row",alignItems:"center",gap:8,marginBottom:9}}><Ionicons name="chatbox-outline" size={17} color={styles.previewEyebrow.color}/><Text style={styles.previewEyebrow}>COME LO VEDE IL CLIENTE</Text></PremiumSectionHeader>
-            <Text style={styles.previewTitle}>
-              {(normalizedTitle || DEFAULT_WELCOME_TITLE)
-                .replace(/\{nome\}/gi, 'Giulia')
-                .replace(/\{salone\}/gi, workspace.salonName || 'il salone')}
-            </Text>
-            <Text style={styles.previewMessage}>
-              {(normalizedMessage || DEFAULT_WELCOME_MESSAGE)
-                .replace(/\{nome\}/gi, 'Giulia')
-                .replace(/\{salone\}/gi, workspace.salonName || 'il salone')}
-            </Text>
+          <Text style={[styles.label,{marginTop:6}]}>Anteprima</Text>
+          <View style={{flexDirection:'row',gap:12,alignItems:'flex-start',padding:14,borderRadius:18,borderWidth:1,borderColor:pal.border,backgroundColor:pal.night?'rgba(38,41,43,.95)':'#FFFDF9',shadowColor:'#000',shadowOpacity:pal.night?.35:.08,shadowRadius:12,shadowOffset:{width:0,height:5}}}>
+            <NativeMedal icon="storefront-outline" size={40} iconSize={18} accent={pal.night?'#8FBF9A':'#3F7A4D'} />
+            <View style={{flex:1,minWidth:0,gap:4}}>
+              <Text style={{fontSize:15,lineHeight:20,fontWeight:'600',color:pal.ink}}>
+                {(normalizedTitle || DEFAULT_WELCOME_TITLE)
+                  .replace(/\{nome\}/gi, 'Giulia')
+                  .replace(/\{salone\}/gi, workspace.salonName || 'il salone')}
+              </Text>
+              <Text style={{fontSize:13,lineHeight:19,color:pal.muted}}>
+                {(normalizedMessage || DEFAULT_WELCOME_MESSAGE)
+                  .replace(/\{nome\}/gi, 'Giulia')
+                  .replace(/\{salone\}/gi, workspace.salonName || 'il salone')}
+              </Text>
+            </View>
           </View>
 
           <HapticTouchable
@@ -230,8 +257,8 @@ export function CustomerWelcomeSettingsCard({
             onPress={save}
             disabled={!canSave}
           >
-            <Text style={styles.saveButtonText}>
-              {saving ? 'Salvataggio...' : 'Salva benvenuto'}
+            <Text style={[styles.saveButtonText, !canSave && {color:pal.muted}]}>
+              {saving ? 'Salvataggio…' : canSave ? 'Salva benvenuto' : 'Nessuna modifica'}
             </Text>
           </HapticTouchable>
         </View>
@@ -239,7 +266,7 @@ export function CustomerWelcomeSettingsCard({
 
   return (
     <>
-    {Platform.OS !== 'web' ? <NativeCustomerUtilityCard
+    {Platform.OS !== 'web' ? <Appearance.Provider value={outerAppearance}><NativeCustomerUtilityCard
       icon="storefront-outline"
       title="Benvenuto nuovi clienti"
       description="Compare una sola volta, dopo notifiche e Face ID o impronta."
@@ -247,7 +274,7 @@ export function CustomerWelcomeSettingsCard({
       accessibilityLabel="Personalizza messaggio di benvenuto clienti"
       status={{label:enabled?'Attivo':'Disattivo',active:enabled}}
       onPress={toggleExpanded}
-    /> : (
+    /></Appearance.Provider> : (
     <View
       {...(Platform.OS==='web'?{dataSet:{customerWelcomeCard:'true'}}:{})}
       style={[
@@ -322,7 +349,7 @@ export function CustomerWelcomeSettingsCard({
 
     {(
       <Modal supportedOrientations={TABLET_MODAL_ORIENTATIONS} visible={expanded} transparent animationType="none" onRequestClose={closeEditor}>
-        <CreationSheet premiumWeb premiumKind="customer" fillAvailableHeight={false} animatePresentation title="Benvenuto nuovi clienti" icon="storefront-outline"
+        <CreationSheet premiumWeb premiumKind="customer" fillAvailableHeight={false} animatePresentation title="Benvenuto nuovi clienti" icon="storefront-outline" iconAccent={pal.night?"#8FBF9A":"#3F7A4D"}
           onClose={closeEditor} scrollRef={scrollRef} onRevealFocusedField={revealFocusedField}>
           {editor}
         </CreationSheet>
