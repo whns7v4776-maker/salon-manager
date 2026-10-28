@@ -29,7 +29,7 @@ import { OwnerAppointmentCheckout } from '../../components/owner-appointment-che
 import { NativeSheetHandle, NativeDraggableSheet } from '../../components/ui/native-sheet-drag';
 import { AgendaLiveTimeOverlay } from '../../components/agenda-live-time-overlay';
 import { AgendaSlotSatin,AgendaPauseSurface } from '../../components/agenda-approved-surface';
-import { AgendaLiveSignalProvider, AgendaLiveGlow } from '../../components/agenda-live-glow';
+import { AgendaLiveSignalProvider, AgendaLiveGlow, AgendaLiveClockRing } from '../../components/agenda-live-glow';
 import { useAppointmentBenefits } from '../../hooks/use-appointment-benefits';
 import { AppointmentBenefitBadges } from '../../components/appointment-benefit-badges';
 import { OwnerBookingPackagePicker } from '../../components/owner-booking-package-picker';
@@ -46481,6 +46481,7 @@ export default function AgendaScreen() {
                     accessibilityHint="Scorre la panoramica fino alla linea dell'ora corrente."
                     {...(IS_WEB ? ({ title: "Vai all'ora attuale" } as object) : {})}
                   >
+<AgendaLiveClockRing/>
 <Ionicons name="time-outline" size={17} color={availabilityPalette.ink}/>
 </HapticTouchable>
                 ) : null}
