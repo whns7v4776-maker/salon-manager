@@ -8,6 +8,7 @@ import { PremiumSearchToolbar } from '../../components/ui/premium-search-toolbar
 import {InfoButton} from '../../components/ui/info-button';
 import { TABLET_MODAL_ORIENTATIONS } from '../../src/lib/tablet-modal-orientations';
 import { NativeMedal } from '../../components/owner-premium-native-home';
+import { customerPopupPalette } from '../../components/customer-popup-skin';
 import { useActiveCustomerCommunications } from '../../src/lib/use-active-customer-communications';
 import {NativePremiumScope, NativeReadableText as Text, NativePremiumIcon as Ionicons} from '../../components/owner-native-premium';
 import { OwnerBrandMark } from '../../components/salon-brand-mark';
@@ -18,7 +19,6 @@ import { CustomerDirectorySummary, CustomerDirectoryRow, CustomerDirectoryBoard,
 import { CustomerSelectionIndicator } from '../../components/customer-selection-indicator';
 import { CustomerPopupHeader } from '../../components/customer-popup-header';
 import { CustomerPopupClose } from '../../components/customer-popup-close';
-import { FormResetLink } from '../../components/form-reset-link';
 import { OwnerPremiumSheetFrame } from '../../components/owner-premium-sheet';
 import { OWNER_RAIL_WIDTH } from '../../components/owner-premium-web';
 import { useIsFocused } from '@react-navigation/native';
@@ -52,7 +52,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { Alert, FlatList, Keyboard, KeyboardAvoidingView, Linking, Modal, Platform, ScrollView, type StyleProp, StyleSheet, TextInput, useWindowDimensions, View, type ViewStyle } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Keyboard, KeyboardAvoidingView, Linking, Modal, Platform, ScrollView, type StyleProp, StyleSheet, TextInput, useWindowDimensions, View, type ViewStyle } from 'react-native';
 import { HapticNativePressable as Pressable } from '../../components/ui/haptic-native-controls';
 import ReanimatedSwipeable, {
   type SwipeableMethods,
@@ -677,268 +677,137 @@ const CustomerCreatorForm = React.memo(
 
       if (!visible) return null;
 
+      // Rebuilt layout: three grouped cards, left-aligned fields, one bronze primary action.
+      const fp = customerPopupPalette(formPalette);
+      const errorEdge = fp.night ? '#D19C9F' : '#A75B63';
+      const busy = saving || loadingInit;
+      const fieldStyle = (hasError?: boolean) => ({ minHeight: 50, borderRadius: 14, borderWidth: 1, borderColor: hasError ? errorEdge : fp.border, backgroundColor: fp.field, paddingHorizontal: 14, fontSize: 16, color: fp.ink, textAlign: 'left' as const });
+      const label = (text: string, optional?: boolean) => <Text style={{ fontSize: 12, lineHeight: 16, fontWeight: '600', color: fp.ink, marginBottom: 6 }}>{text}{optional ? <Text style={{ fontWeight: '400', color: fp.muted }}>  facoltativo</Text> : null}</Text>;
+      const errorText = (text?: string) => text ? <Text accessibilityRole="alert" style={{ fontSize: 12, lineHeight: 17, color: errorEdge, marginTop: 5 }}>{text}</Text> : null;
+      const group = (icon: React.ComponentProps<typeof Ionicons>['name'], accent: [string, string], title: string, children: React.ReactNode) => (
+        <View style={{ borderWidth: 1, borderColor: fp.border, borderRadius: 18, backgroundColor: fp.night ? 'rgba(255,255,255,0.025)' : 'rgba(255,255,255,0.55)', padding: 14, gap: 14 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+            <NativeMedal icon={icon} size={34} iconSize={16} accent={fp.night ? accent[0] : accent[1]} />
+            <Text style={{ fontSize: 15, fontWeight: '600', color: fp.ink }}>{title}</Text>
+          </View>
+          {children}
+        </View>
+      );
+      const twoUp = !isDesktopWebLayout ? { flexDirection: 'row' as const, gap: 10 } : { flexDirection: 'row' as const, gap: 12 };
       const content = (
         <Animated.View
           ref={creatorContentRef}
           collapsable={false}
           layout={Platform.OS === 'web' ? LinearTransition.duration(210).easing(Easing.out(Easing.cubic)) : undefined}
+          style={{ gap: 14, paddingTop: 6, width: '100%', maxWidth: isDesktopWebLayout ? 720 : undefined, alignSelf: 'center' }}
         >
-          <View
-            style={[
-              styles.formFieldsWrap,
-              isDesktopWebLayout && styles.formFieldsWrapDesktop,
-            ]}
-          >
-            <Text style={{ color: formPalette.muted, fontSize: 12, alignSelf: 'flex-start', marginTop: 8, marginBottom: 5 }}>Nome</Text>
-            <ClearableTextInput
-              ref={nameInputRef}
-              keepClearControlMounted
-              reserveSymmetricClearSpace
-              placeholder="Inserisci nome"
-              placeholderTextColor="#9a9a9a"
-              value={draft.nome}
-              onChangeText={(value) => {
-                updateDraft('nome', value);
-                clearError('nome');
-              }}
-              onFocus={() =>
-                scrollToField(nameInputRef, { topOffset: nameFieldScrollTopOffset })
-              }
-              editable={!saving && !loadingInit}
-              style={[
-                styles.input,
-                isDesktopWebLayout && styles.inputDesktopWide,
-                errors.nome && styles.inputError,
-              ]}
-              returnKeyType="next"
-              enterKeyHint="next"
-              onSubmitEditing={() => focusField(surnameInputRef)}
-              blurOnSubmit={false}
-            />
-            {errors.nome ? (
-              <Text style={styles.fieldErrorText}>{errors.nome}</Text>
-            ) : null}
-
-            <Text style={{ color: formPalette.muted, fontSize: 12, alignSelf: 'flex-start', marginTop: 8, marginBottom: 5 }}>Cognome</Text>
-
-            <ClearableTextInput
-              ref={surnameInputRef}
-              keepClearControlMounted
-              reserveSymmetricClearSpace
-              placeholder="Inserisci cognome"
-              placeholderTextColor="#9a9a9a"
-              value={draft.cognome}
-              onChangeText={(value) => {
-                updateDraft('cognome', value);
-                clearError('cognome');
-              }}
-              onFocus={() => scrollToField(surnameInputRef)}
-              editable={!saving && !loadingInit}
-              style={[
-                styles.input,
-                isDesktopWebLayout && styles.inputDesktopWide,
-                errors.cognome && styles.inputError,
-              ]}
-              returnKeyType="next"
-              enterKeyHint="next"
-              onSubmitEditing={() => focusField(phoneInputRef)}
-              blurOnSubmit={false}
-            />
-            {errors.cognome ? (
-              <Text style={styles.fieldErrorText}>{errors.cognome}</Text>
-            ) : null}
-
-            <Text style={{ color: formPalette.muted, fontSize: 12, alignSelf: 'flex-start', marginTop: 8, marginBottom: 5 }}>Telefono</Text>
-
-            <ClearableTextInput
-              ref={phoneInputRef}
-              keepClearControlMounted
-              reserveSymmetricClearSpace
-              placeholder="Inserisci numero di telefono"
-              placeholderTextColor="#9a9a9a"
-              value={draft.telefono}
-              onChangeText={(value) => {
-                updateDraft('telefono', limitPhoneToTenDigits(value));
-                clearError('telefono');
-              }}
-              onFocus={() => scrollToField(phoneInputRef)}
-              editable={!saving && !loadingInit}
-              keyboardType="phone-pad"
-              style={[
-                styles.input,
-                isDesktopWebLayout && styles.inputDesktopWide,
-                errors.telefono && styles.inputError,
-              ]}
-              returnKeyType="next"
-              enterKeyHint="next"
-              onSubmitEditing={() => focusField(emailInputRef)}
-              blurOnSubmit={false}
-            />
-            {errors.telefono ? (
-              <Text style={styles.fieldErrorText}>{errors.telefono}</Text>
-            ) : null}
-
-            <Text style={{ color: formPalette.muted, fontSize: 12, alignSelf: 'flex-start', marginTop: 8, marginBottom: 5 }}>Email · facoltativa</Text>
-
-            <ClearableTextInput
-              ref={emailInputRef}
-              keepClearControlMounted
-              reserveSymmetricClearSpace
-              placeholder="Email (Opzionale)"
-              placeholderTextColor="#9a9a9a"
-              value={draft.email}
-              onChangeText={(value) => {
-                updateDraft('email', value);
-                clearError('email');
-              }}
-              onFocus={() => scrollToField(emailInputRef)}
-              editable={!saving && !loadingInit}
-              autoCapitalize="none"
-              keyboardType="email-address"
-              style={[
-                styles.input,
-                isDesktopWebLayout && styles.inputDesktopWide,
-                errors.email && styles.inputError,
-              ]}
-              returnKeyType="next"
-              enterKeyHint="next"
-              onSubmitEditing={() => focusField(instagramInputRef)}
-              blurOnSubmit={false}
-            />
-            {errors.email ? (
-              <Text style={styles.fieldErrorText}>{errors.email}</Text>
-            ) : null}
-            <View style={styles.optionalEmailInfo}>
-              <Ionicons name="mail-outline" size={18} color={styles.__premiumIcon.color} />
-              <View style={styles.optionalEmailInfoText}>
-                <Text style={styles.optionalEmailInfoTitle}>Email opzionale</Text>
-                <Text style={styles.optionalEmailInfoBody}>
-                  Se il salone non ne è in possesso, può lasciarla vuota. Al primo accesso il
-                  cliente dovrà inserirla e verificarla tramite codice OTP prima di poter entrare.
-                </Text>
+          {group('person-outline', ['#A9ABD9', '#5B5E9A'], 'Anagrafica', <>
+            <View style={twoUp}>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                {label('Nome')}
+                <ClearableTextInput ref={nameInputRef} keepClearControlMounted placeholder="Nome" placeholderTextColor={fp.muted} value={draft.nome}
+                  onChangeText={(value) => { updateDraft('nome', value); clearError('nome'); }}
+                  onFocus={() => scrollToField(nameInputRef, { topOffset: nameFieldScrollTopOffset })}
+                  editable={!busy} style={fieldStyle(!!errors.nome)} returnKeyType="next" enterKeyHint="next"
+                  onSubmitEditing={() => focusField(surnameInputRef)} blurOnSubmit={false} />
+                {errorText(errors.nome)}
+              </View>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                {label('Cognome')}
+                <ClearableTextInput ref={surnameInputRef} keepClearControlMounted placeholder="Cognome" placeholderTextColor={fp.muted} value={draft.cognome}
+                  onChangeText={(value) => { updateDraft('cognome', value); clearError('cognome'); }}
+                  onFocus={() => scrollToField(surnameInputRef)}
+                  editable={!busy} style={fieldStyle(!!errors.cognome)} returnKeyType="next" enterKeyHint="next"
+                  onSubmitEditing={() => focusField(phoneInputRef)} blurOnSubmit={false} />
+                {errorText(errors.cognome)}
               </View>
             </View>
+            <View>
+              {label('Telefono')}
+              <ClearableTextInput ref={phoneInputRef} keepClearControlMounted placeholder="Numero di cellulare" placeholderTextColor={fp.muted} value={draft.telefono}
+                onChangeText={(value) => { updateDraft('telefono', limitPhoneToTenDigits(value)); clearError('telefono'); }}
+                onFocus={() => scrollToField(phoneInputRef)}
+                editable={!busy} keyboardType="phone-pad" style={fieldStyle(!!errors.telefono)} returnKeyType="next" enterKeyHint="next"
+                onSubmitEditing={() => focusField(emailInputRef)} blurOnSubmit={false} />
+              {errorText(errors.telefono)}
+            </View>
+          </>)}
 
-            <Text style={{ color: formPalette.muted, fontSize: 12, alignSelf: 'flex-start', marginTop: 8, marginBottom: 5 }}>Instagram · facoltativo</Text>
-
-            <ClearableTextInput
-              ref={instagramInputRef}
-              keepClearControlMounted
-              reserveSymmetricClearSpace
-              placeholder="Instagram (Opzionale)"
-              placeholderTextColor="#9a9a9a"
-              value={draft.instagram}
-              onChangeText={(value) => updateDraft('instagram', value)}
-              onFocus={() => scrollToField(instagramInputRef)}
-              editable={!saving && !loadingInit}
-              autoCapitalize="none"
-              style={[styles.input, isDesktopWebLayout && styles.inputDesktopWide]}
-              returnKeyType="next"
-              enterKeyHint="next"
-              onSubmitEditing={() => focusField(noteInputRef)}
-              blurOnSubmit={false}
-            />
-
-            <View style={styles.customerNoteFieldCard}>
-              <View style={styles.customerNoteFieldHeader}>
-                <View style={styles.customerNoteFieldIcon}>
-                  <Ionicons name="information" size={16} color="#FFFFFF" />
-                </View>
-                <View style={styles.customerNoteFieldCopy}>
-                  <Text style={styles.customerNoteFieldTitle}>Note cliente</Text>
-                  <Text style={styles.customerNoteFieldSubtitle}>
-                    Informazioni interne visibili solo al salone.
-                  </Text>
-                </View>
+          {group('at-outline', ['#9DBAD6', '#4D6E8F'], 'Contatti', <>
+            <View>
+              {label('Email', true)}
+              <ClearableTextInput ref={emailInputRef} keepClearControlMounted placeholder="nome@esempio.it" placeholderTextColor={fp.muted} value={draft.email}
+                onChangeText={(value) => { updateDraft('email', value); clearError('email'); }}
+                onFocus={() => scrollToField(emailInputRef)}
+                editable={!busy} autoCapitalize="none" keyboardType="email-address" style={fieldStyle(!!errors.email)} returnKeyType="next" enterKeyHint="next"
+                onSubmitEditing={() => focusField(instagramInputRef)} blurOnSubmit={false} />
+              {errorText(errors.email)}
+              <View style={{ flexDirection: 'row', gap: 7, marginTop: 7, alignItems: 'flex-start' }}>
+                <Ionicons name="shield-checkmark-outline" size={14} color={fp.muted} style={{ marginTop: 2 }} />
+                <Text style={{ flex: 1, fontSize: 12, lineHeight: 17, color: fp.muted }}>Se manca, il cliente la inserirà e la verificherà con un codice al primo accesso.</Text>
               </View>
+            </View>
+            <View>
+              {label('Instagram', true)}
+              <ClearableTextInput ref={instagramInputRef} keepClearControlMounted placeholder="@nomeprofilo" placeholderTextColor={fp.muted} value={draft.instagram}
+                onChangeText={(value) => updateDraft('instagram', value)}
+                onFocus={() => scrollToField(instagramInputRef)}
+                editable={!busy} autoCapitalize="none" style={fieldStyle()} returnKeyType="next" enterKeyHint="next"
+                onSubmitEditing={() => focusField(noteInputRef)} blurOnSubmit={false} />
+            </View>
+          </>)}
+
+          {group('sparkles-outline', ['#D69AB0', '#9A4F67'], 'Dettagli', <>
+            <View>
+              {label('Data di nascita', true)}
+              <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+                <HapticTouchable
+                  accessibilityRole="button" accessibilityLabel="Scegli data di nascita"
+                  style={[fieldStyle(), { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, opacity: busy ? 0.5 : 1 }]}
+                  onPress={() => { Keyboard.dismiss(); onBirthdayPress(draftRef.current.birthday); }}
+                  disabled={busy} pressScale={0.98} pressOpacity={0.98}
+                >
+                  <Ionicons name="calendar-outline" size={17} color={fp.muted} />
+                  <Text style={{ flex: 1, fontSize: 16, color: draft.birthday ? fp.ink : fp.muted }}>{formatBirthdayLabel(draft.birthday) || 'Scegli una data'}</Text>
+                </HapticTouchable>
+                {draft.birthday ? (
+                  <HapticTouchable accessibilityRole="button" accessibilityLabel="Rimuovi data di nascita" onPress={() => updateDraft('birthday', '')} disabled={busy}
+                    style={{ width: 50, height: 50, borderRadius: 14, borderWidth: 1, borderColor: fp.border, backgroundColor: fp.field, alignItems: 'center', justifyContent: 'center' }}>
+                    <Ionicons name="close" size={18} color={fp.ink} />
+                  </HapticTouchable>
+                ) : null}
+              </View>
+            </View>
+            <View>
+              {label('Note interne', true)}
               <TextInput
                 ref={noteInputRef}
                 value={draft.notaCliente}
                 onChangeText={(value) => updateDraft('notaCliente', value)}
-                placeholder="Preferenze e informazioni utili"
-                placeholderTextColor="#94A3B8"
+                placeholder="Preferenze, allergie, informazioni utili. Visibili solo al salone."
+                placeholderTextColor={fp.muted}
                 multiline
                 maxLength={1000}
-                editable={!saving && !loadingInit}
-                style={styles.customerNoteInput}
+                editable={!busy}
+                style={[fieldStyle(), { minHeight: 100, paddingTop: 13, paddingBottom: 13, lineHeight: 21 }]}
                 textAlignVertical="top"
                 onFocus={() => scrollToField(noteInputRef)}
                 returnKeyType="default"
               />
             </View>
+          </>)}
 
-            <HapticTouchable
-              style={[
-                styles.input,
-                styles.dateInputButton,
-                styles.dateInputAfterCustomerNote,
-                isDesktopWebLayout && styles.dateInputButtonDesktop,
-                isDesktopWebLayout && styles.dateInputAfterCustomerNoteWeb,
-                (saving || loadingInit) && styles.primaryButtonDisabled,
-                {flex:0,alignSelf:'center',width:240,maxWidth:'100%',minHeight:46},
-              ]}
-              onPress={() => {
-                Keyboard.dismiss();
-                onBirthdayPress(draftRef.current.birthday);
-              }}
-              disabled={saving || loadingInit}
-              pressScale={0.98}
-              pressOpacity={0.98}
-            >
-              <Text
-                style={[
-                  styles.dateInputText,
-                  !draft.birthday && styles.dateInputPlaceholder,
-                ]}
-              >
-                {formatBirthdayLabel(draft.birthday) || 'Data di nascita (Opzionale)'}
-              </Text>
+          <Text style={{ fontSize: 12, lineHeight: 17, color: fp.muted, textAlign: 'center' }}>Obbligatori: nome, cognome e telefono.</Text>
+
+          <View style={{ flexDirection: 'row', gap: 10, alignItems: 'stretch' }}>
+            <HapticTouchable accessibilityRole="button" onPress={reset} disabled={busy || !canClear} pressScale={0.975} pressOpacity={0.98}
+              style={{ minHeight: 52, paddingHorizontal: 20, borderRadius: 15, borderWidth: 1, borderColor: fp.border, backgroundColor: fp.field, alignItems: 'center', justifyContent: 'center', opacity: busy || !canClear ? 0.45 : 1 }}>
+              <Text style={{ fontSize: 15, fontWeight: '600', color: fp.ink }}>Svuota</Text>
             </HapticTouchable>
-
-            {draft.birthday ? (
-              <HapticTouchable
-                style={styles.clearDateChip}
-                onPress={() => updateDraft('birthday', '')}
-                disabled={saving || loadingInit}
-                pressScale={0.98}
-                pressOpacity={0.98}
-              >
-                <Text style={styles.clearDateChipText}>Rimuovi data</Text>
-              </HapticTouchable>
-            ) : null}
-          </View>
-
-          <Text style={styles.requiredFieldsHint}>
-            Campi obbligatori: nome, cognome e numero di telefono.
-          </Text>
-
-          <View
-            style={[[
-              styles.actionRow,
-              isDesktopWebLayout && styles.actionColumnDesktop,
-            ], {width:'100%',flexDirection:'column',flexWrap:'nowrap',alignItems:'center',justifyContent:'center',gap:10}]}
-          >
-            <FormResetLink onPress={reset} disabled={saving || loadingInit || !canClear} pressScale={0.975} pressOpacity={0.98}>Svuota</FormResetLink>
-
-            <HapticTouchable
-              style={[
-                styles.primaryButtonInline,
-                isDesktopWebLayout && styles.primaryButtonInlineDesktop,
-                (saving || loadingInit) && styles.primaryButtonDisabled,
-              ]}
-              onPress={() => void onSubmit(draftRef.current)}
-              disabled={saving || loadingInit}
-              pressScale={0.975}
-              pressOpacity={0.98}
-            >
-              <Text
-                style={[
-                  styles.primaryButtonText,
-                  (saving || loadingInit) && styles.primaryButtonTextDisabled,
-                ]}
-              >
-                {saving ? 'Salvataggio...' : 'Aggiungi cliente'}
-              </Text>
+            <HapticTouchable accessibilityRole="button" onPress={() => void onSubmit(draftRef.current)} disabled={busy} pressScale={0.975} pressOpacity={0.98}
+              style={{ flex: 1, minHeight: 52, borderRadius: 15, backgroundColor: fp.night ? '#9C8461' : '#5E4A30', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, opacity: busy ? 0.6 : 1, shadowColor: '#000', shadowOpacity: fp.night ? 0.35 : 0.14, shadowRadius: 10, shadowOffset: { width: 0, height: 4 } }}>
+              {saving ? <ActivityIndicator color="#FFF8EC" /> : <Ionicons name="person-add-outline" size={18} color="#FFF8EC" />}
+              <Text style={{ fontSize: 15, fontWeight: '600', color: '#FFF8EC' }}>{saving ? 'Salvataggio…' : 'Aggiungi cliente'}</Text>
             </HapticTouchable>
           </View>
         </Animated.View>
@@ -953,7 +822,7 @@ const CustomerCreatorForm = React.memo(
       return (
         <Modal visible={visible} supportedOrientations={TABLET_MODAL_ORIENTATIONS} transparent animationType="none" onRequestClose={onClose}>
           <GestureHandlerRootView style={{ flex: 1 }}>
-            <CreationSheet premiumWeb title="Nuovo cliente" icon="person-add-outline" onClose={onClose} scrollRef={creatorScrollRef} onRevealFocusedField={revealCreatorField}>
+            <CreationSheet premiumWeb title="Nuovo cliente" icon="person-add-outline" iconAccent={formPalette.night ? "#A9ABD9" : "#5B5E9A"} onClose={onClose} scrollRef={creatorScrollRef} onRevealFocusedField={revealCreatorField}>
               {content}
             </CreationSheet>
             {nativeOverlays}
