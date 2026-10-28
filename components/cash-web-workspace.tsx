@@ -1,4 +1,5 @@
 import { NativeMedal } from './owner-premium-native-home';
+import { ShopSwitch } from './shop/shop-switch';
 import { CASH_LOCKED_PERMISSION_LABELS } from '../src/lib/cash-locked-permissions';
 import {OwnerWebPageTitle} from './owner-web-page-title';
 import { premiumSectionAccent } from "./premium-section-accent";
@@ -489,7 +490,7 @@ export function CashWebWorkspace({
  [data-cash-movement-row]{transition:background-color .15s ease;}
  [data-cash-movement-row]:hover{background-color:${p.night ? "rgba(255,255,255,.035)" : "rgba(52,55,53,.035)"};}
  [data-cash-tools]{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;}
- [data-cash-dialog] input,[data-cash-dialog] textarea{color:${p.ink}!important;background:${p.night ? "#2B2B29" : "#EAE4DA"}!important;border-color:${p.night ? p.border : "#B9AE9C"}!important;border-radius:11px!important;}
+ [data-cash-dialog] input:not([role="switch"]),[data-cash-dialog] textarea{color:${p.ink}!important;background:${p.night ? "#2B2B29" : "#EAE4DA"}!important;border-color:${p.night ? p.border : "#B9AE9C"}!important;border-radius:11px!important;}
  @media(max-width:1250px){[data-cash-main]{grid-template-columns:minmax(0,1fr);}[data-cash-row]{grid-template-columns:minmax(160px,1.6fr) 110px 100px 115px 42px;}}
  @media(max-width:480px){[data-cash-periods]{display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr));width:100%;}[data-cash-metrics]{grid-template-columns:1fr!important;}}
  @media(max-width:700px){[data-cash-table-toolbar]{grid-template-columns:1fr;}[data-cash-mobile-meta]{display:flex;}[data-cash-tools]{grid-template-columns:1fr;}[data-cash-row]{grid-template-columns:minmax(0,1fr) auto 40px;gap:10px;}[data-cash-row] [data-cash-cell="method"],[data-cash-row] [data-cash-cell="status"]{display:none;}[data-cash-table-heading]{display:none!important;}}
@@ -962,224 +963,33 @@ export function CashWebWorkspace({
           onClose={() => setPanel(null)}
         >
           {panel === "settings" ? (
-            <View
-              {...{ dataSet: { cashManagement: "true" } }}
-              style={{ gap: 24 }}
-            >
-              <View
-                style={{ flexDirection: "row", alignItems: "center", gap: 15 }}
-              >
-                <View
-                  style={{
-                    width: 50,
-                    height: 50,
-                    borderRadius: 15,
-                    alignItems: "center",
-                    justifyContent: "center",
-                    backgroundColor: m.disabled
-                      ? p.field
-                      : p.night
-                        ? "#19392B"
-                        : "#D8EEDC",
-                  }}
+            <View {...{ dataSet: { cashManagement: "true" } }} style={{ gap: 16 }}>
+              <Text style={{ color: p.muted, fontSize: 14, lineHeight: 21 }}>
+                Impostazioni della Cassa del salone. La protezione con password si gestisce da Protezione della Cassa.
+              </Text>
+              <View style={{ borderRadius: 16, borderWidth: 1, borderColor: p.night ? p.border : "rgba(122,100,70,.2)", backgroundColor: surface, paddingHorizontal: 16 }}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Riferimenti carta"
+                  onPress={() => setPanel("references")}
+                  style={{ flexDirection: "row", alignItems: "center", gap: 14, paddingVertical: 16 }}
                 >
-                  <Ionicons
-                    name="wallet-outline"
-                    size={25}
-                    color={
-                      m.disabled ? p.muted : p.night ? "#98E0AF" : "#196635"
-                    }
-                  />
-                </View>
-                <View style={{ flex: 1, gap: 5 }}>
-                  <Text
-                    style={{
-                      fontFamily: "Georgia",
-                      fontSize: 23,
-                      color: p.ink,
-                    }}
-                  >
-                    La Cassa del salone
-                  </Text>
-                  <Text
-                    style={{
-                      fontSize: 14,
-                      color: m.disabled
-                        ? p.muted
-                        : p.night
-                          ? "#98E0AF"
-                          : "#196635",
-                      fontWeight: "500",
-                    }}
-                  >
-                    Sezione {m.disabled ? "disattivata" : "attiva"}
-                  </Text>
-                </View>
-              </View>
-              <View
-                style={{
-                  flexDirection: width >= 760 ? "row" : "column",
-                  gap: 24,
-                }}
-              >
-                <View
-                  style={{
-                    flex: 1,
-                    borderWidth: 1,
-                    borderColor: p.night ? "#50564D" : "#B9AE9C",
-                    backgroundColor: p.night ? "#2B2F2A" : "#E5DED2",
-                    ...popupGlass(p, "panel"),
-                    borderRadius: 15,
-                    padding: 20,
-                    alignItems: "center",
-                    gap: 14,
-                  }}
-                >
-                  <View
-                    style={{
-                      flexDirection: "row",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      gap: 10,
-                    }}
-                  >
-                    <Ionicons
-                      name="lock-closed-outline"
-                      size={20}
-                      color={p.ink}
-                    />
-                    <Text
-                      style={{ fontSize: 17, fontWeight: "500", color: p.ink }}
-                    >
-                      Protezione della Cassa
+                  <NativeMedal icon="card-outline" size={40} iconSize={18} accent={p.night ? "#C9AA8C" : "#7E6247"} />
+                  <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+                    <Text style={{ fontSize: 15, fontWeight: "600", color: p.ink }}>Riferimenti carta</Text>
+                    <Text style={{ fontSize: 13, lineHeight: 19, color: p.muted }}>Un aiuto facoltativo per riconoscere gli incassi del POS esterno.</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color={p.muted} />
+                </Pressable>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 14, paddingVertical: 16, borderTopWidth: 1, borderTopColor: p.line }}>
+                  <NativeMedal icon="wallet-outline" size={40} iconSize={18} accent={p.night ? "#D6B27A" : "#8C6A35"} />
+                  <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+                    <Text style={{ fontSize: 15, fontWeight: "600", color: p.ink }}>Cassa attiva</Text>
+                    <Text style={{ fontSize: 13, lineHeight: 19, color: p.muted }}>
+                      {m.toggling ? "Salvataggio…" : m.disabled ? "Disattivata: i movimenti restano conservati." : "Se la disattivi, i movimenti restano conservati e puoi riattivarla quando vuoi."}
                     </Text>
                   </View>
-                  <Text
-                    style={{
-                      color: p.muted,
-                      fontSize: 14,
-                      lineHeight: 22,
-                      textAlign: "center",
-                    }}
-                  >
-                    Scegli se lasciare la Cassa libera o riservarla al titolare.
-                    La protezione è facoltativa.
-                  </Text>
-                  <View style={{ alignSelf: "center" }}>
-                    {button(
-                      "Configura accesso",
-                      () => {
-                        setPanel(null);
-                        access.onConfigure();
-                      },
-                      false,
-                      false,
-                      "arrow-forward-outline",
-                    )}
-                  </View>
-                </View>
-
-                <View
-                  style={{
-                    flex: 1,
-                    borderWidth: 1,
-                    borderColor: p.night ? "#50564D" : "#B9AE9C",
-                    backgroundColor: p.night ? "#2B2F2A" : "#E5DED2",
-                    ...popupGlass(p, "panel"),
-                    borderRadius: 15,
-                    padding: 20,
-                    alignItems: "center",
-                    gap: 14,
-                  }}
-                >
-                  <View
-                    style={{
-                      flexDirection: "row",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      gap: 10,
-                    }}
-                  >
-                    <Ionicons name="card-outline" size={20} color={p.ink} />
-                    <Text
-                      style={{ fontSize: 17, fontWeight: "500", color: p.ink }}
-                    >
-                      Riferimenti carta
-                    </Text>
-                  </View>
-                  <Text
-                    style={{
-                      color: p.muted,
-                      fontSize: 14,
-                      lineHeight: 22,
-                      textAlign: "center",
-                    }}
-                  >
-                    Un aiuto facoltativo per riconoscere gli incassi registrati
-                    sul POS esterno.
-                  </Text>
-                  <View style={{ alignSelf: "center" }}>
-                    {button(
-                      "Gestisci riferimenti",
-                      () => setPanel("references"),
-                      false,
-                      false,
-                      "arrow-forward-outline",
-                    )}
-                  </View>
-                </View>
-              </View>
-              <View
-                style={{
-                  borderWidth: 1,
-                  borderColor: p.night ? "#50564D" : "#B9AE9C",
-                  backgroundColor: p.night ? "#292D28" : "#D4CCBF",
-                  ...popupGlass(p, "panel"),
-                  borderRadius: 15,
-                  padding: 22,
-                  alignItems: "center",
-                  gap: 14,
-                }}
-              >
-                <View
-                  style={{
-                    flexDirection: "row",
-                    alignItems: "center",
-                    gap: 10,
-                  }}
-                >
-                  <Ionicons name="power-outline" size={20} color={p.ink} />
-                  <Text
-                    style={{ fontSize: 17, fontWeight: "500", color: p.ink }}
-                  >
-                    Disponibilità della sezione
-                  </Text>
-                </View>
-                <Text
-                  style={{
-                    color: p.muted,
-                    fontSize: 14,
-                    lineHeight: 22,
-                    textAlign: "center",
-                    maxWidth: 560,
-                  }}
-                >
-                  Puoi disattivare la sezione senza perdere i movimenti e
-                  riattivarla quando vuoi.
-                </Text>
-                <View style={{ alignSelf: "center" }}>
-                  {button(
-                    m.toggling
-                      ? "Salvataggio…"
-                      : m.disabled
-                        ? "Riabilita Cassa"
-                        : "Disabilita Cassa",
-                    m.onToggleDisabled,
-                    !!m.disabled,
-                    m.toggling,
-                    "power-outline",
-                    !m.disabled,
-                  )}
+                  <ShopSwitch accessibilityLabel="Cassa attiva" value={!m.disabled} disabled={m.toggling} onValueChange={() => m.onToggleDisabled()} />
                 </View>
               </View>
             </View>

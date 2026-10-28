@@ -1,3 +1,4 @@
+import { NativeMedal } from './owner-premium-native-home';
 import { TABLET_MODAL_ORIENTATIONS } from '../src/lib/tablet-modal-orientations';
 import {NativeReadableText as Text, NativePremiumIcon as Ionicons} from './owner-native-premium';
 import { CashWebDialog } from "./cash-web-dialog";
@@ -573,16 +574,10 @@ export function CashStripePanel({
       {!modalOnly ? (
         <>
           <View style={styles.heading}>
-            <View style={styles.icon}>
-              <Ionicons
-                name="card-outline"
-                size={22}
-                color={p.night?"#C6B9D5":"#786682"}
-              />
-            </View>
+            <NativeMedal icon="card-outline" size={44} iconSize={20} accent={p.night ? "#A9ABD9" : "#5B5E9A"} />
             <View style={styles.headingCopy}>
-              <Text style={styles.title}>Pagamenti digitali</Text>
-              <Text style={styles.subtitle}>Con Stripe · QR e link</Text>
+              <Text style={styles.title}>Stripe</Text>
+              <Text style={styles.subtitle}>QR, link e carta sul telefono</Text>
             </View>
           </View>
           <PremiumGuideDock
@@ -606,97 +601,38 @@ export function CashStripePanel({
             </Text>
           ) : (
             <>
-              <Text
-                style={{
-                  color:p.ink,
-                  fontSize: 14,
-                  fontWeight: "600",
-                }}
-              >
-                QR e link
-              </Text>
-              <View
-                accessibilityRole="text"
-                style={[
-                  styles.statusBadge,
+              {/* One row per way of getting paid: medallion, name, quiet dot status. */}
+              <View style={{ borderRadius: 16, borderWidth: 1, borderColor: p.night ? p.border : "rgba(122,100,70,.2)", paddingHorizontal: 14 }}>
+                {([
                   {
-                    backgroundColor: status.ready
-                      ? status.live
-                        ? (p.night?"#304235":"#E2EBDD")
-                        : (p.night?"#443D2E":"#F0E6D0")
-                      : status.connected
-                        ? (p.night?"#443D2E":"#F0E6D0")
-                        : p.field,
+                    icon: "qr-code-outline",
+                    accent: p.night ? "#A9ABD9" : "#5B5E9A",
+                    title: "QR e link",
+                    note: "Il cliente paga dal proprio telefono.",
+                    dot: status.ready ? (status.live ? (p.night ? "#86C2BE" : "#3E7C7A") : "#C9A35A") : status.connected ? "#C9A35A" : p.muted,
+                    label: status.ready ? (status.live ? "Attivo" : "Modalità test") : status.connected ? "Da completare" : "Non collegato",
                   },
-                ]}
-              >
-                <View
-                  style={[
-                    styles.statusDot,
-                    {
-                      backgroundColor: status.ready
-                        ? status.live
-                          ? "#22A66A"
-                          : "#B78020"
-                        : status.connected
-                          ? "#B78020"
-                          : "#8491A3",
-                    },
-                  ]}
-                />
-                <Text
-                  style={[
-                    styles.statusLabel,
-                    {
-                      color:
-                        status.ready && status.live
-                          ? (p.night?"#BDD0BA":"#4D6A50")
-                          : status.connected
-                            ? (p.night?"#DEC89B":"#816944")
-                            : p.muted,
-                    },
-                  ]}
-                >
-                  {status.ready
-                    ? status.live
-                      ? "Attivo"
-                      : "Modalità test"
-                    : status.connected
-                      ? "Attivazione da completare"
-                      : "Non collegato"}
-                </Text>
-              </View>
-              <View
-                style={{
-                  borderTopWidth: 1,
-                  borderTopColor:p.line,
-                  paddingTop: 12,
-                  gap: 8,
-                }}
-              >
-                <Text
-                  style={{
-                    color:p.ink,
-                    fontSize: 14,
-                    fontWeight: "600",
-                  }}
-                >
-                  Tap to Pay · carta sul telefono
-                </Text>
-                <View
-                  style={[styles.statusBadge, { backgroundColor:p.night?"#493E2C":"#F1E6D0" }]}
-                >
-                  <View
-                    style={[styles.statusDot, { backgroundColor: "#B78020" }]}
-                  />
-                  <Text style={[styles.statusLabel, { color:p.night?"#DFC69A":"#80643B" }]}>
-                    {terminalStatus?.enabled&&terminalStatus.locations?.length?tapLabel:`Non ancora attivo · ${tapLabel}`}
-                  </Text>
-                </View>
-                <Text style={styles.note}>
-                  Su iPhone e Android compatibili. L’abilitazione del telefono
-                  viene verificata prima del pagamento.
-                </Text>
+                  {
+                    icon: "phone-portrait-outline",
+                    accent: p.night ? "#9DBAD6" : "#4D6E8F",
+                    title: "Tap to Pay",
+                    note: "Carta appoggiata al telefono, su iPhone e Android compatibili.",
+                    dot: terminalStatus?.enabled && terminalStatus.locations?.length ? (p.night ? "#86C2BE" : "#3E7C7A") : "#C9A35A",
+                    label: terminalStatus?.enabled && terminalStatus.locations?.length ? tapLabel : `Non attivo · ${tapLabel}`,
+                  },
+                ] as const).map((item, index) => (
+                  <View key={item.title} style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 14, borderTopWidth: index ? 1 : 0, borderTopColor: p.line }}>
+                    <NativeMedal icon={item.icon} size={38} iconSize={17} accent={item.accent} />
+                    <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
+                      <Text style={{ color: p.ink, fontSize: 15, fontWeight: "600" }}>{item.title}</Text>
+                      <Text style={{ color: p.muted, fontSize: 12, lineHeight: 17 }}>{item.note}</Text>
+                      <View accessibilityRole="text" style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 2 }}>
+                        <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: item.dot }} />
+                        <Text style={{ color: p.ink, fontSize: 12, fontWeight: "600" }}>{item.label}</Text>
+                      </View>
+                    </View>
+                  </View>
+                ))}
               </View>
               <Text style={styles.text}>
                 {status?.connected

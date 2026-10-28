@@ -9,7 +9,9 @@ export function useCashPanelStyles<T extends Record<string, any>>(base: T): T {
   const { height } = useWindowDimensions();
   const native=useNativePremium();
   return useMemo(() => {
-    if (Platform.OS !== "web" && !native) return base;
+    // Cash panels only live in the owner back office: always in the premium theme,
+    // also inside native sheets that sit outside the NativePremiumScope.
+    void native;
     const result: any = {};
     for (const [name, value] of Object.entries(base)) {
       const style: any = { ...value };
