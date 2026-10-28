@@ -794,7 +794,7 @@ export function CashWebWorkspace({
               >
                 <View style={{ gap: 5 }}>
                   <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-                    <Ionicons name="analytics-outline" size={24} color={p.night ? "#B3C6D5" : "#526B80"} />
+                    <NativeMedal icon="analytics-outline" size={42} iconSize={19} accent={p.night ? "#9DBAD6" : "#4D6E8F"} />
                     {heading("Report e statistiche")}
                   </View>
                   <Text style={{ color: p.muted, fontSize: 13 }}>
@@ -914,32 +914,36 @@ export function CashWebWorkspace({
               "Riepilogo dei rimborsi e degli stati",
               "return-down-back-outline",
             ],
-          ].filter(([id]) => !reserved || (id === "payments" && allow("payments"))).map(([id, title, copy, icon], index) => (
-            <View
-              key={id}
-              style={{
-                padding: 20,
-                gap: 12,
-                borderRadius: 17,
-                borderWidth: 1,
-                borderColor: p.border,
-                backgroundColor: surface,
-              }}
-            >
-              <View
-                style={{ flexDirection: "row", alignItems: "center", gap: 10, minHeight: 40, marginHorizontal: -20, marginTop: -20, paddingHorizontal: 20, paddingVertical: 12, backgroundColor: premiumSectionAccent(p.night, [0, 2, 1, 2, 1, 3][index]).backgroundColor, borderTopLeftRadius: 17, borderTopRightRadius: 17, borderBottomWidth: 1, borderBottomColor: premiumSectionAccent(p.night, [0, 2, 1, 2, 1, 3][index]).borderColor }}
+          ].filter(([id]) => !reserved || (id === "payments" && allow("payments"))).map(([id, title, copy, icon]) => {
+            // One enamel colour per tool, same family as Home and Richieste.
+            const accent = ({ payments: ["#A9ABD9", "#5B5E9A"], policy: ["#D6B27A", "#8C6A35"], expenses: ["#9CC5A3", "#4E7A55"], fiscal: ["#D99A92", "#A35A52"], archive: ["#C9AA8C", "#7E6247"], refunds: ["#86C2BE", "#3E7C7A"] } as Record<string, string[]>)[id];
+            return (
+              <Pressable
+                key={id}
+                accessibilityRole="button"
+                accessibilityLabel={"Apri " + title.toLowerCase()}
+                onPress={() => setPanel(id as any)}
+                {...{ dataSet: { premiumHoverCard: "true" } }}
+                style={{
+                  padding: 18,
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 14,
+                  borderRadius: 18,
+                  borderWidth: 1,
+                  borderColor: p.night ? p.border : "rgba(122,100,70,.2)",
+                  backgroundColor: surface,
+                }}
               >
-                <View style={{ ...premiumSectionAccent(p.night, [0, 2, 1, 2, 1, 3][index]), paddingHorizontal: 10, paddingVertical: 10, borderRadius: 12 }}>
-                  <Ionicons name={icon as any} size={21} color={p.night ? ["#AAC8B0", "#D6BD99", "#B3C6D5", "#D6BD99", "#B3C6D5", "#CCB2C2"][index] : ["#42664C", "#80603C", "#526B80", "#80603C", "#526B80", "#7E5E72"][index]} />
+                <NativeMedal icon={icon as any} size={44} iconSize={20} accent={p.night ? accent[0] : accent[1]} />
+                <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
+                  <Text style={{ fontSize: 15, fontWeight: "600", color: p.ink }}>{title}</Text>
+                  <Text style={{ color: p.muted, fontSize: 13, lineHeight: 19 }}>{copy}</Text>
                 </View>
-                <Text style={{ fontSize: 16, color: p.ink }}>{title}</Text>
-              </View>
-              <Text style={{ color: p.muted, fontSize: 13, lineHeight: 20 }}>
-                {copy}
-              </Text>
-              {button("Apri " + title.toLowerCase(), () => setPanel(id))}
-            </View>
-          ))}
+                <Ionicons name="chevron-forward" size={18} color={p.muted} />
+              </Pressable>
+            );
+          })}
         </View>
         <CashWebPanel>{m.shop}</CashWebPanel>
       </ScrollView>
@@ -1265,18 +1269,19 @@ export function CashShopTrigger({
       accessibilityRole="button"
       accessibilityLabel="Apri vendite prodotti e ritiri"
       onPress={onPress}
+      {...{ dataSet: { premiumHoverCard: "true" } }}
       style={{
-        padding: 22,
+        padding: 20,
         borderWidth: 1,
-        borderColor: p.border,
+        borderColor: needsAttention ? (p.night ? "#9C8461" : "#7A6446") : p.night ? p.border : "rgba(122,100,70,.2)",
         borderRadius: 18,
-        backgroundColor: p.field,
+        backgroundColor: p.night ? "rgba(30,32,31,.88)" : "rgba(248,245,239,.85)",
         flexDirection: "row",
         alignItems: "center",
         gap: 14,
       }}
     >
-      <Ionicons name="bag-handle-outline" size={23} color={p.ink} />
+      <NativeMedal icon="bag-handle-outline" size={46} iconSize={21} accent={p.night ? "#D69AB0" : "#9A4F67"} />
       <View style={{ flex: 1, gap: 5 }}>
         <Text style={{ fontFamily: "Georgia", fontSize: 22, color: p.ink }}>
           Vendite prodotti e ritiri
@@ -1287,7 +1292,7 @@ export function CashShopTrigger({
             : "Apri la vendita prodotti e gli ordini da ritirare."}
         </Text>
       </View>
-      <Ionicons name="chevron-forward" size={20} color={p.ink} />
+      <Ionicons name="chevron-forward" size={20} color={p.muted} />
     </Pressable>
   );
 }
