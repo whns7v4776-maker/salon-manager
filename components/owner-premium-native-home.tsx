@@ -3,7 +3,7 @@ import { OwnerBrandMark } from './salon-brand-mark';
 import React, { memo, useEffect, useState } from 'react';
 import { Platform, Pressable, StatusBar, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import Svg, { Circle } from 'react-native-svg';
+import Svg, { Circle, Defs, LinearGradient, RadialGradient, Stop } from 'react-native-svg';
 import { SalonCodeBadge } from './ui/salon-code-badge';
 import { HapticTouchable } from './ui/haptic-touchable';
 import { NativeSettingsPopup } from './native-settings-popup';
@@ -34,7 +34,21 @@ function Glass({children,tint,style}:{children:React.ReactNode;tint?:string;styl
 }
 function Availability({value}:{value:number|null}){
  const {palette:p}=useAccessAppearance(); const valid=value!==null; const pct=Math.max(0,Math.min(100,value??0));
- return <View style={{alignItems:'center',width:70}} accessibilityLabel={valid?`Disponibilità stimata ${pct}%`:'Disponibilità non disponibile'}><View style={{width:52,height:52,alignItems:'center',justifyContent:'center'}}><Svg width={52} height={52} style={StyleSheet.absoluteFill}><Circle cx={26} cy={26} r={22} fill="none" stroke={p.night?'#ffffff1c':'#DCE1D6'} strokeWidth={3.5}/><Circle cx={26} cy={26} r={22} fill="none" stroke={p.night?'#AEC7AD':'#667F6C'} strokeWidth={3.5} strokeDasharray={`${138.23*pct/100} 138.23`} strokeLinecap="round" rotation={-90} origin="26,26"/></Svg><Text style={{color:p.ink,fontFamily:sans,fontSize:15,fontWeight:'600'}}>{valid?`${pct}%`:'—'}</Text></View><Text style={{color:p.muted,fontFamily:sans,fontSize:11,marginTop:3}}>Disponibilità*</Text></View>;
+ // Luminous ring: gradient arc over a soft halo, with a bright bead where the arc ends.
+ const size=58,c=size/2,r=23,circ=2*Math.PI*r,arc=circ*pct/100;
+ const angle=(pct/100)*2*Math.PI-Math.PI/2,bx=c+r*Math.cos(angle),by=c+r*Math.sin(angle);
+ const hi=p.night?'#D9F2D2':'#7FA486',lo=p.night?'#7FB08A':'#4F6E57',glow=p.night?'#9FD6A6':'#6E9A76';
+ return <View style={{alignItems:'center',width:74}} accessibilityLabel={valid?`Disponibilità stimata ${pct}%`:'Disponibilità non disponibile'}><View style={[{width:size,height:size,alignItems:'center',justifyContent:'center'},Platform.OS==='web'&&valid?({filter:`drop-shadow(0 0 6px ${p.night?'rgba(159,214,166,.45)':'rgba(110,154,118,.30)'})`} as any):null]}><Svg width={size} height={size} style={StyleSheet.absoluteFill}>
+  <Defs><LinearGradient id="availabilityArc" x1="0" y1="0" x2="1" y2="1"><Stop offset="0" stopColor={hi}/><Stop offset="1" stopColor={lo}/></LinearGradient><RadialGradient id="availabilityCore" cx="50%" cy="45%" r="55%"><Stop offset="0" stopColor={glow} stopOpacity={p.night?.16:.12}/><Stop offset="1" stopColor={glow} stopOpacity={0}/></RadialGradient></Defs>
+  <Circle cx={c} cy={c} r={r-3} fill="url(#availabilityCore)"/>
+  <Circle cx={c} cy={c} r={r} fill="none" stroke={p.night?'#ffffff14':'#DCE1D6'} strokeWidth={3}/>
+  {valid&&pct>0?<>
+   {[9,6].map((w,i)=><Circle key={w} cx={c} cy={c} r={r} fill="none" stroke={glow} strokeOpacity={p.night?(i?.16:.07):(i?.12:.05)} strokeWidth={w} strokeDasharray={`${arc} ${circ}`} strokeLinecap="round" rotation={-90} origin={`${c},${c}`}/>)}
+   <Circle cx={c} cy={c} r={r} fill="none" stroke="url(#availabilityArc)" strokeWidth={3.5} strokeDasharray={`${arc} ${circ}`} strokeLinecap="round" rotation={-90} origin={`${c},${c}`}/>
+   <Circle cx={bx} cy={by} r={5} fill={glow} fillOpacity={p.night?.28:.2}/>
+   <Circle cx={bx} cy={by} r={2.6} fill={p.night?'#F2FFF0':'#FFFFFF'} stroke={hi} strokeWidth={1}/>
+  </>:null}
+ </Svg><Text style={{color:p.ink,fontFamily:sans,fontSize:15,fontWeight:'600',fontVariant:['tabular-nums']}}>{valid?`${pct}%`:'—'}</Text></View><Text style={{color:p.muted,fontFamily:sans,fontSize:11,marginTop:3}}>Disponibilità*</Text></View>;
 }
 export const OwnerPremiumNativeHome=memo(function OwnerPremiumNativeHome(props:Props){
  const {palette:p,toggle}=useAccessAppearance();

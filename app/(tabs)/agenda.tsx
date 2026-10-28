@@ -1155,9 +1155,8 @@ const getWebWeekResizeIndicatorHeight = (contentHeight: number) => {
 const WEEK_PLANNER_DAY_WIDTH = 44;
 const WEEK_PLANNER_ROW_GAP = 1;
 const WEEK_PLANNER_COLUMN_GAP = 0;
-const WEEK_PLANNER_NATIVE_SCROLL_CUE_TRACK_WIDTH = 204;
-const WEEK_PLANNER_NATIVE_SCROLL_CUE_INNER_WIDTH =
-  WEEK_PLANNER_NATIVE_SCROLL_CUE_TRACK_WIDTH - 4;
+// App: the column rail runs across the operator area, inset from the card edges.
+const WEEK_PLANNER_NATIVE_SCROLL_CUE_INSET = 14;
 const AGENDA_LIST_CONTENT_TOP_PADDING = IS_WEB ? 8 : 54;
 const WEEK_PLANNER_MIN_OPERATOR_LANE_WIDTH = 72;
 // Su mobile una corsia troppo stretta rende il contenuto delle card illeggibile.
@@ -1238,7 +1237,7 @@ const buildWeekLaneRoleSortKey = ({
   return '';
 };
 const WEEK_PLANNER_MIN_OPERATOR_LANE_GAP = 1;
-const WEEK_PLANNER_NATIVE_SCRUBBER_HEIGHT = IS_WEB ? 0 : 8;
+const WEEK_PLANNER_NATIVE_SCRUBBER_HEIGHT = IS_WEB ? 0 : 12;
 const WEEK_PLANNER_DAY_HEADER_TOTAL_HEIGHT = 39;
 const WEEK_PLANNER_EDGE_BLEED_LEFT = 2;
 const WEEK_PLANNER_EDGE_BLEED_RIGHT = 18;
@@ -19747,7 +19746,8 @@ export default function AgendaScreen() {
   ]);
   const weekPlannerHasHorizontalOverflow =
     weekPlannerHorizontalMetrics.maxScrollX > 0.5;
-  const nativeScrubberHeight = !IS_WEB && weekPlannerHasHorizontalOverflow ? WEEK_PLANNER_NATIVE_SCRUBBER_HEIGHT : 0;
+  // App: the rail strip only exists with overflowing columns; otherwise a small breath keeps the operator tiles off the card edge.
+  const nativeScrubberHeight = IS_WEB ? 0 : weekPlannerHasHorizontalOverflow ? WEEK_PLANNER_NATIVE_SCRUBBER_HEIGHT : 5;
   nativeScrubberHeightRef.current = nativeScrubberHeight;
   const effectivePlannerDayHeaderHeight = (weekVisibleDates.length===1?0:WEEK_PLANNER_DAY_HEADER_TOTAL_HEIGHT) + nativeScrubberHeight;
 
@@ -19837,6 +19837,10 @@ export default function AgendaScreen() {
     () => weekPlannerHasHorizontalOverflow,
     [weekPlannerHasHorizontalOverflow],
   );
+  const weekPlannerNativeScrollCueTrackWidth = Math.max(
+    60,
+    plannerContainerWidth - WEEK_PLANNER_TIME_COL_TOTAL - WEEK_PLANNER_NATIVE_SCROLL_CUE_INSET * 2,
+  );
   const weekPlannerNativeScrollCueThumbWidth = useMemo(() => {
     const visibleRatio =
       weekPlannerHorizontalMetrics.totalGridWidth > 0
@@ -19848,12 +19852,13 @@ export default function AgendaScreen() {
         : 1;
 
     return Math.max(
-      30,
-      WEEK_PLANNER_NATIVE_SCROLL_CUE_INNER_WIDTH * visibleRatio,
+      36,
+      weekPlannerNativeScrollCueTrackWidth * visibleRatio,
     );
   }, [
     weekPlannerHorizontalMetrics.availableGridWidth,
     weekPlannerHorizontalMetrics.totalGridWidth,
+    weekPlannerNativeScrollCueTrackWidth,
   ]);
   const weekPlannerNativeScrollCueThumbStyle = useAnimatedStyle(() => {
     const maxScrollX = weekPlannerHorizontalMetrics.maxScrollX;
@@ -19867,17 +19872,18 @@ export default function AgendaScreen() {
 
     const thumbTravel = Math.max(
       0,
-      WEEK_PLANNER_NATIVE_SCROLL_CUE_INNER_WIDTH -
+      weekPlannerNativeScrollCueTrackWidth -
         weekPlannerNativeScrollCueThumbWidth,
     );
 
     return {
       width: weekPlannerNativeScrollCueThumbWidth,
-      transform: [{ translateX: (progress - 0.5) * thumbTravel }],
+      transform: [{ translateX: progress * thumbTravel }],
     };
   }, [
     weekPlannerHorizontalMetrics.maxScrollX,
     weekPlannerNativeScrollCueThumbWidth,
+    weekPlannerNativeScrollCueTrackWidth,
   ]);
 
   const syncWeekHorizontalScrollOnJs = useCallback(
@@ -46393,16 +46399,17 @@ export default function AgendaScreen() {
             }
           }}
         >
-          {nativeScrubberHeight > 0 && <View style={{ position: 'absolute', top: effectivePlannerDayHeaderHeight + WEEK_PLANNER_LANE_HEADER_HEIGHT - 8, left: WEEK_PLANNER_TIME_COL_TOTAL, right: 0, zIndex: 1000, elevation: 1000, alignItems: 'center' }} pointerEvents="box-none">
-            <View accessibilityRole="adjustable" accessibilityLabel="Scorri colonne operatori" hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          {!IS_WEB && weekPlannerHasHorizontalOverflow && <View style={{ position: 'absolute', top: effectivePlannerDayHeaderHeight - nativeScrubberHeight, height: nativeScrubberHeight, left: WEEK_PLANNER_TIME_COL_TOTAL + WEEK_PLANNER_NATIVE_SCROLL_CUE_INSET, width: weekPlannerNativeScrollCueTrackWidth, zIndex: 1000, elevation: 1000, justifyContent: 'center' }} pointerEvents="box-none">
+            {/* Hairline rail with a gold thumb: only exists while operator columns overflow the screen. */}
+            <View accessibilityRole="adjustable" accessibilityLabel="Scorri colonne operatori" hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
               accessibilityActions={[{ name: 'increment', label: 'Colonne successive' }, { name: 'decrement', label: 'Colonne precedenti' }]}
               onAccessibilityAction={(event) => { const direction = event.nativeEvent.actionName === 'increment' ? 1 : -1; weekPlannerHorizontalRef.current?.scrollTo({ x: Math.max(0, Math.min(weekPlannerHorizontalMetrics.maxScrollX, weekHorizontalScrollPosRef.current + direction * weekVisibleColWidth)), animated: true }); }}
               onStartShouldSetResponder={() => true} onMoveShouldSetResponder={() => true}
-              onResponderGrant={(event) => { const progress = Math.max(0, Math.min(1, event.nativeEvent.locationX / WEEK_PLANNER_NATIVE_SCROLL_CUE_INNER_WIDTH)); weekPlannerHorizontalRef.current?.scrollTo({ x: progress * weekPlannerHorizontalMetrics.maxScrollX, animated: false }); }}
-              onResponderMove={(event) => { const progress = Math.max(0, Math.min(1, event.nativeEvent.locationX / WEEK_PLANNER_NATIVE_SCROLL_CUE_INNER_WIDTH)); weekPlannerHorizontalRef.current?.scrollTo({ x: progress * weekPlannerHorizontalMetrics.maxScrollX, animated: false }); }}
-              style={{ width: WEEK_PLANNER_NATIVE_SCROLL_CUE_INNER_WIDTH, height: 16, alignItems: 'center', justifyContent: 'center' }}>
-              <View pointerEvents="none" style={{ position: 'absolute', height: 6, width: '100%', borderRadius: 3, borderWidth: 1, borderColor: availabilityPalette.night ? 'rgba(216,194,155,.22)' : 'rgba(150,118,72,.22)', backgroundColor: availabilityPalette.night ? '#26292A' : '#F3EDE3' }} />
-              <Reanimated.View pointerEvents="none" style={[{ height: 4, borderRadius: 2, backgroundColor: availabilityPalette.night ? '#D8C29B' : '#8F6D3B', shadowColor: availabilityPalette.night ? '#D8C29B' : '#6E542E', shadowOpacity: .45, shadowRadius: 3, shadowOffset: { width: 0, height: 0 } }, weekPlannerNativeScrollCueThumbStyle]} />
+              onResponderGrant={(event) => { const progress = Math.max(0, Math.min(1, (event.nativeEvent.locationX - weekPlannerNativeScrollCueThumbWidth / 2) / Math.max(1, weekPlannerNativeScrollCueTrackWidth - weekPlannerNativeScrollCueThumbWidth))); weekPlannerHorizontalRef.current?.scrollTo({ x: progress * weekPlannerHorizontalMetrics.maxScrollX, animated: true }); }}
+              onResponderMove={(event) => { const progress = Math.max(0, Math.min(1, (event.nativeEvent.locationX - weekPlannerNativeScrollCueThumbWidth / 2) / Math.max(1, weekPlannerNativeScrollCueTrackWidth - weekPlannerNativeScrollCueThumbWidth))); weekPlannerHorizontalRef.current?.scrollTo({ x: progress * weekPlannerHorizontalMetrics.maxScrollX, animated: false }); }}
+              style={{ width: '100%', height: nativeScrubberHeight, justifyContent: 'center' }}>
+              <View pointerEvents="none" style={{ position: 'absolute', left: 0, right: 0, height: 2, borderRadius: 1, backgroundColor: availabilityPalette.night ? 'rgba(216,194,155,.14)' : 'rgba(110,84,46,.12)' }} />
+              <Reanimated.View pointerEvents="none" style={[{ position: 'absolute', left: 0, height: 4, borderRadius: 2, backgroundColor: availabilityPalette.night ? '#D8C29B' : '#8F6D3B', shadowColor: availabilityPalette.night ? '#D8C29B' : '#6E542E', shadowOpacity: availabilityPalette.night ? .35 : .18, shadowRadius: 4, shadowOffset: { width: 0, height: 0 } }, weekPlannerNativeScrollCueThumbStyle]} />
             </View>
           </View>}
           <AgendaLiveSignalProvider enabled={shouldRunNativeAgendaWork}>
@@ -50198,7 +50205,7 @@ null
                     full:fullAgendaDates.has(day.value),pending:stablePendingRequestsCountByDate[day.value]??0,
                   }))}
                   dayCountControl={<HapticTouchable
-                    style={{minHeight:!IS_WEB?30:responsive.width<600?36:42,paddingHorizontal:!IS_WEB?10:responsive.width<600?8:12,flexDirection:'row',alignItems:'center',justifyContent:'center',gap:responsive.width<600?4:7,borderRadius:!IS_WEB?9:responsive.width<600?10:12,borderWidth:1,borderColor:availabilityPalette.border,backgroundColor:availabilityPalette.field}}
+                    style={{minHeight:!IS_WEB?26:responsive.width<600?36:42,paddingHorizontal:!IS_WEB?10:responsive.width<600?8:12,flexDirection:'row',alignItems:'center',justifyContent:'center',gap:responsive.width<600?4:7,borderRadius:!IS_WEB?13:responsive.width<600?10:12,borderWidth:IS_WEB?1:0,borderColor:availabilityPalette.border,backgroundColor:availabilityPalette.field}}
                     onPressIn={markWeekVisibleDaysPickerDirectPress} onPress={openWeekVisibleDaysPicker}
                     immediatePress pressInDuration={42} pressOutDuration={62} activeOpacity={0.88}
                     accessibilityRole="button" accessibilityLabel={`Scegli i giorni visibili. Vista attuale ${weekEffectiveVisibleDays} ${weekEffectiveVisibleDays===1?'giorno':'giorni'}`}>

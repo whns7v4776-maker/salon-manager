@@ -129,9 +129,19 @@ export function AgendaPremiumDateStrip({days,selected,month,onMonth,onToday,onPr
  // App: the day strip is swiped directly, so it takes the full width with no side arrows.
  // Wide web: month/today stacked over the view picker in a narrow column, one arrow on each side of the days.
  const stackedLeading=<View style={{flexShrink:0,gap:6,alignItems:'stretch'}}><View style={{flexDirection:'row'}}>{button(month,null,onMonth,'first')}{button('Oggi',null,()=>{onToday();requestRecenter(value=>value+1);},'last')}</View>{dayCountControl}</View>;
+ // App: a quiet header built into the card — month title, gold "Oggi", the view chip and the guide, no boxed buttons.
+ const gold=p.night?'#D8C29B':'#8F6D3B';
+ const nativeHeader=<View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',height:34,paddingLeft:14,paddingRight:8}}>
+  <View style={{flexDirection:'row',alignItems:'center',gap:4,flexShrink:1,minWidth:0}}>
+   <Pressable accessibilityRole="button" accessibilityLabel={`Scegli mese, ${month}`} onPress={onMonth} hitSlop={6} style={({pressed})=>({flexDirection:'row',alignItems:'center',gap:4,opacity:pressed?.6:1,flexShrink:1})}><Text numberOfLines={1} style={{fontSize:15,fontWeight:'600',letterSpacing:-.2,color:p.ink,textTransform:'capitalize'}}>{month}</Text><Ionicons name="chevron-down" size={13} color={p.muted}/></Pressable>
+   <View style={{width:3,height:3,borderRadius:2,backgroundColor:p.muted,opacity:.6,marginHorizontal:6}}/>
+   <Pressable accessibilityRole="button" accessibilityLabel="Oggi" onPress={()=>{onToday();requestRecenter(value=>value+1);}} hitSlop={6} style={({pressed})=>({opacity:pressed?.6:1})}><Text style={{fontSize:14,fontWeight:'600',color:gold}}>Oggi</Text></Pressable>
+  </View>
+  <View style={{flexDirection:'row',alignItems:'center',gap:6,flexShrink:0}}>{dayCountControl}<Pressable accessibilityRole="button" accessibilityLabel="Come funziona l’Agenda" onPress={onHelp} hitSlop={8} style={({pressed})=>({width:26,height:26,borderRadius:13,alignItems:'center',justifyContent:'center',backgroundColor:p.field,opacity:pressed?.6:1})}><Ionicons name="information" size={15} color={p.muted}/></Pressable></View>
+ </View>;
  const railArrow=(label:string,icon:'chevron-back'|'chevron-forward',press:()=>void)=><Pressable accessibilityRole="button" accessibilityLabel={label} onPress={press} style={({hovered,pressed}:any)=>({width:34,alignSelf:'stretch',alignItems:'center',justifyContent:'center',borderRadius:12,borderWidth:1,borderColor:p.border,backgroundColor:hovered||pressed?(p.night?'#33373A':'#F1EADF'):p.field,flexShrink:0})}><Ionicons name={icon} size={18} color={p.ink}/></Pressable>;
- return <View {...(web?{dataSet:{agendaDateStrip:'true'}}:{})} style={{borderWidth:1,borderColor:p.border,borderRadius:18,backgroundColor:p.surface,padding:compact?8:10,...(!web?{paddingHorizontal:0,paddingBottom:0,paddingTop:6,overflow:'hidden'}:{}),gap:inline?14:web?10:6,marginBottom:web?10:6,flexDirection:inline?'row':'column',alignItems:inline?'center':'stretch'}}>
-  {inline?stackedLeading:<View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',flexWrap:'nowrap',gap:compact?4:8,paddingHorizontal:web?0:compact?8:10}}>{leading}{web?trailingArrows:help}</View>}
+ return <View {...(web?{dataSet:{agendaDateStrip:'true'}}:{})} style={{borderWidth:1,borderColor:p.border,borderRadius:18,backgroundColor:p.surface,padding:compact?8:10,...(!web?{paddingHorizontal:0,paddingBottom:0,paddingTop:3,overflow:'hidden'}:{}),gap:inline?14:web?10:3,marginBottom:web?10:6,flexDirection:inline?'row':'column',alignItems:inline?'center':'stretch'}}>
+  {!web?nativeHeader:inline?stackedLeading:<View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',flexWrap:'nowrap',gap:compact?4:8,paddingHorizontal:web?0:compact?8:10}}>{leading}{web?trailingArrows:help}</View>}
   {inline?railArrow('Giorno precedente','chevron-back',onPrevious):null}
   <View {...(web?{dataSet:{agendaDayScroll:'true'}}:{})} style={{width:inline?undefined:'100%',flex:inline?1:undefined,minWidth:0,position:'relative'}}>
    {web?React.createElement('style',null,`
