@@ -7,6 +7,8 @@ import { PremiumSectionHeading } from '../../components/ui/premium-section-headi
 import { PremiumSearchToolbar } from '../../components/ui/premium-search-toolbar';
 import {InfoButton} from '../../components/ui/info-button';
 import { TABLET_MODAL_ORIENTATIONS } from '../../src/lib/tablet-modal-orientations';
+import { NativeMedal } from '../../components/owner-premium-native-home';
+import { useActiveCustomerCommunications } from '../../src/lib/use-active-customer-communications';
 import {NativePremiumScope, NativeReadableText as Text, NativePremiumIcon as Ionicons} from '../../components/owner-native-premium';
 import { OwnerBrandMark } from '../../components/salon-brand-mark';
 import { useCustomerPremium } from '../../src/lib/use-customer-premium';
@@ -1363,6 +1365,10 @@ export default function ClientiScreen() {
   const [remindersGuideOpen, setRemindersGuideOpen] = useState(false);
   const [showNewCustomerExpanded, setShowNewCustomerExpanded] = useState(false);
   const [showCommunicationsModal, setShowCommunicationsModal] = useState(false);
+  const activeCommunications = useActiveCustomerCommunications(showCommunicationsModal);
+  const activeCommunicationsLabel = activeCommunications && activeCommunications.scheduled + activeCommunications.popups > 0
+    ? [activeCommunications.scheduled ? `${activeCommunications.scheduled} programmat${activeCommunications.scheduled === 1 ? 'o' : 'i'}` : null, activeCommunications.popups ? `${activeCommunications.popups} popup` : null].filter(Boolean).join(' · ')
+    : null;
   const [isUpdatingCustomerReminder, setIsUpdatingCustomerReminder] = useState(false);
   const [customerReminderSaveError, setCustomerReminderSaveError] = useState('');
   const [displayedCustomerReminderHours, setDisplayedCustomerReminderHours] = useState<number>(
@@ -4867,152 +4873,81 @@ export default function ClientiScreen() {
   );
 
   const customerCommunicationsSection = (<>
-            <View style={styles.customerRemindersGuideCard}>
-              <PremiumGuideDock tone={{ink:customerPalette.ink,fill:customerPalette.field,border:customerPalette.border}}
-                guideOpen={remindersGuideOpen}
-                cutoutColor="#EEF2F6"
-                onGuidePress={() => {
-                  setRemindersGuideOpen((current) => !current);
-                  setRubricaGuideOpen(false);
-                }}
-                guideAccessibilityLabel="Come funzionano promemoria e comunicazioni ai clienti"
-              />
-              <View style={styles.customerRemindersGuideHeader}>
-                <View style={styles.customerRemindersGuideCopy}>
-                  <Text style={styles.customerRemindersGuideTitle}>
-                    Promemoria e comunicazioni
-                  </Text>
-                  <Text style={styles.customerRemindersGuideSubtitle}>
-                    Gestisci memo appuntamenti, messaggi e benvenuto ai nuovi clienti.
-                  </Text>
-                </View>
-              </View>
-              {remindersGuideOpen ? (
-                <SectionHowItWorksPanel premiumNative onClose={() => setRemindersGuideOpen(false)}
-                  title="Resta in contatto con i clienti"
-                  description="Le tre funzioni hanno scopi diversi e usano soltanto dispositivi correttamente registrati per le notifiche."
-                  steps={[
-                    {
-                      title: 'Promemoria appuntamento',
-                      description:
-                        'Scegli Off oppure quante ore prima inviare il memo standard. La regola vale per tutti gli appuntamenti del salone.',
-                    },
-                    {
-                      title: 'Comunicazioni push',
-                      description:
-                        'Promuovi offerte e prodotti dello shop, crea avvisi o chiusure e inviale a tutti i clienti oppure seleziona soltanto i contatti interessati.',
-                    },
-                    {
-                      title: 'Benvenuto nuovi clienti',
-                      description:
-                        'Personalizza titolo e messaggio. Compare una sola volta, dopo notifiche e Face ID o impronta, se la funzione è attiva.',
-                    },
-                    {
-                      title: 'Controlla prima di inviare',
-                      description:
-                        'Le impostazioni mostrano stato e riepilogo; le comunicazioni richiedono composizione e destinatari prima della conferma.',
-                    },
-                  ]}
-                  note="Le preferenze vengono salvate per il salone. Disattivare il memo non disattiva comunicazioni push o messaggio di benvenuto."
-                />
-              ) : null}
-            </View>
-
-            <View style={styles.reminderCard}>
-              <View style={styles.reminderHeader}>
-                <Text style={styles.reminderTitle}>Promemoria push clienti</Text>
-                <View
-                  style={[
-                    styles.reminderStatusBadge,
-                    customerReminderHoursBefore > 0
-                      ? styles.reminderStatusBadgeActive
-                      : styles.reminderStatusBadgeDanger,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.reminderStatusBadgeText,
-                      customerReminderHoursBefore > 0
-                        ? styles.reminderStatusBadgeTextActive
-                        : styles.reminderStatusBadgeTextDanger,
-                    ]}
-                  >
-                    {formatReminderHoursLabel(customerReminderHoursBefore)}
-                  </Text>
-                </View>
-              </View>
-
-              <Text style={styles.reminderDescription}>
-                Il salone decide una sola regola per tutti gli appuntamenti. Il push memo parte
-                solo per i clienti che hanno gia registrato il loro device.
-              </Text>
-
-              <View style={styles.reminderOptionsRow}>
-                {CUSTOMER_REMINDER_HOUR_OPTIONS.map((hours) => {
-                  const isActive = customerReminderHoursBefore === hours;
-                  return (
-                    <HapticTouchable webHoverLift
-                      key={`reminder-hours-${hours}`}
-                      style={[
-                        styles.reminderOptionChip,
-                        isActive && styles.reminderOptionChipActive,
-                        !isCustomerReminderReady && styles.reminderOptionChipDisabled,
-                      ]}
-                      onPress={() => updateCustomerReminderHours(hours)}
-                      disabled={!isCustomerReminderReady || isUpdatingCustomerReminder}
-                      pressScale={1}
-                      pressOpacity={0.92}
-                    >
-                      <Text
-                        style={[
-                          styles.reminderOptionChipText,
-                          isActive && styles.reminderOptionChipTextActive,
-                        ]}
-                      >
-                        {hours === 0 ? 'Off' : `${hours}h`}
+            {(() => {
+              // One settings card in the Richieste rule style: medallion, title + "i", left text, hour pills, quiet status.
+              const cp = customerPalette;
+              const reminderOn = customerReminderHoursBefore > 0;
+              const bronze = cp.night ? "#9C8461" : "#7A6446";
+              const statusTone = reminderOn ? (cp.night ? "#9CC7A6" : "#3F7A4D") : (cp.night ? "#D9A3A8" : "#9A4B53");
+              return (
+                <View style={{ borderWidth: 1, borderColor: cp.border, borderRadius: 19, backgroundColor: cp.night ? "rgba(46,49,50,.92)" : "rgba(255,253,250,.92)", padding: 16, gap: 14, marginBottom: 14, shadowColor: "#000", shadowOpacity: cp.night ? 0.3 : 0.08, shadowRadius: 12, shadowOffset: { width: 0, height: 5 } }}>
+                  <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 12 }}>
+                    <NativeMedal icon="notifications-outline" size={40} iconSize={18} accent={cp.night ? "#D6B27A" : "#8A6A2E"} />
+                    <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                        <Text accessibilityRole="header" style={{ fontSize: 16, lineHeight: 22, fontWeight: "600", color: cp.ink, flexShrink: 1 }}>Promemoria appuntamento</Text>
+                        <HapticTouchable accessibilityRole="button" accessibilityLabel="Come funzionano promemoria e comunicazioni ai clienti" hitSlop={8} onPress={() => { setRemindersGuideOpen((current) => !current); setRubricaGuideOpen(false); }} style={{ width: 24, height: 24, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: cp.field }}>
+                          <Ionicons name="information" size={14} color={cp.muted} />
+                        </HapticTouchable>
+                      </View>
+                      <Text style={{ fontSize: 12, lineHeight: 18, color: cp.muted }}>
+                        Un memo automatico prima di ogni appuntamento, ai clienti che hanno attivato le notifiche.
                       </Text>
-                    </HapticTouchable>
-                  );
-                })}
-              </View>
-
-              <View
-                style={[
-                  styles.reminderSummaryCard,
-                  customerReminderHoursBefore > 0
-                    ? styles.reminderSummaryCardActive
-                    : styles.reminderSummaryCardDanger,
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.reminderSummaryText,
-                    customerReminderHoursBefore > 0
-                      ? styles.reminderSummaryTextActive
-                      : styles.reminderSummaryTextDanger,
-                  ]}
-                >
-                  {!isCustomerReminderReady
-                    ? 'Carico la preferenza salvata...'
-                    : isUpdatingCustomerReminder
-                    ? `Sto riallineando il promemoria push su ${formatReminderHoursLabel(
-                        customerReminderHoursBefore
-                      )}...`
-                    : customerReminderHoursBefore > 0
-                    ? `Promemoria push attivi: ${formatReminderHoursLabel(customerReminderHoursBefore)}`
-                    : 'Promemoria push disattivati per tutti gli appuntamenti'}
-                </Text>
-              </View>
-
-              {customerReminderSaveError ? (
-                <Text style={styles.reminderErrorText}>{customerReminderSaveError}</Text>
-              ) : null}
-
-              <Text style={styles.reminderHint}>
-                Template usato: promemoria cliente standard del salone. Se imposti Off, il memo
-                push non viene inviato.
-              </Text>
-            </View>
+                    </View>
+                  </View>
+                  {remindersGuideOpen ? (
+                    <SectionHowItWorksPanel premiumNative onClose={() => setRemindersGuideOpen(false)}
+                      title="Resta in contatto con i clienti"
+                      description="Le tre funzioni hanno scopi diversi e usano soltanto dispositivi correttamente registrati per le notifiche."
+                      steps={[
+                        { title: 'Promemoria appuntamento', description: 'Scegli Off oppure quante ore prima inviare il memo standard. La regola vale per tutti gli appuntamenti del salone.' },
+                        { title: 'Comunicazioni push', description: 'Promuovi offerte e prodotti dello shop, crea avvisi o chiusure e inviale a tutti i clienti oppure seleziona soltanto i contatti interessati.' },
+                        { title: 'Benvenuto nuovi clienti', description: 'Personalizza titolo e messaggio. Compare una sola volta, dopo notifiche e Face ID o impronta, se la funzione è attiva.' },
+                        { title: 'Controlla prima di inviare', description: 'Le impostazioni mostrano stato e riepilogo; le comunicazioni richiedono composizione e destinatari prima della conferma.' },
+                      ]}
+                      note="Le preferenze vengono salvate per il salone. Disattivare il memo non disattiva comunicazioni push o messaggio di benvenuto."
+                    />
+                  ) : null}
+                  <View style={{ gap: 8 }}>
+                    <Text style={{ fontSize: 11, lineHeight: 16, letterSpacing: 0.8, fontWeight: "600", textTransform: "uppercase", color: cp.muted }}>Quanto prima</Text>
+                    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+                      {CUSTOMER_REMINDER_HOUR_OPTIONS.map((hours) => {
+                        const isActive = customerReminderHoursBefore === hours;
+                        return (
+                          <HapticTouchable webHoverLift
+                            key={`reminder-hours-${hours}`}
+                            accessibilityRole="radio"
+                            accessibilityState={{ checked: isActive, disabled: !isCustomerReminderReady || isUpdatingCustomerReminder }}
+                            style={{ flexGrow: 1, flexBasis: Platform.OS === "web" ? 56 : "22%", minHeight: 40, borderRadius: 12, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: isActive ? bronze : cp.border, backgroundColor: isActive ? (cp.night ? "rgba(156,132,97,.16)" : "rgba(122,100,70,.10)") : cp.field, opacity: isCustomerReminderReady ? 1 : 0.5 }}
+                            onPress={() => updateCustomerReminderHours(hours)}
+                            disabled={!isCustomerReminderReady || isUpdatingCustomerReminder}
+                            pressScale={1}
+                            pressOpacity={0.92}
+                          >
+                            <Text style={{ fontSize: 13, fontWeight: "600", color: cp.ink }}>{hours === 0 ? "Off" : `${hours} h`}</Text>
+                          </HapticTouchable>
+                        );
+                      })}
+                    </View>
+                  </View>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingTop: 12, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: cp.line }}>
+                    <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: statusTone }} />
+                    <Text style={{ flex: 1, fontSize: 12, lineHeight: 17, fontWeight: "600", color: cp.ink }}>
+                      {!isCustomerReminderReady
+                        ? 'Carico la preferenza salvata…'
+                        : isUpdatingCustomerReminder
+                        ? `Salvataggio: ${formatReminderHoursLabel(customerReminderHoursBefore)}…`
+                        : reminderOn
+                        ? `Attivo · ${formatReminderHoursLabel(customerReminderHoursBefore)}`
+                        : 'Disattivato per tutti gli appuntamenti'}
+                    </Text>
+                  </View>
+                  {customerReminderSaveError ? (
+                    <Text style={styles.reminderErrorText}>{customerReminderSaveError}</Text>
+                  ) : null}
+                </View>
+              );
+            })()}
 
             {Platform.OS !== 'web' ? <NativeCustomerUtilityCard
               icon="megaphone-outline"
@@ -5021,6 +4956,7 @@ export default function ClientiScreen() {
               action="Crea"
               accessibilityLabel="Crea comunicazione push clienti"
               onPress={() => setShowCommunicationsModal(true)}
+              status={activeCommunicationsLabel ? { label: `Attivo · ${activeCommunicationsLabel}`, active: true } : undefined}
             /> : (
             <View
               style={[
@@ -5055,6 +4991,11 @@ export default function ClientiScreen() {
                 >
                   Comunicazioni push
                 </Text>
+                {activeCommunicationsLabel ? (
+                  <View style={{ alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, backgroundColor: customerPalette.night ? 'rgba(141,172,149,.18)' : 'rgba(214,229,209,.65)' }}>
+                    <Text style={{ fontSize: 12, fontWeight: '600', color: customerPalette.night ? '#C1D6C4' : '#42684A' }}>Attivo · {activeCommunicationsLabel}</Text>
+                  </View>
+                ) : null}
                 <Text
                   numberOfLines={undefined}
                   adjustsFontSizeToFit={isDesktopWebLayout}

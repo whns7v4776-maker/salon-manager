@@ -1,3 +1,4 @@
+import { NativeMedal } from './owner-premium-native-home';
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -18,11 +19,9 @@ type Props = {
 export function NativeCustomerUtilityCard({icon,title,description,action,accessibilityLabel,onPress,status}: Props) {
   const {palette:p} = useAccessAppearance();
   const welcome = icon === 'storefront-outline';
-  const iconInk = welcome ? (p.night?'#A8CDB4':'#52795E') : (p.night?'#C9B6E2':'#806399');
-  const iconFill = welcome ? (p.night?'rgba(112,157,128,.19)':'rgba(191,216,195,.45)') : (p.night?'rgba(162,132,191,.20)':'rgba(218,201,235,.48)');
   return <View style={[s.card,{backgroundColor:p.night?'rgba(38,41,43,.80)':'rgba(255,253,250,.67)',borderColor:p.border}]}>
     <View style={s.heading}>
-      <View style={[s.icon,{backgroundColor:iconFill}]}><Ionicons name={icon} size={21} color={iconInk}/></View>
+      <NativeMedal icon={icon} size={40} iconSize={18} accent={welcome?(p.night?'#8FBF9A':'#3F7A4D'):(p.night?'#B9A3D6':'#6E5590')}/>
       <Text accessibilityRole="header" style={[s.title,{color:p.ink}]}>{title}</Text>
     </View>
     <Text style={[s.description,{color:p.muted}]}>{description}</Text>
