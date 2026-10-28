@@ -574,7 +574,7 @@ export function CashStripePanel({
       {!modalOnly ? (
         <>
           <View style={styles.heading}>
-            <NativeMedal icon="card-outline" size={44} iconSize={20} accent={p.night ? "#A9ABD9" : "#5B5E9A"} />
+            <NativeMedal icon="flash-outline" size={44} iconSize={20} accent={p.night ? "#D6B27A" : "#8C6A35"} />
             <View style={styles.headingCopy}>
               <Text style={styles.title}>Stripe</Text>
               <Text style={styles.subtitle}>QR, link e carta sul telefono</Text>
@@ -606,7 +606,7 @@ export function CashStripePanel({
                 {([
                   {
                     icon: "qr-code-outline",
-                    accent: p.night ? "#A9ABD9" : "#5B5E9A",
+                    accent: p.night ? "#86C2BE" : "#3E7C7A",
                     title: "QR e link",
                     note: "Il cliente paga dal proprio telefono.",
                     dot: status.ready ? (status.live ? (p.night ? "#86C2BE" : "#3E7C7A") : "#C9A35A") : status.connected ? "#C9A35A" : p.muted,
