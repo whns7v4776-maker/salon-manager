@@ -27,6 +27,7 @@ type KeyboardAwareScrollOptions = {
   keyboardHeight?: number;
   allowWebScroll?: boolean;
   autoScrollOnKeyboardShow?: boolean;
+  onlyScrollWhenCovered?: boolean;
   shouldScrollNode?: (node: unknown) => boolean;
 };
 
@@ -148,7 +149,11 @@ const scrollNodeIntoView = (
       | undefined
   )?.scrollResponderScrollNativeHandleToKeyboard;
 
-  if (typeof responderScrollToKeyboard === 'function') {
+  if (
+    Platform.OS !== 'android' &&
+    typeof responderScrollToKeyboard === 'function' &&
+    options?.onlyScrollWhenCovered !== true
+  ) {
     runAfterLayout(() => {
       responderScrollToKeyboard(inputHandle, additionalKeyboardOffset, true);
     }, delay);
@@ -160,6 +165,9 @@ const scrollNodeIntoView = (
       const windowHeight = Dimensions.get('window').height;
       const screenHeight = Dimensions.get('screen').height;
       const keyboardHeight = Math.max(0, options?.keyboardHeight ?? 0);
+      if (options?.onlyScrollWhenCovered === true && keyboardHeight <= 0) {
+        return;
+      }
       const resizedByKeyboard = Math.max(0, screenHeight - windowHeight);
       const overlayKeyboardHeight = Math.max(0, keyboardHeight - resizedByKeyboard);
       const visibleBottom = windowHeight - overlayKeyboardHeight - keyboardGap;
@@ -169,6 +177,14 @@ const scrollNodeIntoView = (
         const overlap = nodeBottom - visibleBottom;
 
         if (overlap <= 0) {
+          return;
+        }
+
+        if (
+          options?.onlyScrollWhenCovered === true &&
+          typeof responderScrollToKeyboard === 'function'
+        ) {
+          responderScrollToKeyboard(inputHandle, keyboardGap, true);
           return;
         }
 
@@ -205,7 +221,9 @@ export const useKeyboardAwareScroll = (
       return;
     }
 
-    if (options?.autoScrollOnKeyboardShow !== true) {
+    const shouldAutoScrollOnKeyboardShow =
+      options?.autoScrollOnKeyboardShow ?? Platform.OS === 'android';
+    if (shouldAutoScrollOnKeyboardShow !== true) {
       return;
     }
 
@@ -282,9 +300,6 @@ export const useKeyboardAwareScroll = (
   const focusField = useCallback(
     (inputRef: InputRef) => {
       inputRef.current?.focus();
-      if (Platform.OS === 'web') {
-        return;
-      }
       if (options?.shouldScrollNode && !options.shouldScrollNode(inputRef.current)) {
         return;
       }

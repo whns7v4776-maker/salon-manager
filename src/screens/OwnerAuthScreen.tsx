@@ -12,7 +12,14 @@ import {
     View,
 } from 'react-native';
 import { AppWordmark } from '../../components/app-wordmark';
+import { PasswordTextInput } from '../../components/ui/password-text-input';
 import { useAppContext } from '../context/AppContext';
+import {
+  buildPersonNameValidationError,
+  formatCustomerNamePart,
+  formatLeadingCapitalizedValue,
+  isValidPersonNamePart,
+} from '../lib/customer-name';
 import { useKeyboardAwareScroll } from '../lib/form-navigation';
 import {
     buildInvalidFieldsMessage,
@@ -63,6 +70,8 @@ export default function OwnerAuthScreen() {
   const [formErrors, setFormErrors] = useState<{
     loginEmail?: string;
     resetEmail?: string;
+    registerFirstName?: string;
+    registerLastName?: string;
     registerEmail?: string;
     registerBusinessPhone?: string;
   }>({});
@@ -89,9 +98,13 @@ export default function OwnerAuthScreen() {
   const handleRegister = async () => {
     const invalidFields: string[] = [];
     const nextErrors: {
+      registerFirstName?: string;
+      registerLastName?: string;
       registerEmail?: string;
       registerBusinessPhone?: string;
     } = {};
+    const normalizedFirstName = formatCustomerNamePart(register.firstName);
+    const normalizedLastName = formatCustomerNamePart(register.lastName);
 
     if (
       !register.firstName.trim() ||
@@ -110,9 +123,21 @@ export default function OwnerAuthScreen() {
       );
     }
 
+    if (!isValidPersonNamePart(register.firstName)) {
+      const error = buildPersonNameValidationError('Nome');
+      invalidFields.push(error);
+      nextErrors.registerFirstName = error;
+    }
+
+    if (!isValidPersonNamePart(register.lastName)) {
+      const error = buildPersonNameValidationError('Cognome');
+      invalidFields.push(error);
+      nextErrors.registerLastName = error;
+    }
+
     if (!isValidPhone10(register.businessPhone)) {
-      invalidFields.push('Numero di telefono errato (deve avere 10 cifre)');
-      nextErrors.registerBusinessPhone = 'Numero di telefono errato (deve avere 10 cifre)';
+      invalidFields.push('Numero di telefono errato (deve avere 9 o 10 cifre)');
+      nextErrors.registerBusinessPhone = 'Numero di telefono errato (deve avere 9 o 10 cifre)';
     }
 
     if (!isValidEmail(register.email)) {
@@ -128,11 +153,17 @@ export default function OwnerAuthScreen() {
 
     setFormErrors((current) => ({
       ...current,
+      registerFirstName: undefined,
+      registerLastName: undefined,
       registerEmail: undefined,
       registerBusinessPhone: undefined,
     }));
 
-    const result = await registerOwnerAccount(register);
+    const result = await registerOwnerAccount({
+      ...register,
+      firstName: normalizedFirstName,
+      lastName: normalizedLastName,
+    });
     if (!result.ok) {
       Alert.alert('Registrazione non riuscita', result.error ?? 'Controlla i dati e riprova.');
       return;
@@ -154,12 +185,7 @@ export default function OwnerAuthScreen() {
       return;
     }
 
-    if (result.backendRequired) {
-      Alert.alert(
-        'Recupero password',
-        'La schermata è pronta, ma l’invio reale della mail si attiverà quando colleghiamo il backend.'
-      );
-    }
+    Alert.alert('Recupero password', 'Controlla la tua casella mail.');
   };
 
   return (
@@ -209,12 +235,11 @@ export default function OwnerAuthScreen() {
           {formErrors.loginEmail ? (
             <Text style={styles.fieldErrorText}>{formErrors.loginEmail}</Text>
           ) : null}
-          <TextInput
+          <PasswordTextInput
             ref={loginPasswordRef}
             style={styles.input}
             placeholder="Password"
             placeholderTextColor="#9a9a9a"
-            secureTextEntry
             value={login.password}
             onChangeText={(value) => setLogin((current) => ({ ...current, password: value }))}
             onFocus={() => scrollToField(loginPasswordRef)}
@@ -244,7 +269,7 @@ export default function OwnerAuthScreen() {
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Recupera password</Text>
             <Text style={styles.helperText}>
-              Inserisci la mail dell’account. Il flusso mail reale lo collegheremo al backend finale.
+              Inserisci la mail dell’account e ti invieremo il link per reimpostare la password.
             </Text>
             <TextInput
               ref={resetEmailRef}
@@ -292,32 +317,44 @@ export default function OwnerAuthScreen() {
             <>
               <TextInput
                 ref={registerFirstNameRef}
-                style={styles.input}
+                style={[styles.input, formErrors.registerFirstName && styles.inputError]}
                 placeholder="Nome"
                 placeholderTextColor="#9a9a9a"
                 value={register.firstName}
-                onChangeText={(value) =>
-                  setRegister((current) => ({ ...current, firstName: value }))
-                }
+                onChangeText={(value) => {
+                  setRegister((current) => ({ ...current, firstName: formatCustomerNamePart(value) }));
+                  if (formErrors.registerFirstName) {
+                    setFormErrors((current) => ({ ...current, registerFirstName: undefined }));
+                  }
+                }}
                 onFocus={() => scrollToField(registerFirstNameRef)}
                 returnKeyType="next"
                 onSubmitEditing={() => focusField(registerLastNameRef)}
                 blurOnSubmit={false}
               />
+              {formErrors.registerFirstName ? (
+                <Text style={styles.fieldErrorText}>{formErrors.registerFirstName}</Text>
+              ) : null}
               <TextInput
                 ref={registerLastNameRef}
-                style={styles.input}
+                style={[styles.input, formErrors.registerLastName && styles.inputError]}
                 placeholder="Cognome"
                 placeholderTextColor="#9a9a9a"
                 value={register.lastName}
-                onChangeText={(value) =>
-                  setRegister((current) => ({ ...current, lastName: value }))
-                }
+                onChangeText={(value) => {
+                  setRegister((current) => ({ ...current, lastName: formatCustomerNamePart(value) }));
+                  if (formErrors.registerLastName) {
+                    setFormErrors((current) => ({ ...current, registerLastName: undefined }));
+                  }
+                }}
                 onFocus={() => scrollToField(registerLastNameRef)}
                 returnKeyType="next"
                 onSubmitEditing={() => focusField(registerSalonNameRef)}
                 blurOnSubmit={false}
               />
+              {formErrors.registerLastName ? (
+                <Text style={styles.fieldErrorText}>{formErrors.registerLastName}</Text>
+              ) : null}
               <TextInput
                 ref={registerSalonNameRef}
                 style={styles.input}
@@ -325,7 +362,7 @@ export default function OwnerAuthScreen() {
                 placeholderTextColor="#9a9a9a"
                 value={register.salonName}
                 onChangeText={(value) =>
-                  setRegister((current) => ({ ...current, salonName: value }))
+                  setRegister((current) => ({ ...current, salonName: formatLeadingCapitalizedValue(value) }))
                 }
                 onFocus={() => scrollToField(registerSalonNameRef)}
                 returnKeyType="next"
@@ -368,7 +405,10 @@ export default function OwnerAuthScreen() {
                 placeholderTextColor="#9a9a9a"
                 value={register.streetLine}
                 onChangeText={(value) =>
-                  setRegister((current) => ({ ...current, streetLine: value }))
+                  setRegister((current) => ({
+                    ...current,
+                    streetLine: formatLeadingCapitalizedValue(value),
+                  }))
                 }
                 onFocus={() => scrollToField(registerStreetLineRef)}
                 returnKeyType="next"
@@ -382,7 +422,10 @@ export default function OwnerAuthScreen() {
                 placeholderTextColor="#9a9a9a"
                 value={register.city}
                 onChangeText={(value) =>
-                  setRegister((current) => ({ ...current, city: value }))
+                  setRegister((current) => ({
+                    ...current,
+                    city: formatLeadingCapitalizedValue(value),
+                  }))
                 }
                 onFocus={() => scrollToField(registerCityRef)}
                 returnKeyType="next"
@@ -411,9 +454,12 @@ export default function OwnerAuthScreen() {
                 placeholderTextColor="#9a9a9a"
                 value={register.activityCategory}
                 onChangeText={(value) =>
-                  setRegister((current) => ({ ...current, activityCategory: value }))
+                  setRegister((current) => ({
+                    ...current,
+                    activityCategory: formatLeadingCapitalizedValue(value),
+                  }))
                 }
-                autoCapitalize="characters"
+                autoCapitalize="words"
                 onFocus={() => scrollToField(registerActivityCategoryRef)}
                 returnKeyType="next"
                 onSubmitEditing={() => focusField(registerEmailRef)}
@@ -441,12 +487,11 @@ export default function OwnerAuthScreen() {
               {formErrors.registerEmail ? (
                 <Text style={styles.fieldErrorText}>{formErrors.registerEmail}</Text>
               ) : null}
-              <TextInput
+              <PasswordTextInput
                 ref={registerPasswordRef}
                 style={styles.input}
                 placeholder="Password"
                 placeholderTextColor="#9a9a9a"
-                secureTextEntry
                 value={register.password}
                 onChangeText={(value) =>
                   setRegister((current) => ({ ...current, password: value }))
@@ -494,11 +539,11 @@ const styles = StyleSheet.create({
     borderColor: '#94acc8',
     borderTopWidth: 2,
     borderTopColor: '#eef6ff',
-    shadowColor: '#0f172a',
-    shadowOpacity: 0.2,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 8,
+    shadowColor: '#10203F',
+    shadowOpacity: Platform.OS === 'ios' ? 0.10 : 0.13,
+    shadowRadius: Platform.OS === 'ios' ? 24 : 18,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 6,
   },
   appEyebrow: {
     fontSize: 12,
@@ -528,11 +573,11 @@ const styles = StyleSheet.create({
     borderColor: '#94acc8',
     borderTopWidth: 2,
     borderTopColor: '#eef6ff',
-    shadowColor: '#0f172a',
-    shadowOpacity: 0.2,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 8,
+    shadowColor: '#10203F',
+    shadowOpacity: Platform.OS === 'ios' ? 0.10 : 0.13,
+    shadowRadius: Platform.OS === 'ios' ? 24 : 18,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 6,
   },
   cardTitle: {
     fontSize: 20,

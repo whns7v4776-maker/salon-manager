@@ -1,10 +1,18 @@
+import { clientBiometricError } from '../src/lib/client-biometric-error';
+import { OwnerSettingsBackGesture as AndroidSettingsSwipeBack } from '../components/android-owner-settings-back-gesture';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
-import { Alert, Image, Keyboard, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, AppState, Image, Keyboard, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { HapticTouchable } from '../components/ui/haptic-touchable';
+import { MetaMeasurementLink } from '../components/meta-measurement-link';
 import { getAppLanguageOptions, resolveStoredAppLanguage, tApp, type AppLanguage } from '../src/lib/i18n';
+import { haptic } from '../src/lib/haptics';
+import { setApplicationBadgeSuppressed } from '../src/lib/notification-badge-sync';
+import { invalidateNativeCustomerSession } from '../src/lib/client-native-session';
+import { invalidateCustomerPaymentToken } from '../src/lib/client-payment-session';
 import { normalizeSalonCode } from '../src/lib/platform';
 import { useResponsiveLayout } from '../src/lib/responsive';
 
@@ -14,6 +22,8 @@ const FRONTEND_LAST_SALON_CODE_KEY = 'salon_manager_frontend_last_salon_code';
 const FRONTEND_BIOMETRIC_ENABLED_KEY = 'salon_manager_frontend_biometric_enabled';
 const FRONTEND_BIOMETRIC_PROFILE_KEY = 'salon_manager_frontend_biometric_profile';
 const FRONTEND_BIOMETRIC_SALON_CODE_KEY = 'salon_manager_frontend_biometric_salon_code';
+const normalizeEmail = (value?: string | null) => (value ?? '').trim().toLowerCase();
+const normalizePhone = (value?: string | null) => (value ?? '').replace(/\D+/g, '');
 const buildFrontendProfileKeyForSalon = (salonCode?: string | null) => {
   const normalized = normalizeSalonCode(salonCode ?? '');
   return normalized ? `${FRONTEND_PROFILE_KEY}:${normalized}` : FRONTEND_PROFILE_KEY;
@@ -21,6 +31,23 @@ const buildFrontendProfileKeyForSalon = (salonCode?: string | null) => {
 const buildFrontendBiometricProfileKeyForSalon = (salonCode?: string | null) => {
   const normalized = normalizeSalonCode(salonCode ?? '');
   return normalized ? `${FRONTEND_BIOMETRIC_PROFILE_KEY}:${normalized}` : FRONTEND_BIOMETRIC_PROFILE_KEY;
+};
+const buildFrontendBiometricEnabledKey = ({
+  salonCode,
+  email,
+  phone,
+}: {
+  salonCode?: string | null;
+  email?: string | null;
+  phone?: string | null;
+}) => {
+  const normalizedSalonCode = normalizeSalonCode(salonCode ?? '');
+  const normalizedEmail = normalizeEmail(email);
+  const normalizedPhone = normalizePhone(phone);
+  const identity = [normalizedSalonCode, normalizedEmail || normalizedPhone].filter(Boolean).join(':');
+  return identity
+    ? `${FRONTEND_BIOMETRIC_ENABLED_KEY}:${identity}`
+    : FRONTEND_BIOMETRIC_ENABLED_KEY;
 };
 
 export default function ClienteImpostazioniScreen() {
@@ -87,6 +114,22 @@ export default function ClienteImpostazioniScreen() {
                 telefono: parsedProfile.telefono.trim(),
               }
             : null;
+        const scopedBiometricEnabledRaw =
+          normalizedProfile && resolvedSalonCode
+            ? await AsyncStorage.getItem(
+                buildFrontendBiometricEnabledKey({
+                  salonCode: resolvedSalonCode,
+                  email: normalizedProfile.email,
+                  phone: normalizedProfile.telefono,
+                })
+              )
+            : null;
+
+        setFrontendBiometricEnabled(
+          scopedBiometricEnabledRaw === 'true' || scopedBiometricEnabledRaw === 'false'
+            ? scopedBiometricEnabledRaw === 'true'
+            : savedBiometricEnabled === 'true'
+        );
 
         setActiveProfile(normalizedProfile);
         setActiveSalonCode(resolvedSalonCode || normalizeSalonCode(savedSalonCode ?? ''));
@@ -101,10 +144,12 @@ export default function ClienteImpostazioniScreen() {
   }, [salonParam]);
 
   useEffect(() => {
-    (async () => {
+    let alive = true;
+    const refreshBiometrics = async () => {
       try {
         const hasHardware = await LocalAuthentication.hasHardwareAsync();
         const isEnrolled = await LocalAuthentication.isEnrolledAsync();
+        if (!alive) return;
         const available = hasHardware && isEnrolled;
         setFrontendBiometricAvailable(available);
 
@@ -115,12 +160,16 @@ export default function ClienteImpostazioniScreen() {
 
         const types = await LocalAuthentication.supportedAuthenticationTypesAsync();
         const hasFace = types.includes(LocalAuthentication.AuthenticationType.FACIAL_RECOGNITION);
-        setFrontendBiometricType(hasFace ? 'faceid' : 'fingerprint');
+        if (alive) setFrontendBiometricType(hasFace ? 'faceid' : 'fingerprint');
       } catch {
+        if (!alive) return;
         setFrontendBiometricAvailable(false);
         setFrontendBiometricType('none');
       }
-    })();
+    };
+    void refreshBiometrics();
+    const subscription = AppState.addEventListener('change', state => { if (state === 'active') void refreshBiometrics(); });
+    return () => { alive = false; subscription.remove(); };
   }, []);
 
   const handleChangeLanguage = async (value: AppLanguage) => {
@@ -134,10 +183,23 @@ export default function ClienteImpostazioniScreen() {
     if (frontendBiometricEnabled) {
       setFrontendBiometricBusy(true);
       try {
+        const normalizedSalonCode = normalizeSalonCode(activeSalonCode || salonParam || '');
+        const scopedBiometricEnabledKey =
+          activeProfile && normalizedSalonCode
+            ? buildFrontendBiometricEnabledKey({
+                salonCode: normalizedSalonCode,
+                email: activeProfile.email,
+                phone: activeProfile.telefono,
+              })
+            : null;
         await AsyncStorage.multiRemove([
           FRONTEND_BIOMETRIC_ENABLED_KEY,
           FRONTEND_BIOMETRIC_PROFILE_KEY,
           FRONTEND_BIOMETRIC_SALON_CODE_KEY,
+          ...(scopedBiometricEnabledKey ? [scopedBiometricEnabledKey] : []),
+          ...(normalizedSalonCode
+            ? [buildFrontendBiometricProfileKeyForSalon(normalizedSalonCode)]
+            : []),
         ]);
         setFrontendBiometricEnabled(false);
       } finally {
@@ -149,6 +211,11 @@ export default function ClienteImpostazioniScreen() {
     setFrontendBiometricBusy(true);
 
     try {
+      if (Platform.OS === 'web') { Alert.alert('Accesso biometrico', 'Per usare Face ID o impronta, apri l’app SalonPro sul telefono.'); return; }
+      const hasHardware = await LocalAuthentication.hasHardwareAsync();
+      const enrolled = await LocalAuthentication.isEnrolledAsync();
+      setFrontendBiometricAvailable(hasHardware && enrolled);
+      if (!hasHardware || !enrolled) { Alert.alert('Accesso biometrico non attivo', clientBiometricError(!hasHardware ? 'not_available' : 'not_enrolled')); return; }
       const [legacySavedProfile, savedSalonCode] = await Promise.all([
         AsyncStorage.getItem(FRONTEND_PROFILE_KEY),
         AsyncStorage.getItem(FRONTEND_LAST_SALON_CODE_KEY),
@@ -158,11 +225,29 @@ export default function ClienteImpostazioniScreen() {
         ? await AsyncStorage.getItem(buildFrontendProfileKeyForSalon(normalizedSalonCode))
         : null;
       const savedProfile = scopedSavedProfile ?? legacySavedProfile;
+      const parsedSavedProfile = savedProfile
+        ? (JSON.parse(savedProfile) as {
+            nome?: string;
+            cognome?: string;
+            email?: string;
+            telefono?: string;
+          })
+        : null;
+      const savedProfileEmail = normalizeEmail(parsedSavedProfile?.email);
+      const savedProfilePhone = normalizePhone(parsedSavedProfile?.telefono);
 
       if (!savedProfile || !normalizedSalonCode) {
         Alert.alert(
           'Accesso cliente richiesto',
           'Accedi prima nell’area cliente con email e cellulare, poi potrai attivare Face ID o l’accesso con impronta.'
+        );
+        return;
+      }
+
+      if (!savedProfileEmail || !savedProfilePhone) {
+        Alert.alert(
+          'Accesso cliente richiesto',
+          'Il profilo salvato su questo dispositivo non è valido. Accedi di nuovo nell’area cliente e riprova.'
         );
         return;
       }
@@ -178,22 +263,37 @@ export default function ClienteImpostazioniScreen() {
       });
 
       if (!authResult.success) {
+        Alert.alert('Accesso biometrico non attivato', clientBiometricError(authResult.error));
         return;
       }
 
       await AsyncStorage.multiSet([
         [FRONTEND_BIOMETRIC_ENABLED_KEY, 'true'],
+        [
+          buildFrontendBiometricEnabledKey({
+            salonCode: normalizedSalonCode,
+            email: savedProfileEmail,
+            phone: savedProfilePhone,
+          }),
+          'true',
+        ],
         [FRONTEND_BIOMETRIC_PROFILE_KEY, savedProfile],
         [buildFrontendBiometricProfileKeyForSalon(normalizedSalonCode), savedProfile],
         [FRONTEND_BIOMETRIC_SALON_CODE_KEY, normalizedSalonCode],
       ]);
       setFrontendBiometricEnabled(true);
+    } catch {
+      Alert.alert('Attivazione non completata', 'Non è stato possibile completare e salvare l’attivazione su questo telefono. Riprova.');
     } finally {
       setFrontendBiometricBusy(false);
     }
   };
 
   const handleBack = () => {
+    if (Platform.OS === 'android' && router.canGoBack()) {
+      router.back();
+      return;
+    }
     const fallbackEmail = String(emailParam ?? '').trim().toLowerCase();
     const fallbackPhone = String(phoneParam ?? '').trim();
     const targetEmail = activeProfile?.email?.trim()?.toLowerCase() || fallbackEmail;
@@ -205,6 +305,8 @@ export default function ClienteImpostazioniScreen() {
         pathname: '/cliente-prenotazioni',
         params: {
           salon: targetSalon,
+          session: '1',
+          trusted: '1',
           autologin: targetEmail && targetPhone ? '1' : undefined,
           email: targetEmail || undefined,
           phone: targetPhone || undefined,
@@ -217,6 +319,8 @@ export default function ClienteImpostazioniScreen() {
       pathname: '/cliente',
       params: {
         salon: targetSalon,
+        session: '1',
+        trusted: '1',
         mode: 'booking',
         autologin: targetEmail && targetPhone ? '1' : undefined,
         email: targetEmail || undefined,
@@ -227,15 +331,29 @@ export default function ClienteImpostazioniScreen() {
 
   const redirectToFrontendAccess = () => {
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
-      window.location.assign('/');
+      window.location.replace('/?side=client&frontendLoggedOut=1');
       return;
     }
 
-    router.replace('/');
+    router.replace({
+      pathname: '/',
+      params: { side: 'client', frontendLoggedOut: '1' },
+    });
   };
 
   const performFrontendLogout = async () => {
+    // Revoke before any asynchronous cleanup so a pending login cannot persist
+    // an active session after the customer's explicit logout.
+    const sessionCleanup = invalidateNativeCustomerSession();
     const currentSalonCode = normalizeSalonCode(activeSalonCode || salonParam || '');
+    const customerEmail = normalizeEmail(emailParam || activeProfile?.email);
+    const customerPhone = normalizePhone(phoneParam || activeProfile?.telefono).slice(0, 10);
+    if (currentSalonCode && (customerEmail || customerPhone)) {
+      void invalidateCustomerPaymentToken({ salonCode: currentSalonCode, email: customerEmail, phone: customerPhone })
+        .catch(() => undefined);
+    }
+    await sessionCleanup.catch(() => undefined);
+    await setApplicationBadgeSuppressed(true).catch(() => undefined);
     const scopedKeysToRemove = currentSalonCode
       ? [buildFrontendProfileKeyForSalon(currentSalonCode)]
       : [];
@@ -248,15 +366,12 @@ export default function ClienteImpostazioniScreen() {
     setActiveProfile(null);
     setActiveSalonCode('');
 
-    const navigationRouter = router as typeof router & {
-      dismissAll?: () => void;
-    };
-
-    navigationRouter.dismissAll?.();
     redirectToFrontendAccess();
   };
 
   const handleFrontendLogout = () => {
+    void haptic.medium().catch(() => null);
+
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
       const confirmed = window.confirm(tApp(frontendLanguage, 'frontend_logout_confirm_body'));
       if (confirmed) {
@@ -296,6 +411,7 @@ export default function ClienteImpostazioniScreen() {
         : 'Attiva l’accesso con impronta per entrare nell’area cliente senza reinserire i dati.';
 
   return (
+    <AndroidSettingsSwipeBack onBack={handleBack}>
     <ScrollView
       style={styles.container}
       contentContainerStyle={[
@@ -305,28 +421,32 @@ export default function ClienteImpostazioniScreen() {
       keyboardDismissMode="on-drag"
       onScrollBeginDrag={Keyboard.dismiss}
       keyboardShouldPersistTaps="handled"
-      showsVerticalScrollIndicator={false}
+      showsVerticalScrollIndicator
+      indicatorStyle="black"
+      scrollIndicatorInsets={{ right: 2 }}
     >
       <View style={[styles.pageShell, { maxWidth: responsive.contentMaxWidth }]}>
         <View style={styles.heroCard}>
           <View style={styles.headerRow}>
-            <TouchableOpacity style={styles.backButton} onPress={handleBack} activeOpacity={0.9}>
+            <HapticTouchable style={styles.backButton} onPress={handleBack} activeOpacity={0.9}>
               <View style={styles.actionIconBadge}>
                 <Ionicons name="chevron-back" size={18} color="#111111" />
               </View>
-            </TouchableOpacity>
+            </HapticTouchable>
+            <View style={styles.headerSettingsButton}>
+              <View style={[styles.actionIconBadge, styles.headerSettingsIconBadge]}>
+                <Image
+                  source={require('../assets/header-impostazioni-icon.png')}
+                  style={styles.headerSettingsIconImage}
+                  resizeMode="contain"
+                />
+              </View>
+            </View>
             <View style={styles.badge}>
               <Text style={styles.badgeText}>{tApp(frontendLanguage, 'frontend_badge')}</Text>
             </View>
           </View>
           <View style={styles.titleRow}>
-            <View style={styles.titleBadge}>
-              <Image
-                source={require('../assets/header-impostazioni-icon.png')}
-                style={styles.titleBadgeImage}
-                resizeMode="contain"
-              />
-            </View>
             <Text style={styles.title}>{tApp(frontendLanguage, 'settings_title')}</Text>
           </View>
           <Text style={styles.subtitle}>{tApp(frontendLanguage, 'frontend_settings_subtitle')}</Text>
@@ -356,7 +476,7 @@ export default function ClienteImpostazioniScreen() {
               const selected = frontendLanguage === option.value;
 
               return (
-                <TouchableOpacity
+                <HapticTouchable
                   key={option.value}
                   style={[styles.languageChip, selected && styles.languageChipActive]}
                   onPress={() => handleChangeLanguage(option.value)}
@@ -368,13 +488,13 @@ export default function ClienteImpostazioniScreen() {
                   <Text style={[styles.languageChipNote, selected && styles.languageChipNoteActive]}>
                     {option.note}
                   </Text>
-                </TouchableOpacity>
+                </HapticTouchable>
               );
             })}
           </View>
         </View>
 
-        <TouchableOpacity
+        <HapticTouchable
           style={[
             styles.card,
             styles.biometricRow,
@@ -384,11 +504,12 @@ export default function ClienteImpostazioniScreen() {
           onPress={handleToggleFrontendBiometric}
           activeOpacity={0.9}
           disabled={frontendBiometricBusy}
-          >
-            <View style={styles.biometricContent}>
-              <Text style={styles.cardTitle}>{biometricTitle}</Text>
-              <Text style={styles.cardHint}>{biometricDescription}</Text>
-            </View>
+          hapticType="medium"
+        >
+          <View style={styles.biometricContent}>
+            <Text style={styles.cardTitle}>{biometricTitle}</Text>
+            <Text style={styles.cardHint}>{biometricDescription}</Text>
+          </View>
           <View style={[styles.biometricToggle, frontendBiometricEnabled && styles.biometricToggleActive]}>
             <View
               style={[
@@ -396,23 +517,34 @@ export default function ClienteImpostazioniScreen() {
                 frontendBiometricEnabled && styles.biometricToggleKnobActive,
               ]}
             />
+            <Text
+              style={[
+                styles.biometricToggleText,
+                frontendBiometricEnabled && styles.biometricToggleTextActive,
+              ]}
+            >
+              {frontendBiometricEnabled ? 'ON' : 'OFF'}
+            </Text>
           </View>
-        </TouchableOpacity>
+        </HapticTouchable>
 
+        <MetaMeasurementLink />
         <View style={[styles.card, styles.logoutCard]}>
-          <TouchableOpacity
+          <HapticTouchable
             style={styles.logoutButton}
             onPress={handleFrontendLogout}
             activeOpacity={0.9}
+            hapticType="medium"
           >
             <Text style={styles.logoutButtonText}>{tApp(frontendLanguage, 'common_logout')}</Text>
-          </TouchableOpacity>
+          </HapticTouchable>
           <Text style={styles.logoutHint}>
             Esci dal profilo cliente salvato su questo dispositivo e torna all’accesso frontend.
           </Text>
         </View>
       </View>
     </ScrollView>
+    </AndroidSettingsSwipeBack>
   );
 }
 
@@ -432,7 +564,9 @@ const styles = StyleSheet.create({
   heroCard: {
     backgroundColor: '#ffffff',
     borderRadius: 30,
-    padding: 22,
+    paddingHorizontal: 24,
+    paddingTop: 26,
+    paddingBottom: 28,
     marginBottom: 16,
     shadowColor: '#0f172a',
     shadowOpacity: 0.22,
@@ -446,7 +580,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     width: '100%',
-    marginBottom: 12,
+    marginBottom: 18,
     position: 'relative',
   },
   backButton: {
@@ -454,13 +588,30 @@ const styles = StyleSheet.create({
     left: 0,
     top: 0,
   },
+  headerSettingsButton: {
+    position: 'absolute',
+    right: 0,
+    top: 0,
+  },
   actionIconBadge: {
-    width: 36,
-    height: 36,
-    borderRadius: 12,
+    width: 48,
+    height: 48,
+    borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#eef2f7',
+  },
+  headerSettingsIconBadge: {
+    backgroundColor: '#f8fafc',
+    shadowColor: '#0f172a',
+    shadowOpacity: 0.08,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 2,
+  },
+  headerSettingsIconImage: {
+    width: 28,
+    height: 28,
   },
   badge: {
     backgroundColor: '#111111',
@@ -476,27 +627,9 @@ const styles = StyleSheet.create({
   titleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    marginBottom: 6,
+    marginBottom: 10,
     justifyContent: 'center',
     width: '100%',
-  },
-  titleBadge: {
-    width: 52,
-    height: 52,
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#f8fafc',
-    shadowColor: '#0f172a',
-    shadowOpacity: 0.08,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 2,
-  },
-  titleBadgeImage: {
-    width: 28,
-    height: 28,
   },
   title: {
     fontSize: 34,
@@ -510,6 +643,7 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     textAlign: 'center',
     maxWidth: 560,
+    marginTop: 4,
   },
   card: {
     backgroundColor: '#ffffff',
@@ -555,37 +689,80 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   biometricRow: {
-    flexDirection: 'row',
+    marginTop: 14,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(15,23,42,0.07)',
+    backgroundColor: '#F8FAFC',
+    padding: 16,
+    flexDirection: 'column',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    justifyContent: 'center',
+    gap: 18,
+    shadowColor: '#000000',
+    shadowOpacity: 0.04,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 2,
   },
   biometricRowActive: {
-    backgroundColor: '#eefbf4',
-    borderColor: '#b7ebc6',
+    backgroundColor: '#ECFDF5',
+    borderColor: '#BBF7D0',
   },
   biometricContent: {
-    flex: 1,
-    marginRight: 14,
-  },
-  biometricToggle: {
-    width: 76,
-    height: 42,
-    borderRadius: 999,
-    backgroundColor: '#0f172a',
-    padding: 4,
+    width: '100%',
+    maxWidth: 420,
+    alignItems: 'center',
     justifyContent: 'center',
   },
+  biometricToggle: {
+    width: 78,
+    height: 40,
+    borderRadius: 999,
+    backgroundColor: '#E5E7EB',
+    justifyContent: 'center',
+    paddingHorizontal: 6,
+    alignSelf: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(15,23,42,0.08)',
+    shadowColor: '#0f172a',
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 2,
+  },
   biometricToggleActive: {
-    backgroundColor: '#16a34a',
+    backgroundColor: '#0F172A',
+    borderColor: '#0F172A',
   },
   biometricToggleKnob: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 28,
+    height: 28,
+    borderRadius: 999,
     backgroundColor: '#ffffff',
+    shadowColor: '#0f172a',
+    shadowOpacity: 0.12,
+    shadowRadius: 5,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
   },
   biometricToggleKnobActive: {
     alignSelf: 'flex-end',
+  },
+  biometricToggleText: {
+    position: 'absolute',
+    left: 36,
+    right: 7,
+    textAlign: 'center',
+    fontSize: 10,
+    fontWeight: '900',
+    color: '#64748B',
+    letterSpacing: 0,
+  },
+  biometricToggleTextActive: {
+    left: 7,
+    right: 36,
+    color: '#FFFFFF',
   },
   languageChip: {
     minWidth: 118,
@@ -632,21 +809,20 @@ const styles = StyleSheet.create({
     color: '#ffffff',
   },
   logoutCard: {
-    backgroundColor: '#fff1f2',
-    borderWidth: 1,
-    borderColor: '#fecdd3',
     alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderColor: 'rgba(15,23,42,0.08)',
   },
   logoutButton: {
     minWidth: 160,
-    backgroundColor: '#ffffff',
+    backgroundColor: '#fff1f2',
     borderRadius: 22,
     paddingVertical: 14,
     paddingHorizontal: 28,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1.5,
-    borderColor: '#f9a8b6',
+    borderColor: '#fecdd3',
   },
   logoutButtonText: {
     fontSize: 19,
@@ -657,7 +833,7 @@ const styles = StyleSheet.create({
     marginTop: 18,
     fontSize: 14,
     lineHeight: 21,
-    color: '#9f1239',
+    color: '#64748b',
     textAlign: 'center',
     maxWidth: 560,
   },

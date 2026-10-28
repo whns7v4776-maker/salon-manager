@@ -10,6 +10,8 @@ const normalizeIncomingSystemPath = (path: string) => {
   const lowercased = normalized.toLowerCase();
 
   if (
+    lowercased === 'salonpro://' ||
+    lowercased === 'salonpro:///' ||
     lowercased === 'salonmanager://' ||
     lowercased === 'salonmanager:///' ||
     lowercased === '/' ||
@@ -19,8 +21,8 @@ const normalizeIncomingSystemPath = (path: string) => {
     return ROOT_FALLBACK_ROUTE;
   }
 
-  if (lowercased.startsWith('salonmanager://')) {
-    const withoutScheme = normalized.replace(/^salonmanager:\/\//i, '');
+  if (lowercased.startsWith('salonpro://') || lowercased.startsWith('salonmanager://')) {
+    const withoutScheme = normalized.replace(/^salonpro:\/\//i, '').replace(/^salonmanager:\/\//i, '');
     const normalizedPath = withoutScheme.startsWith('/')
       ? withoutScheme
       : `/${withoutScheme}`;
@@ -38,4 +40,3 @@ export const redirectSystemPath = async ({ path }: { path: string; initial: bool
     return ROOT_FALLBACK_ROUTE;
   }
 };
-

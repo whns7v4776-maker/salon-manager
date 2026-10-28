@@ -18,3 +18,12 @@ salonpro
 .git
 .cursor
 *.codexbak*
+
+# Separate dashboard and local test/release artifacts are not part of the public app.
+admin-dashboard
+work
+output
+store-builds
+store-assets
+app-store-screenshots
+.env*

@@ -1,0 +1,28 @@
+{
+  "web": {
+    "id": "dpl_7t2P2FMiUpttNveBUb47PWR4aPW5",
+    "url": "https://salonpro.dev",
+    "ready": true,
+    "clientPageStatus": 200,
+    "verifiedScriptCount": 4,
+    "ioniconsBytes": 389724
+  },
+  "nativeOta": [
+    {
+      "id": "01a0f3d3-9259-7a6a-b0dd-41db4f871d8e",
+      "platform": "android",
+      "group": "8ef8960a-9f51-4907-9cb6-99cecd922ab5",
+      "runtimeVersion": "1.0.18-meta1",
+      "manifestVerified": true
+    },
+    {
+      "id": "01a0f3d3-9259-77a9-ada9-7946006a10df",
+      "platform": "ios",
+      "group": "8ef8960a-9f51-4907-9cb6-99cecd922ab5",
+      "runtimeVersion": "1.0.18-meta1",
+      "manifestVerified": true
+    }
+  ],
+  "newNativeBuild": false,
+  "backendChanges": false
+}

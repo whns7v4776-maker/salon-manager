@@ -1,25 +1,59 @@
+import {OwnerWebSheetHeader} from '../../components/owner-web-page-title';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { NativePremiumScope } from '../../components/owner-native-premium';
+import { PremiumSearchToolbar } from '../../components/ui/premium-search-toolbar';
+import { TABLET_MODAL_ORIENTATIONS } from '../../src/lib/tablet-modal-orientations';
+import {useCashDevicePrivacy} from '../../src/lib/cash-device-privacy';
+import { SalonBrandPlacementSettings } from '../../components/salon-brand-placement-settings';
+import { NativeHomeIndicators, NativeHomeInvite, NativeHomeResults, NativeHomeQuickAction, OwnerPremiumNativeHome } from '../../components/owner-premium-native-home';
+import { nativeHomeStyles } from '../../components/owner-premium-native-style';
+import { OwnerPremiumDashboard } from '../../components/owner-premium-dashboard';
+import { useAccessAppearance } from '../../components/access-premium';
+import { OwnerPremiumHomeHeading, OwnerPremiumHomeCss, OwnerPremiumHomeRegion, webHomePart, premiumHomeStyles } from '../../components/owner-premium-web';
+import { ShopEntry } from "../../components/shop/shop-entry";
+import { NativeSettingsPopup } from '../../components/native-settings-popup';
+import { DockedSheetSurface } from '../../components/ui/docked-sheet-surface';
+import { DirectoryReminder } from '../../components/salon-discovery/directory-reminder';
+import { premiumFilterStyles } from '../../components/ui/premium-filter-styles';
+import { isSameOperatorIdentity } from '../../src/lib/home-operator-identity';
+import { lowerItalian, upperItalian } from '../../src/lib/italian-case';
+import { selectLatestCustomer } from '../../src/lib/latest-customer';
 import { Ionicons } from '@expo/vector-icons';
+import { useSalonShortCode } from '../../src/lib/salon-short-code';
+import { SalonCodeBadge } from '../../components/ui/salon-code-badge';
+import { SalonLogoEditor } from '../../components/ui/salon-logo-editor';
+import { SalonLogoPlaque } from '../../components/ui/salon-logo-plaque';
+import { SalonActivityPicker } from '../../components/ui/salon-activity-picker';
+import { CustomerInsightsOverlay } from '../../components/ui/customer-insights-overlay';
+import { CustomerInsightsOpenButton } from '../../components/ui/customer-insights-open-button';
 import Constants from 'expo-constants';
-import * as Haptics from 'expo-haptics';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+import { useIsFocused } from '@react-navigation/native';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
-    ActivityIndicator,
+    AccessibilityInfo,
+    Animated,
+    Easing as NativeEasing,
     Alert,
+    FlatList,
     Image,
+    InteractionManager,
     Keyboard,
     Modal,
     Platform,
+    Pressable,
     ScrollView,
     Share,
     StyleSheet,
     Text,
     TextInput,
     View,
+    type StyleProp,
+    type TextStyle,
+    type ViewStyle,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import QRCode from 'react-native-qrcode-svg';
 import Reanimated, {
   Easing,
@@ -32,13 +66,36 @@ import Reanimated, {
 } from 'react-native-reanimated';
 import { ModuleHeroHeader } from '../../components/module-hero-header';
 import { ClearableTextInput } from '../../components/ui/clearable-text-input';
-import { HapticTouchable } from '../../components/ui/haptic-touchable';
+import { HapticTouchable, HapticTouchableFastRegion } from '../../components/ui/haptic-touchable';
+import { PremiumExpandButton } from '../../components/ui/premium-expand-button';
+import {
+  getWebExpandableCardProps,
+  getWebExpandableCardStyle,
+} from '../../components/ui/web-expandable-card';
+import { SkeletonShimmer } from '../../components/ui/skeleton-shimmer';
+import { FilterCheckmark } from '../../components/ui/filter-checkmark';
 import { useAppContext } from '../../src/context/AppContext';
+import { formatCash, summarizeCashActivity } from '../../src/lib/cash-summary';
+import { resolveBundledAssetUri } from '../../src/lib/bundled-asset-uri';
 import { salonNameFontOptions } from '../../src/lib/fonts';
+import { formatLeadingCapitalizedValue } from '../../src/lib/customer-name';
 import { useKeyboardAwareScroll } from '../../src/lib/form-navigation';
 import { tApp } from '../../src/lib/i18n';
+import { ICON_ASSET_VERSION } from '../../src/lib/icon-asset-version';
 import { formatSalonAddress, normalizeSalonCode } from '../../src/lib/platform';
 import { useResponsiveLayout } from '../../src/lib/responsive';
+import { resolveServiceAccent } from '../../src/lib/service-accents';
+import { buildSalonQrPrintHtml } from '../../src/lib/salon-qr-print';
+import {
+  buildDisplayTimeSlots,
+  getDateAvailabilityInfo,
+  buildSalonCapacityOperatorId,
+  getAppointmentEndTime,
+  isSlotBlockedByOverride,
+  isTimeBlockedByLunchBreak,
+  normalizeRoleName,
+  timeToMinutes,
+} from '../../src/lib/booking';
 import {
     buildInvalidFieldsMessage,
     isValidEmail,
@@ -61,6 +118,103 @@ const formatDateLabel = (dateString?: string) => {
   return `${day}/${month}/${year}`;
 };
 
+const sanitizeFileNameSegment = (value: string) =>
+  value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60) || 'agenda';
+
+type OperatorAgendaPrintScope = 'day' | 'week' | 'month';
+
+const parseIsoDateValue = (value: string) => {
+  const [year, month, day] = value.split('-').map(Number);
+  return new Date(year, (month ?? 1) - 1, day ?? 1);
+};
+
+const toIsoDateValue = (date: Date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const addDaysToIsoDate = (value: string, days: number) => {
+  const baseDate = parseIsoDateValue(value);
+  baseDate.setDate(baseDate.getDate() + days);
+  return toIsoDateValue(baseDate);
+};
+
+const getWeekStartIsoDate = (value: string) => {
+  const baseDate = parseIsoDateValue(value);
+  const weekDay = baseDate.getDay();
+  const mondayOffset = weekDay === 0 ? -6 : 1 - weekDay;
+  baseDate.setDate(baseDate.getDate() + mondayOffset);
+  return toIsoDateValue(baseDate);
+};
+
+const getWeekEndIsoDate = (value: string) => addDaysToIsoDate(getWeekStartIsoDate(value), 6);
+
+const getMonthStartIsoDate = (value: string) => {
+  const baseDate = parseIsoDateValue(value);
+  return toIsoDateValue(new Date(baseDate.getFullYear(), baseDate.getMonth(), 1));
+};
+
+const getMonthEndIsoDate = (value: string) => {
+  const baseDate = parseIsoDateValue(value);
+  return toIsoDateValue(new Date(baseDate.getFullYear(), baseDate.getMonth() + 1, 0));
+};
+
+const buildInclusiveDateRange = (startValue: string, endValue: string) => {
+  const dates: string[] = [];
+  let currentValue = startValue;
+
+  while (currentValue <= endValue) {
+    dates.push(currentValue);
+    currentValue = addDaysToIsoDate(currentValue, 1);
+  }
+
+  return dates;
+};
+
+const formatLongDateLabel = (dateString?: string) => {
+  if (!dateString) return '—';
+
+  try {
+    const formatter = new Intl.DateTimeFormat('it-IT', {
+      weekday: 'long',
+      day: '2-digit',
+      month: 'long',
+      year: 'numeric',
+    });
+    const rawLabel = formatter.format(parseIsoDateValue(dateString));
+    return upperItalian(rawLabel.charAt(0)) + rawLabel.slice(1);
+  } catch {
+    return formatDateLabel(dateString);
+  }
+};
+
+const formatOperatorAgendaScopeLabel = ({
+  scope,
+  startDate,
+  endDate,
+}: {
+  scope: OperatorAgendaPrintScope;
+  startDate: string;
+  endDate: string;
+}) => {
+  if (scope === 'day') {
+    return `Giornata · ${formatLongDateLabel(startDate)}`;
+  }
+
+  if (scope === 'week') {
+    return `Settimana · ${formatDateLabel(startDate)} - ${formatDateLabel(endDate)}`;
+  }
+
+  return `Mese · ${formatDateLabel(startDate)} - ${formatDateLabel(endDate)}`;
+};
+
 const formatMinutes = (value?: number) => {
   if (!value) return '—';
   if (value === 30) return '30 min';
@@ -76,36 +230,133 @@ const formatMinutes = (value?: number) => {
   return hours > 0 ? `${hours}h` : `${minutes} min`;
 };
 
-const normalizeOperatorNameKey = (value?: string) =>
-  (value ?? '').trim().toLocaleLowerCase('it-IT');
-
-const isSameOperatorIdentity = (
-  item: { operatoreId?: string; operatoreNome?: string },
-  operator: { id: string; nome: string }
-) => {
-  const appointmentOperatorId = item.operatoreId?.trim() ?? '';
-  const appointmentOperatorName = normalizeOperatorNameKey(item.operatoreNome);
-  const operatorId = operator.id.trim();
-  const operatorName = normalizeOperatorNameKey(operator.nome);
-
-  if (appointmentOperatorId && operatorId && appointmentOperatorId === operatorId) {
-    return true;
+const blendHexWithWhite = (hex: string, whiteWeight = 0.82) => {
+  const normalized = hex.replace('#', '').trim();
+  if (!/^[0-9a-fA-F]{6}$/.test(normalized)) {
+    return '#F8FAFC';
   }
 
-  if (appointmentOperatorName && operatorName && appointmentOperatorName === operatorName) {
-    return true;
-  }
+  const clampChannel = (value: number) => Math.max(0, Math.min(255, Math.round(value)));
+  const mixChannel = (channelHex: string) => {
+    const channel = Number.parseInt(channelHex, 16);
+    return clampChannel(channel * (1 - whiteWeight) + 255 * whiteWeight)
+      .toString(16)
+      .padStart(2, '0');
+  };
 
-  return false;
+  return `#${mixChannel(normalized.slice(0, 2))}${mixChannel(normalized.slice(2, 4))}${mixChannel(normalized.slice(4, 6))}`;
 };
 
+const normalizeOperatorNameKey = (value?: string) =>
+  lowerItalian((value ?? '').trim());
+
+
 const normalizeCustomerNameKey = (value?: string) =>
-  (value ?? '').trim().toLocaleLowerCase('it-IT');
+  lowerItalian((value ?? '').trim());
+const normalizeCustomerEmailKey = (value?: string | null) =>
+  lowerItalian((value ?? '').trim());
+const normalizeCustomerPhoneKey = (value?: string | null) =>
+  (value ?? '').replace(/\D+/g, '').slice(-10);
+const normalizeRoleKey = (value?: string) =>
+  lowerItalian((value ?? '').trim());
+
+const formatRoleDisplayLabel = (value?: string | null) =>
+  (value ?? '')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word) => upperItalian(word.charAt(0)) + lowerItalian(word.slice(1)))
+    .join(' ');
+
+const resolveAppointmentRoleLabel = ({
+  appointment,
+  services,
+  operators,
+}: {
+  appointment: {
+    servizio?: string;
+    mestiereRichiesto?: string;
+    operatoreId?: string;
+    operatoreNome?: string;
+  };
+  services: { nome: string; mestiereRichiesto?: string | null }[];
+  operators: { id: string; nome: string; mestiere: string }[];
+}) => {
+  const explicitRole = appointment.mestiereRichiesto?.trim();
+  if (explicitRole) return explicitRole;
+
+  const matchedOperator =
+    (appointment.operatoreId?.trim()
+      ? operators.find((item) => item.id.trim() === appointment.operatoreId?.trim())
+      : undefined) ??
+    (appointment.operatoreNome?.trim()
+      ? operators.find(
+          (item) => normalizeOperatorNameKey(item.nome) === normalizeOperatorNameKey(appointment.operatoreNome)
+        )
+      : undefined);
+  if (matchedOperator?.mestiere?.trim()) {
+    return matchedOperator.mestiere.trim();
+  }
+
+  const matchedService = services.find(
+    (item) =>
+      lowerItalian((item.nome ?? '').trim()) ===
+      lowerItalian((appointment.servizio ?? '').trim())
+  );
+
+  if (matchedService?.mestiereRichiesto?.trim()) {
+    return matchedService.mestiereRichiesto.trim();
+  }
+
+  const inferredCapacityId = buildSalonCapacityOperatorId(
+    appointment.servizio ?? '',
+    [],
+    appointment.mestiereRichiesto
+  );
+  const inferredRoleKey = inferredCapacityId.replace(/^salon-capacity::/i, '').trim();
+
+  return formatRoleDisplayLabel(inferredRoleKey);
+};
 
 const isSameCustomerIdentity = (
-  appointment: { cliente?: string },
-  customer: { nome: string }
-) => normalizeCustomerNameKey(appointment.cliente) === normalizeCustomerNameKey(customer.nome);
+  appointment: { cliente?: string; customerEmail?: string; customerPhone?: string },
+  customer: { nome: string; email?: string; telefono?: string }
+) => {
+  const appointmentEmail = normalizeCustomerEmailKey(appointment.customerEmail);
+  const customerEmail = normalizeCustomerEmailKey(customer.email);
+  const appointmentPhone = normalizeCustomerPhoneKey(appointment.customerPhone);
+  const customerPhone = normalizeCustomerPhoneKey(customer.telefono);
+  const hasAppointmentContact = !!appointmentEmail || !!appointmentPhone;
+  const hasCustomerContact = !!customerEmail || !!customerPhone;
+
+  if (appointmentEmail && customerEmail) {
+    return appointmentEmail === customerEmail;
+  }
+
+  if (appointmentPhone && customerPhone) {
+    return appointmentPhone === customerPhone;
+  }
+
+  if (hasAppointmentContact && hasCustomerContact) {
+    return false;
+  }
+
+  return normalizeCustomerNameKey(appointment.cliente) === normalizeCustomerNameKey(customer.nome);
+};
+
+const buildCustomerInsightIdentityKey = (
+  customer: { id?: string; nome: string; email?: string; telefono?: string },
+  index: number
+) =>
+  [
+    customer.id?.trim() ?? '',
+    normalizeCustomerEmailKey(customer.email),
+    normalizeCustomerPhoneKey(customer.telefono),
+    normalizeCustomerNameKey(customer.nome),
+    String(index),
+  ]
+    .filter(Boolean)
+    .join('|');
 
 const buildClientInviteMessage = ({
   brandName,
@@ -114,10 +365,10 @@ const buildClientInviteMessage = ({
   brandName: string;
   salonClientLink: string;
 }) => {
-  return `Apri l'app di ${brandName} e accedi direttamente all'area cliente.\n\nLink diretto: ${salonClientLink}`;
+  return `Apri l'app di ${brandName} e registrati nell'area cliente del salone.\n\nLink diretto: ${salonClientLink}`;
 };
 
-const toUppercaseField = (value: string) => value.toLocaleUpperCase('it-IT');
+const toUppercaseField = (value: string) => formatLeadingCapitalizedValue(value);
 const DEFAULT_PUBLIC_CLIENT_BASE_URL = 'https://salon-manager-puce.vercel.app';
 const IS_ANDROID = Platform.OS === 'android';
 const escapeHtml = (value: string) =>
@@ -158,7 +409,10 @@ const buildSalonClientLink = (baseUrl: URL | null, salonCode: string) => {
     return '';
   }
 
-  return `${baseUrl.toString()}/join/${encodeURIComponent(salonCode)}`;
+  const link = new URL(`${Platform.OS==='web'?baseUrl.toString().replace(/\/+$/, ''):baseUrl.toString()}/join/${encodeURIComponent(salonCode)}`);
+  link.searchParams.set('entry', 'client');
+  link.searchParams.set('v', ICON_ASSET_VERSION);
+  return link.toString();
 };
 
 const getPublicClientLinkStatus = ({
@@ -196,43 +450,287 @@ const getPublicClientLinkStatus = ({
   };
 };
 
-function AnimatedChevron({
-  expanded,
-  color,
-  size,
+function DashboardSkeletonBar({
+  width,
+  height = 24,
+  radius = 999,
+  style,
 }: {
-  expanded: boolean;
-  color: string;
-  size: number;
+  width: ViewStyle['width'];
+  height?: number;
+  radius?: number;
+  style?: ViewStyle;
 }) {
-  const rotation = useSharedValue(expanded ? 180 : 0);
-
-  useEffect(() => {
-    rotation.value = withTiming(expanded ? 180 : 0, {
-      duration: 200,
-      easing: Easing.out(Easing.cubic),
-    });
-  }, [expanded, rotation]);
-
-  const animatedStyle = useAnimatedStyle(() => ({
-    transform: [{ rotate: `${rotation.value}deg` }],
-  }));
-
+  if(Platform.OS==='web')return <View style={[{width,height,borderRadius:radius},style,{backgroundColor:'transparent'}]}/>;
   return (
-    <Reanimated.View style={animatedStyle}>
-      <Ionicons name="chevron-down" size={size} color={color} />
-    </Reanimated.View>
+    <SkeletonShimmer
+      style={[
+        styles.dashboardSkeletonBar,
+        { width, height, borderRadius: radius },
+        style,
+      ]}
+    />
   );
 }
 
+type HomeMetricCopyProps = {
+  text: string;
+  textStyle: StyleProp<TextStyle>;
+  viewportStyle?: StyleProp<ViewStyle>;
+  scrolling?: boolean;
+};
+
+const HomeMetricMotionContext = createContext<{
+  progress: Animated.Value;
+  distance: number;
+  reduceMotion: boolean;
+  reportWidth: (width: number) => void;
+} | null>(null);
+
+/** One clock and one distance keep every metric description in exact sync. */
+function HomeMetricMotion({ children }: { children: React.ReactNode }) {
+  const progress = useRef(new Animated.Value(0)).current;
+  const [distance, setDistance] = useState(0);
+  const [reduceMotion, setReduceMotion] = useState(false);
+  const focused = useIsFocused();
+  const reportWidth = useCallback((width: number) => {
+    if (Number.isFinite(width) && width > 0) {
+      setDistance(current => Math.max(current, Math.ceil(width) + 28));
+    }
+  }, []);
+
+  useEffect(() => {
+    let mounted = true;
+    AccessibilityInfo.isReduceMotionEnabled()
+      .then(enabled => { if (mounted) setReduceMotion(enabled); })
+      .catch(() => undefined);
+    const subscription = AccessibilityInfo.addEventListener('reduceMotionChanged', setReduceMotion);
+    return () => { mounted = false; subscription.remove(); };
+  }, []);
+
+  useEffect(() => {
+    progress.stopAnimation();
+    progress.setValue(0);
+    if (!focused || reduceMotion || distance === 0) return;
+    const animation = Animated.loop(Animated.sequence([
+      Animated.delay(2000),
+      Animated.timing(progress, {
+        toValue: 1,
+        duration: Math.max(6000, distance * 32),
+        easing: NativeEasing.linear,
+        useNativeDriver: Platform.OS !== 'web',
+        isInteraction: false,
+      }),
+      Animated.delay(2000),
+    ]), { resetBeforeIteration: true });
+    animation.start();
+    return () => { animation.stop(); progress.stopAnimation(); };
+  }, [distance, focused, progress, reduceMotion]);
+
+  const value = useMemo(() => ({ progress, distance, reduceMotion, reportWidth }),
+    [progress, distance, reduceMotion, reportWidth]);
+  return <HomeMetricMotionContext.Provider value={value}>{children}</HomeMetricMotionContext.Provider>;
+}
+
+const HomeMetricCopy = memo(function HomeMetricCopy({
+  text, textStyle, viewportStyle, scrolling = false,
+}: HomeMetricCopyProps) {
+  const motion = useContext(HomeMetricMotionContext);
+  const [viewportWidth, setViewportWidth] = useState(0);
+  const [textWidth, setTextWidth] = useState(0);
+  const flatStyle = StyleSheet.flatten(textStyle);
+  const lineHeight = flatStyle?.lineHeight ?? 17;
+  const translateX = useMemo(() => motion?.progress.interpolate({
+    inputRange: [0, 1], outputRange: [0, -motion.distance],
+  }) ?? 0, [motion?.progress, motion?.distance]);
+  const measureStyle = [textStyle, { width: 'auto' as const, alignSelf: 'flex-start' as const, flexGrow: 0, minHeight: 0, marginBottom: 0, flexShrink: 0 }];
+  const shouldScroll = Platform.OS !== 'web' || (viewportWidth > 0 && textWidth > viewportWidth + 1);
+  useEffect(() => {
+    if (Platform.OS === 'web' && scrolling && shouldScroll) {
+      motion?.reportWidth(Math.max(viewportWidth, textWidth));
+    }
+  }, [motion?.reportWidth, scrolling, shouldScroll, textWidth, viewportWidth]);
+
+  if (Platform.OS === 'web' || !scrolling || !motion || motion.reduceMotion) {
+    return (
+      <View style={[{ width: '100%' }, viewportStyle]}>
+        <Text style={[textStyle, { width: '100%', marginBottom: 0 }]}>{text}</Text>
+      </View>
+    );
+  }
+
+  const offset = Math.max(0, (viewportWidth - textWidth) / 2);
+  return (
+    <View accessible accessibilityRole="text" accessibilityLabel={text} pointerEvents="none"
+      onLayout={event => {
+        const width = event.nativeEvent.layout.width;
+        setViewportWidth(width);
+        if (Platform.OS !== 'web') motion.reportWidth(width);
+      }}
+      style={[{ width: '100%', height: lineHeight, overflow: 'hidden' }, viewportStyle]}>
+      <View accessible={false} aria-hidden={true} accessibilityElementsHidden importantForAccessibility="no-hide-descendants"
+        style={{ position: 'absolute', opacity: 0, width: 10000, flexDirection: 'row' }}>
+        <Text style={measureStyle} numberOfLines={1} onLayout={event => {
+          const width = event.nativeEvent.layout.width;
+          setTextWidth(width);
+          if (Platform.OS !== 'web') motion.reportWidth(width);
+        }}>{text}</Text>
+      </View>
+      <Animated.View accessible={false} aria-hidden={true} accessibilityElementsHidden importantForAccessibility="no-hide-descendants"
+        style={{ width: motion.distance * 2 + viewportWidth, height: lineHeight,
+          opacity: textWidth > 0 && viewportWidth > 0 ? 1 : 0,
+          transform: [{ translateX: shouldScroll ? translateX : 0 }] }}>
+        {(shouldScroll ? [0, 1] : [0]).map(copy => (
+          <Text key={copy} numberOfLines={1}
+            style={[measureStyle, { position: 'absolute', left: offset + copy * motion.distance,
+              width: Math.ceil(textWidth) + 2, textAlign: 'left' }]}>{text}</Text>
+        ))}
+      </Animated.View>
+    </View>
+  );
+});
+
+/** Fit the entire formatted value, including its currency, to the card width. */
+const HomeMetricAmount = memo(function HomeMetricAmount({ value, style }: {
+  value: string; style: StyleProp<TextStyle>;
+}) {
+  const [width, setWidth] = useState(0);
+  const [naturalWidth, setNaturalWidth] = useState(0);
+  const baseStyle = StyleSheet.flatten(style);
+  const baseSize = baseStyle?.fontSize ?? 24;
+  const fittedSize = width > 0 && naturalWidth > 0
+    ? baseSize * Math.min(1, Math.max(0, width - 6) / naturalWidth) : baseSize;
+  if (Platform.OS === 'web') return <View style={{width:'100%',minWidth:0,marginBottom:baseStyle?.marginBottom??0}}><Text style={[style,{width:'100%',marginBottom:0,whiteSpace:'nowrap'} as any]}>{value}</Text></View>;
+  return (
+    <View accessible accessibilityRole="text" accessibilityLabel={value}
+      onLayout={event => setWidth(event.nativeEvent.layout.width)}
+      style={{ width: '100%', overflow: 'hidden', marginBottom: baseStyle?.marginBottom ?? 0 }}>
+      <View accessible={false} aria-hidden={true} accessibilityElementsHidden importantForAccessibility="no-hide-descendants"
+        style={{ position: 'absolute', opacity: 0, width: 10000, flexDirection: 'row' }}>
+        <Text numberOfLines={1} onLayout={event => setNaturalWidth(event.nativeEvent.layout.width)}
+          style={[style, { width: 'auto', alignSelf: 'flex-start', flexGrow: 0, flexShrink: 0, marginBottom: 0 }]}>{value}</Text>
+      </View>
+      <Text accessible={false} aria-hidden={true} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.1}
+        style={[style, { fontSize: fittedSize, width: '100%', marginBottom: 0 }]}>{value}</Text>
+    </View>
+  );
+});
+
+const CUSTOMER_INSIGHT_SEARCH_COMMIT_DELAY_MS = 90;
+
+/**
+ * Keeps the search field responsive without rerendering the whole Home screen
+ * for every keystroke. The parent only receives the settled query used by the
+ * expensive customer-board filter; blur and submit still commit immediately.
+ */
+const DeferredCustomerInsightSearchInput = memo(function DeferredCustomerInsightSearchInput({
+  active,
+  value,
+  onCommit,
+}: {
+  active: boolean;
+  value: string;
+  onCommit: (value: string) => void;
+}) {
+  const { palette: searchPalette } = useAccessAppearance();
+  const [localValue, setLocalValue] = useState(value);
+  const localValueRef = useRef(value);
+  const committedValueRef = useRef(value);
+  const onCommitRef = useRef(onCommit);
+  const commitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    onCommitRef.current = onCommit;
+  }, [onCommit]);
+
+  const clearPendingCommit = useCallback(() => {
+    if (commitTimerRef.current) {
+      clearTimeout(commitTimerRef.current);
+      commitTimerRef.current = null;
+    }
+  }, []);
+
+  const commitValue = useCallback(
+    (nextValue: string) => {
+      clearPendingCommit();
+      if (nextValue === committedValueRef.current) return;
+      committedValueRef.current = nextValue;
+      onCommitRef.current(nextValue);
+    },
+    [clearPendingCommit]
+  );
+
+  const handleChangeText = useCallback(
+    (nextValue: string) => {
+      localValueRef.current = nextValue;
+      setLocalValue(nextValue);
+      clearPendingCommit();
+      commitTimerRef.current = setTimeout(() => {
+        commitTimerRef.current = null;
+        commitValue(localValueRef.current);
+      }, CUSTOMER_INSIGHT_SEARCH_COMMIT_DELAY_MS);
+    },
+    [clearPendingCommit, commitValue]
+  );
+
+  const flushPendingValue = useCallback(() => {
+    commitValue(localValueRef.current);
+  }, [commitValue]);
+
+  useEffect(() => {
+    if (value === committedValueRef.current) return;
+    clearPendingCommit();
+    committedValueRef.current = value;
+    localValueRef.current = value;
+    setLocalValue(value);
+  }, [clearPendingCommit, value]);
+
+  useEffect(() => {
+    if (active) return;
+    clearPendingCommit();
+    committedValueRef.current = value;
+    localValueRef.current = value;
+    setLocalValue(value);
+  }, [active, clearPendingCommit, value]);
+
+  useEffect(() => clearPendingCommit, [clearPendingCommit]);
+
+  return (
+    <PremiumSearchToolbar><ClearableTextInput
+      style={[styles.customerInsightSearchInput, Platform.OS !== 'web' && {minHeight:42,fontSize:13,lineHeight:19,fontWeight:'400',paddingVertical:9,paddingHorizontal:12,borderRadius:12,marginBottom:8,backgroundColor:searchPalette.field,color:searchPalette.ink,borderColor:searchPalette.border}, Platform.OS === 'web' && {backgroundColor:searchPalette.field,color:searchPalette.ink,borderColor:searchPalette.border,fontWeight:'400',boxShadow:'inset 0 1px 0 rgba(255,255,255,.08)'}]}
+      placeholder="Cerca cliente, telefono, email o servizio"
+      placeholderTextColor={searchPalette.muted}
+      value={localValue}
+      onChangeText={handleChangeText}
+      onBlur={flushPendingValue}
+      onSubmitEditing={flushPendingValue}
+      autoCapitalize="words"
+      returnKeyType="search"
+    /></PremiumSearchToolbar>
+  );
+});
+
 export default function HomeScreen() {
+  const homeSheetInsets = useSafeAreaInsets();
+  const { palette: premiumPalette } = useAccessAppearance();
   const router = useRouter();
   const responsive = useResponsiveLayout();
-  const insets = useSafeAreaInsets();
+  const styles = useMemo(() => Platform.OS === 'web' ? premiumHomeStyles(baseHomeStyles, premiumPalette, responsive.width) : nativeHomeStyles(baseHomeStyles,premiumPalette), [premiumPalette, responsive.width]);
+  const hasWideWebMetricCards = Platform.OS === 'web';
+  const compactSalonTotals = Platform.OS !== 'web' || responsive.width < 640;
+  const [showSalonTotalDetails, setShowSalonTotalDetails] = useState(false);
   const scrollRef = useRef<ScrollView | null>(null);
+  const profileSheetScrollRef = useRef<ScrollView | null>(null);
+  const clientQrPrintRef = useRef<{ toDataURL: (callback: (data: string) => void) => void } | null>(null);
+  const priorityScrollOffset = useSharedValue(0);
+  const priorityIndicatorActive = useSharedValue(0);
   const [clientAccessSectionY, setClientAccessSectionY] = useState(0);
+  const profileSectionYRef = useRef(0);
+  const profileSectionElementRef = useRef<View | null>(null);
+  const returnToProfileAfterSaveRef = useRef(false);
+  const [priorityViewportHeight, setPriorityViewportHeight] = useState(0);
+  const [priorityContentHeight, setPriorityContentHeight] = useState(0);
   const salonNameFieldRef = useRef<TextInput | null>(null);
-  const activityCategoryFieldRef = useRef<TextInput | null>(null);
   const businessPhoneFieldRef = useRef<TextInput | null>(null);
   const streetLineFieldRef = useRef<TextInput | null>(null);
   const cityFieldRef = useRef<TextInput | null>(null);
@@ -240,23 +738,42 @@ export default function HomeScreen() {
   const accountEmailFieldRef = useRef<TextInput | null>(null);
   const {
     clienti,
-    appuntamenti,
+    appuntamenti: liveAppuntamenti,
+    ownerFinancialAppointments,
     movimenti,
     servizi,
     operatori,
     richiestePrenotazione,
+    availabilitySettings,
     salonAccountEmail,
     salonWorkspace,
-    setSalonWorkspace,
     updateSalonWorkspacePersisted,
     switchSalonAccount,
     appLanguage,
     ownerProfileNeedsCompletion,
     consumeOwnerProfileNeedsCompletion,
+    ownerInitialDataHydrating,
+    ownerServerSyncReady,
+    ownerAppointmentsAuthoritative,
+    ownerMobileSessionAccessReady,
+    isAuthenticated,
+    ownerExplicitLogout,
+    setOwnerHomeReady,
+    serviceCardColorOverrides,
+    roleCardColorOverrides,
   } = useAppContext();
+  const cashPrivacyScope=salonWorkspace.id&&salonAccountEmail?`${salonWorkspace.id}:${salonAccountEmail.toLowerCase()}`:'';
+  const {enabled:cashPrivacyEnabled}=useCashDevicePrivacy(cashPrivacyScope);
+  const reserveCashAmounts=cashPrivacyEnabled!==false;
+  // Tutti i contatori e gli importi Home provengono dalla tabella privata del
+  // workspace. La raccolta live resta disponibile solo durante l'idratazione,
+  // quando la Home mostra comunque lo skeleton e non espone importi intermedi.
+  const appuntamenti = ownerAppointmentsAuthoritative
+    ? ownerFinancialAppointments
+    : liveAppuntamenti;
 
-  const [loadingSalon, setLoadingSalon] = useState(false);
   const [savingSalon, setSavingSalon] = useState(false);
+  const hasConsumedOwnerProfileCompletionRef = useRef(false);
 
   const [accountEmailInput, setAccountEmailInput] = useState(salonAccountEmail);
   const [salonNameInput, setSalonNameInput] = useState(salonWorkspace.salonName);
@@ -268,10 +785,16 @@ export default function HomeScreen() {
   const [salonNameFontVariantInput, setSalonNameFontVariantInput] = useState(
     salonWorkspace.salonNameFontVariant
   );
+  const [additionalPhonesInput, setAdditionalPhonesInput] = useState<string[]>(salonWorkspace.additionalPhones?.length ? salonWorkspace.additionalPhones : ['']);
   const [businessPhoneInput, setBusinessPhoneInput] = useState(salonWorkspace.businessPhone);
   const [activityCategoryInput, setActivityCategoryInput] = useState(
     toUppercaseField(salonWorkspace.activityCategory)
   );
+  const configuredActivityOptions = useMemo(() => [
+    salonWorkspace.activityCategory,
+    ...servizi.map((service) => service.mestiereRichiesto ?? ''),
+    ...operatori.map((operator) => operator.mestiere ?? ''),
+  ], [salonWorkspace.activityCategory, servizi, operatori]);
   const [streetLineInput, setStreetLineInput] = useState(
     [salonWorkspace.streetType, salonWorkspace.streetName].filter(Boolean).join(' ').trim()
   );
@@ -280,9 +803,18 @@ export default function HomeScreen() {
   const [showAdminPanel, setShowAdminPanel] = useState(false);
   const [isEditingSalonProfile, setIsEditingSalonProfile] = useState(false);
   const [showProfileSection, setShowProfileSection] = useState(false);
-  const [showFontPicker, setShowFontPicker] = useState(false);
+  const toggleProfileSection = useCallback(() => {
+    setShowProfileSection((current) => {
+      const nextValue = !current;
+      setIsEditingSalonProfile(nextValue);
+      return nextValue;
+    });
+  }, []);
   const [showOperatorAgendaModal, setShowOperatorAgendaModal] = useState(false);
   const [selectedOperatorBoardId, setSelectedOperatorBoardId] = useState<string | null>(null);
+  const [operatorAgendaPrintScope, setOperatorAgendaPrintScope] =
+    useState<OperatorAgendaPrintScope>('day');
+  const [isOperatorAgendaSystemDialogOpen, setIsOperatorAgendaSystemDialogOpen] = useState(false);
   const [showCustomerInsightsModal, setShowCustomerInsightsModal] = useState(false);
   const [selectedCustomerInsightId, setSelectedCustomerInsightId] = useState<string | null>(null);
   const [customerInsightSearchQuery, setCustomerInsightSearchQuery] = useState('');
@@ -293,28 +825,136 @@ export default function HomeScreen() {
     businessPhone?: string;
     accountEmail?: string;
   }>({});
-  const { focusField, scrollToField } = useKeyboardAwareScroll(scrollRef, {
+  const [clockNow, setClockNow] = useState(() => Date.now());
+  const isHomeScreenFocused = useIsFocused();
+  useEffect(() => {
+    if (!isHomeScreenFocused) {
+      setShowCustomerInsightsModal(false);
+    }
+  }, [isHomeScreenFocused]);
+  const shouldRunHomeClock =
+    Platform.OS !== 'android' || isHomeScreenFocused;
+  const [androidHomeSecondaryReady, setAndroidHomeSecondaryReady] = useState(
+    !IS_ANDROID,
+  );
+  const [androidHomeQrReady, setAndroidHomeQrReady] = useState(!IS_ANDROID);
+  const [ownerHomeDataSettled, setOwnerHomeDataSettled] = useState(false);
+  const ownerHomeActiveAccountKeyRef = useRef('');
+  const ownerHomeSettledAccountKeyRef = useRef('');
+  const { focusField, scrollToField } = useKeyboardAwareScroll(Platform.OS === 'web' && showProfileSection ? profileSheetScrollRef : scrollRef, {
     topOffset: responsive.isDesktop ? 112 : 192,
+    shouldScrollNode: () => Platform.OS === 'web' || !showProfileSection,
   });
 
-  const scrollToQrSection = useCallback(() => {
-    requestAnimationFrame(() => {
-      scrollRef.current?.scrollTo({
-        y: Math.max(
-          clientAccessSectionY + (responsive.isDesktop ? 980 : 1260),
-          0
-        ),
-        animated: true,
-      });
+  useEffect(() => {
+    if (!shouldRunHomeClock) return;
+
+    const intervalId = setInterval(() => {
+      setClockNow(Date.now());
+    }, 30000);
+
+    return () => clearInterval(intervalId);
+  }, [shouldRunHomeClock]);
+
+  useEffect(() => {
+    if (!IS_ANDROID || androidHomeSecondaryReady || !isHomeScreenFocused) {
+      return;
+    }
+
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const interaction = InteractionManager.runAfterInteractions(() => {
+      timer = setTimeout(() => {
+        if (!cancelled) {
+          setAndroidHomeSecondaryReady(true);
+        }
+      }, 2500);
     });
-  }, [clientAccessSectionY, responsive.isDesktop]);
+
+    return () => {
+      cancelled = true;
+      interaction.cancel();
+      if (timer) clearTimeout(timer);
+    };
+  }, [androidHomeSecondaryReady, isHomeScreenFocused]);
+
+  const scrollToQrSection = useCallback(() => {
+    if (IS_ANDROID && !androidHomeQrReady) {
+      setAndroidHomeQrReady(true);
+    }
+    scrollRef.current?.scrollTo({
+      y: Math.max(clientAccessSectionY - 12, 0),
+      animated: false,
+    });
+  }, [androidHomeQrReady, clientAccessSectionY]);
 
   const oggi = getTodayDateString();
   const numeroClienti = clienti.length;
   const numeroAppuntamenti = appuntamenti.length;
+  const ownerDashboardHasFinancialPayload =
+    numeroAppuntamenti > 0 ||
+    movimenti.length > 0;
+  useEffect(() => {
+    const ownerKey = salonAccountEmail.trim().toLowerCase() || '__no-owner__';
+    const accountChanged = ownerHomeActiveAccountKeyRef.current !== ownerKey;
 
-  const incassoTotale = useMemo(
-    () => movimenti.reduce((totale, movimento) => totale + movimento.importo, 0),
+    if (accountChanged) {
+      ownerHomeActiveAccountKeyRef.current = ownerKey;
+      ownerHomeSettledAccountKeyRef.current = '';
+      setOwnerHomeDataSettled((current) => (current ? false : current));
+    }
+
+    if (
+      (Platform.OS !== 'web' && (!isAuthenticated || ownerExplicitLogout)) ||
+      ownerInitialDataHydrating ||
+      !ownerServerSyncReady ||
+      !ownerAppointmentsAuthoritative
+    ) {
+      // Su app lo skeleton della Home appartiene solo al primo caricamento.
+      // I refresh periodici devono conservare l'ultima dashboard valida invece
+      // di rimettere le metriche in skeleton a ogni sincronizzazione.
+      if (Platform.OS === 'web' || !isAuthenticated || ownerExplicitLogout) {
+        ownerHomeSettledAccountKeyRef.current = '';
+        setOwnerHomeDataSettled((current) => (current ? false : current));
+      }
+      return;
+    }
+
+    if (ownerHomeSettledAccountKeyRef.current === ownerKey) {
+      setOwnerHomeDataSettled((current) => (current ? current : true));
+      return;
+    }
+
+    // Nell'app lo skeleton rappresenta soltanto il caricamento reale. Appena
+    // la tabella appuntamenti e' autorevole mostriamo la Home, senza aggiungere
+    // un secondo ritardo artificiale dopo il bootstrap di sicurezza.
+    if (Platform.OS !== 'web') {
+      ownerHomeSettledAccountKeyRef.current = ownerKey;
+      setOwnerHomeDataSettled(true);
+      return;
+    }
+
+    const timeoutId = setTimeout(
+      () => {
+        ownerHomeSettledAccountKeyRef.current = ownerKey;
+        setOwnerHomeDataSettled(true);
+      },
+      ownerDashboardHasFinancialPayload ? 750 : 1200
+    );
+
+    return () => clearTimeout(timeoutId);
+  }, [
+    ownerDashboardHasFinancialPayload,
+    ownerAppointmentsAuthoritative,
+    ownerInitialDataHydrating,
+    ownerServerSyncReady,
+    salonAccountEmail,
+    isAuthenticated,
+    ownerExplicitLogout,
+  ]);
+
+  const cashActivity = useMemo(
+    () => summarizeCashActivity(movimenti),
     [movimenti]
   );
 
@@ -325,19 +965,105 @@ export default function HomeScreen() {
         .sort((first, second) => first.ora.localeCompare(second.ora)),
     [appuntamenti, oggi]
   );
+  const currentTimeMinutes = useMemo(() => {
+    const now = new Date(clockNow);
+    return now.getHours() * 60 + now.getMinutes();
+  }, [clockNow]);
 
-  const appuntamentiIncassati = appuntamenti.filter((item) => item.incassato).length;
-  const appuntamentiDaIncassare = appuntamenti.filter((item) => !item.incassato).length;
-  const valoreDaIncassare = useMemo(
-    () =>
-      appuntamenti
-        .filter((item) => !item.incassato)
-        .reduce((totale, item) => totale + item.prezzo, 0),
+  // Editing profile fields must not rescan the appointment history on each tap.
+  const appuntamentiIncassati = useMemo(
+    () => appuntamenti.filter((item) => item.incassato).length,
     [appuntamenti]
   );
+  const appuntamentiDaIncassare = useMemo(
+    () => appuntamenti.filter((item) => !item.incassato && !item.nonEffettuato).length,
+    [appuntamenti]
+  );
+  const quickFocusText = useMemo(() => {
+    const pending = richiestePrenotazione.filter((item) => item.stato === 'In attesa' && item.data >= oggi).length;
+    const toVerify = appuntamenti.filter((item) =>
+      !item.incassato && !item.nonEffettuato && (
+        (Boolean(item.data) && item.data! < oggi) || (item.data === oggi && timeToMinutes(getAppointmentEndTime(item, servizi)) <= currentTimeMinutes)
+      )
+    ).length;
+    const remainingToday = appuntamenti.filter((item) =>
+      !item.nonEffettuato && item.data === oggi && timeToMinutes(getAppointmentEndTime(item, servizi)) > currentTimeMinutes
+    ).length;
+    const tasks: string[] = [];
+    if (pending > 0) tasks.push(`${pending} ${pending === 1 ? 'richiesta di prenotazione da gestire' : 'richieste di prenotazione da gestire'}.`);
+    // A past scheduled end is not proof that a service was delivered or that
+    // its full price is still due: deposits and payment ledgers live in Cassa.
+    if (toVerify > 0) tasks.push(`${toVerify} ${toVerify === 1 ? 'appuntamento passato con incasso da verificare' : 'appuntamenti passati con incasso da verificare'} in Cassa.`);
+    if (remainingToday > 0) tasks.push(`${remainingToday} ${remainingToday === 1 ? 'appuntamento ancora previsto' : 'appuntamenti ancora previsti'} oggi.`);
+    return tasks.length ? tasks.join(' ') : 'Nessuna richiesta in attesa per oggi o i prossimi giorni, né incassi passati da verificare nei dati disponibili. Nessun altro appuntamento previsto oggi.';
+  }, [appuntamenti, richiestePrenotazione, oggi, currentTimeMinutes, servizi]);
 
-  const prossimoAppuntamento = appuntamentiOggi[0];
-  const ultimoCliente = clienti[0];
+  const prossimiAppuntamentiOggi = useMemo(
+    () =>
+      appuntamentiOggi.filter((item) => {
+        const appointmentStartMinutes = timeToMinutes(item.ora);
+        const appointmentEndMinutes = timeToMinutes(getAppointmentEndTime(item, servizi));
+
+        if (appointmentStartMinutes <= currentTimeMinutes && appointmentEndMinutes > currentTimeMinutes) {
+          return false;
+        }
+
+        return appointmentStartMinutes > currentTimeMinutes;
+      }),
+    [appuntamentiOggi, currentTimeMinutes, servizi]
+  );
+  const prossimoSlotPrioritario = useMemo(() => {
+    const nextTime = prossimiAppuntamentiOggi[0]?.ora ?? null;
+    if (!nextTime) {
+      return {
+        time: null,
+        appointments: [] as typeof prossimiAppuntamentiOggi,
+        hasMultiRole: false,
+        distinctRoleCount: 0,
+      };
+    }
+
+    const appointments = prossimiAppuntamentiOggi.filter((item) => item.ora === nextTime);
+    const distinctRoles = Array.from(
+      new Set(
+        appointments
+          .map((item) =>
+            resolveAppointmentRoleLabel({
+              appointment: item,
+              services: servizi,
+              operators: operatori,
+            }) || item.servizio.trim()
+          )
+          .map((item) => normalizeRoleKey(item))
+          .filter(Boolean)
+      )
+    );
+
+    return {
+      time: nextTime,
+      appointments,
+      hasMultiRole: distinctRoles.length > 1,
+      distinctRoleCount: distinctRoles.length,
+    };
+  }, [operatori, prossimiAppuntamentiOggi, servizi]);
+  const prossimoAppuntamento = prossimoSlotPrioritario.appointments[0] ?? null;
+  const ultimoCliente = useMemo(() => selectLatestCustomer(clienti), [clienti]);
+  const getHomePriorityAccent = useCallback(
+    (serviceName: string, roleNameOverride?: string | null) => {
+      const matchedService = servizi.find(
+        (item) => item.nome.trim().toLowerCase() === serviceName.trim().toLowerCase()
+      );
+
+      return resolveServiceAccent({
+        serviceId: matchedService?.id,
+        serviceName,
+        roleName: roleNameOverride?.trim() || matchedService?.mestiereRichiesto,
+        serviceColorOverrides: serviceCardColorOverrides,
+        roleColorOverrides: roleCardColorOverrides,
+      });
+    },
+    [roleCardColorOverrides, serviceCardColorOverrides, servizi]
+  );
 
   const servizioTop = useMemo(() => {
     const counts = appuntamenti.reduce<Record<string, number>>((acc, item) => {
@@ -357,36 +1083,227 @@ export default function HomeScreen() {
     };
   }, [appuntamenti, servizi]);
 
-  const mediaScontrino = useMemo(() => {
-    if (movimenti.length === 0) return 0;
-    return incassoTotale / movimenti.length;
-  }, [incassoTotale, movimenti.length]);
+  const mediaScontrino = cashActivity.averageConfirmed;
 
-  const livelloOperativo = useMemo(() => {
-    if (appuntamentiOggi.length >= 5) {
+  const statoOperativoGiornata = useMemo(() => {
+    const availabilityInfo = getDateAvailabilityInfo(availabilitySettings, oggi);
+    if (availabilityInfo.closed) {
       return {
-        label: 'Giornata piena',
+        label: 'Salone chiuso oggi',
+        tone: styles.statusCalm,
+        textTone: styles.statusCalmText,
+      };
+    }
+
+    const candidateSlots = buildDisplayTimeSlots(availabilitySettings, oggi).filter((slotTime) => {
+      const slotMinutes = timeToMinutes(slotTime);
+      return slotMinutes > currentTimeMinutes;
+    });
+
+    const bookableSlots = candidateSlots.filter((slotTime) => {
+      if (isTimeBlockedByLunchBreak(availabilitySettings, slotTime, { dateValue: oggi })) {
+        return false;
+      }
+
+      if (isSlotBlockedByOverride(availabilitySettings, oggi, slotTime)) {
+        return false;
+      }
+
+      return true;
+    });
+
+    const occupiedBookableSlots = bookableSlots.filter((slotTime) => {
+      const slotMinutes = timeToMinutes(slotTime);
+      return appuntamentiOggi.some((appointment) => {
+        const appointmentStartMinutes = timeToMinutes(appointment.ora);
+        const appointmentEndMinutes = timeToMinutes(getAppointmentEndTime(appointment, servizi));
+        return slotMinutes >= appointmentStartMinutes && slotMinutes < appointmentEndMinutes;
+      });
+    }).length;
+
+    const remainingBookableSlots = Math.max(bookableSlots.length - occupiedBookableSlots, 0);
+    const occupancyRatio =
+      bookableSlots.length > 0 ? occupiedBookableSlots / bookableSlots.length : 0;
+
+    if (bookableSlots.length === 0) {
+      return {
+        label: appuntamentiOggi.length > 0 ? 'Nessuno slot libero' : 'Disponibilità terminata',
         tone: styles.statusHot,
         textTone: styles.statusHotText,
       };
     }
 
-    if (appuntamentiOggi.length >= 2) {
+    if (remainingBookableSlots === 0) {
       return {
-        label: 'Buon ritmo',
+        label: 'Nessuno slot libero',
+        tone: styles.statusHot,
+        textTone: styles.statusHotText,
+      };
+    }
+
+    if (occupancyRatio >= 0.85 || remainingBookableSlots <= 2) {
+      return {
+        label: 'Quasi piena',
+        tone: styles.statusHot,
+        textTone: styles.statusHotText,
+      };
+    }
+
+    if (occupancyRatio >= 0.6 || remainingBookableSlots <= 5) {
+      return {
+        label: 'Disponibilità limitata',
         tone: styles.statusWarm,
         textTone: styles.statusWarmText,
       };
     }
 
+    if (appuntamentiOggi.length === 0) {
+      return {
+        label: 'Giornata libera',
+        tone: styles.statusCalm,
+        textTone: styles.statusCalmText,
+      };
+    }
+
     return {
-      label: 'Spazio libero',
+      label: 'Buona disponibilita',
       tone: styles.statusCalm,
       textTone: styles.statusCalmText,
     };
-  }, [appuntamentiOggi.length]);
+  }, [
+    styles,
+    appuntamentiOggi,
+    availabilitySettings,
+    currentTimeMinutes,
+    oggi,
+    servizi,
+  ]);
+
+  // Read-only Home indicators reuse the existing day-slot rules. They never authorize bookings.
+  const premiumOperationalMetrics = useMemo(() => {
+    const closed = getDateAvailabilityInfo(availabilitySettings, oggi).closed;
+    const slots = closed ? [] : buildDisplayTimeSlots(availabilitySettings, oggi).filter(time =>
+      !isTimeBlockedByLunchBreak(availabilitySettings, time, {dateValue:oggi}) &&
+      !isSlotBlockedByOverride(availabilitySettings, oggi, time));
+    const occupied = (time:string) => appuntamentiOggi.some(appointment => {
+      const minute=timeToMinutes(time);
+      return minute>=timeToMinutes(appointment.ora) && minute<timeToMinutes(getAppointmentEndTime(appointment,servizi));
+    });
+    const remaining = slots.filter(time=>timeToMinutes(time)>currentTimeMinutes && !occupied(time)).length;
+    const occupancy = slots.length ? Math.round(slots.filter(occupied).length/slots.length*100) : null;
+    const month=oggi.slice(0,7);
+    const hasClientDates=clienti.every(client=>client.createdAt && Number.isFinite(Date.parse(client.createdAt)));
+    const newClients=hasClientDates?clienti.filter(client=>{
+      const date=new Date(client.createdAt!);
+      return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}`===month;
+    }).length:null;
+    return {pending:richiestePrenotazione.filter(request=>request.stato==='In attesa' && request.data>=oggi).length,remaining,occupancy,newClients,closed};
+  },[availabilitySettings,oggi,appuntamentiOggi,servizi,currentTimeMinutes,clienti,richiestePrenotazione]);
+
+  const livelloOperativo = useMemo(() => {
+    return statoOperativoGiornata;
+  }, [statoOperativoGiornata]);
+  const dashboardStatusLabel = livelloOperativo.label;
+  const shouldHoldOwnerHomeData =
+    !ownerHomeDataSettled ||
+    (Platform.OS !== 'web' && (
+      !isAuthenticated || ownerExplicitLogout || ownerInitialDataHydrating ||
+      !ownerServerSyncReady || !ownerAppointmentsAuthoritative ||
+      !ownerMobileSessionAccessReady
+    ));
+  const shouldHoldDashboardSummaryMetrics = shouldHoldOwnerHomeData;
+  const shouldHoldTotalIncomeMetric = shouldHoldOwnerHomeData;
+  const shouldHoldAppointmentsTodayMetric = shouldHoldOwnerHomeData;
+  const shouldHoldToCollectMetric = shouldHoldOwnerHomeData;
+  const shouldHoldClientMetric = shouldHoldOwnerHomeData;
+  const shouldHoldBottomSummaryMetrics = shouldHoldOwnerHomeData;
+  const dashboardAppointmentsTodayLabel = String(appuntamentiOggi.length);
+  const dashboardToCollectLabel = String(appuntamentiOggi.filter(item => !item.incassato && !item.nonEffettuato).length);
+  const dashboardClientCountLabel = String(numeroClienti);
+  const dashboardTotalIncomeLabel = formatCash(cashActivity.confirmed);
+  const dashboardPendingCashLabel = formatCash(cashActivity.pending);
+  const dashboardLegacyCashLabel = formatCash(cashActivity.legacy);
+  const dashboardLastClientLabel = ultimoCliente
+    ? `Ultimo: ${ultimoCliente.nome}`
+    : clienti.length > 0 ? 'Ultima registrazione in sincronizzazione' : tApp(appLanguage, 'home_no_customer');
+  const dashboardCollectedAppointmentsLabel = String(appuntamentiIncassati);
+  const dashboardBookingsCountLabel = String(numeroAppuntamenti);
+  const dashboardToCollectAppointmentsCountLabel = String(appuntamentiDaIncassare);
+  const dashboardPriorityTitle = prossimoSlotPrioritario.hasMultiRole && prossimoSlotPrioritario.time
+      ? `${prossimoSlotPrioritario.time} · ${prossimoSlotPrioritario.appointments.length} priorità`
+    : prossimoAppuntamento
+      ? `${prossimoAppuntamento.ora} · ${prossimoAppuntamento.cliente}`
+      : 'Nessun prossimo appuntamento oggi';
+  const dashboardPriorityHint = prossimoSlotPrioritario.hasMultiRole
+      ? 'Stesso orario, mestieri diversi: scorri le priorità del prossimo slot.'
+    : prossimoAppuntamento
+      ? `${prossimoAppuntamento.servizio} · € ${prossimoAppuntamento.prezzo.toFixed(0)}`
+      : 'Hai chiuso tutti gli appuntamenti in agenda per oggi';
+  const priorityIndicatorScrollable = priorityContentHeight - priorityViewportHeight > 4;
+  const priorityIndicatorTrackHeight = Math.max(priorityViewportHeight - 8, 64);
+  const priorityIndicatorThumbHeight = priorityIndicatorScrollable
+    ? Math.max(
+        38,
+        Math.min(
+          priorityIndicatorTrackHeight,
+          (priorityViewportHeight / Math.max(priorityContentHeight, 1)) * priorityIndicatorTrackHeight
+        )
+      )
+    : Math.max(38, priorityIndicatorTrackHeight);
+  const priorityIndicatorMaxTravel = Math.max(
+    priorityIndicatorTrackHeight - priorityIndicatorThumbHeight,
+    0
+  );
+  const priorityIndicatorScrollRange = Math.max(priorityContentHeight - priorityViewportHeight, 1);
+
+  const priorityIndicatorThumbAnimatedStyle = useAnimatedStyle(() => {
+    const progress = Math.max(
+      0,
+      Math.min(priorityScrollOffset.value / priorityIndicatorScrollRange, 1)
+    );
+    const translateY = priorityIndicatorMaxTravel * progress;
+    const thumbWidth = priorityIndicatorActive.value > 0.5 ? 8 : 6;
+    const centeredOffset = (4 - thumbWidth) / 2;
+
+    return {
+      width: withTiming(thumbWidth, {
+        duration: 180,
+        easing: Easing.out(Easing.quad),
+      }),
+      transform: [
+        { translateY },
+        {
+          translateX: withTiming(centeredOffset, {
+            duration: 180,
+            easing: Easing.out(Easing.quad),
+          }),
+        },
+      ],
+      backgroundColor:
+        priorityIndicatorActive.value > 0.5
+          ? 'rgba(176, 182, 192, 0.94)'
+          : 'rgba(198, 203, 212, 0.88)',
+      shadowOpacity: withTiming(priorityIndicatorActive.value > 0.5 ? 0.24 : 0.12, {
+        duration: 180,
+        easing: Easing.out(Easing.quad),
+      }),
+      shadowRadius: withTiming(priorityIndicatorActive.value > 0.5 ? 10 : 6, {
+        duration: 180,
+        easing: Easing.out(Easing.quad),
+      }),
+      opacity: priorityIndicatorScrollable ? 1 : 0.65,
+    };
+  }, [
+    priorityIndicatorMaxTravel,
+    priorityIndicatorScrollRange,
+    priorityIndicatorScrollable,
+  ]);
 
   const operatorDailyBoards = useMemo(() => {
+    if (IS_ANDROID && !androidHomeSecondaryReady) {
+      return [];
+    }
+
     const pendingRequestsToday = richiestePrenotazione
       .filter((item) => item.data === oggi && item.stato === 'In attesa')
       .sort((first, second) => first.ora.localeCompare(second.ora));
@@ -443,7 +1360,7 @@ export default function HomeScreen() {
           timeline,
           totalAssigned: appointmentsToday.length + pendingRequests.length,
           openTasks: remainingAppointments + pendingRequests.length,
-          nextItem: timeline[0] ?? null,
+          nextItem: timeline.find((entry) => { const [hours, minutes] = entry.ora.split(':').map(Number); return hours * 60 + minutes >= currentTimeMinutes && (entry.tone === 'appointment' || entry.tone === 'request'); }) ?? null,
         };
       })
       .sort((first, second) => {
@@ -457,14 +1374,21 @@ export default function HomeScreen() {
 
         return first.operator.nome.localeCompare(second.operator.nome, 'it');
       });
-  }, [appuntamentiOggi, oggi, operatori, richiestePrenotazione]);
+  }, [
+    currentTimeMinutes,
+    androidHomeSecondaryReady,
+    appuntamentiOggi,
+    oggi,
+    operatori,
+    richiestePrenotazione,
+  ]);
 
-  const operatorsWithWorkToday = operatorDailyBoards.filter((item) => item.totalAssigned > 0).length;
   const totalOperatorOpenTasks = operatorDailyBoards.reduce((total, item) => total + item.openTasks, 0);
   const totalOperatorPendingRequests = operatorDailyBoards.reduce(
     (total, item) => total + item.pendingRequests.length,
     0
   );
+  const shouldHoldOperatorInsightMetrics = shouldHoldOwnerHomeData;
   const operatorBoardPreview = operatorDailyBoards.filter((item) => item.totalAssigned > 0).slice(0, 3);
   const visibleOperatorBoards = useMemo(
     () =>
@@ -488,10 +1412,268 @@ export default function HomeScreen() {
     () => operatorDailyBoards.find((item) => item.operator.id === selectedOperatorBoardId) ?? null,
     [operatorDailyBoards, selectedOperatorBoardId]
   );
+  const printableOperators = useMemo(
+    () =>
+      (selectedOperatorBoardId
+        ? operatori.filter((item) => item.id === selectedOperatorBoardId)
+        : operatori
+      ).slice().sort((first, second) => {
+        const firstRole = normalizeRoleName(first.mestiere ?? '');
+        const secondRole = normalizeRoleName(second.mestiere ?? '');
+
+        if (firstRole !== secondRole) {
+          if (!firstRole) return 1;
+          if (!secondRole) return -1;
+          return firstRole.localeCompare(secondRole, 'it', { sensitivity: 'base' });
+        }
+
+        return first.nome.localeCompare(second.nome, 'it', { sensitivity: 'base' });
+      }),
+    [operatori, selectedOperatorBoardId]
+  );
+  const operatorAgendaPrintRange = useMemo(() => {
+    if (operatorAgendaPrintScope === 'week') {
+      const startDate = getWeekStartIsoDate(oggi);
+      return {
+        startDate,
+        endDate: getWeekEndIsoDate(oggi),
+        label: formatOperatorAgendaScopeLabel({
+          scope: 'week',
+          startDate,
+          endDate: getWeekEndIsoDate(oggi),
+        }),
+      };
+    }
+
+    if (operatorAgendaPrintScope === 'month') {
+      const startDate = getMonthStartIsoDate(oggi);
+      const endDate = getMonthEndIsoDate(oggi);
+      return {
+        startDate,
+        endDate,
+        label: formatOperatorAgendaScopeLabel({
+          scope: 'month',
+          startDate,
+          endDate,
+        }),
+      };
+    }
+
+    return {
+      startDate: oggi,
+      endDate: oggi,
+      label: formatOperatorAgendaScopeLabel({
+        scope: 'day',
+        startDate: oggi,
+        endDate: oggi,
+      }),
+    };
+  }, [oggi, operatorAgendaPrintScope]);
+  const operatorAgendaPrintDays = useMemo(() => {
+    if (IS_ANDROID && !androidHomeSecondaryReady) {
+      return [];
+    }
+
+    const rangeDates = buildInclusiveDateRange(
+      operatorAgendaPrintRange.startDate,
+      operatorAgendaPrintRange.endDate
+    );
+
+    const matchingAppointments = appuntamenti
+      .filter((item) => {
+        const itemDate = item.data ?? oggi;
+        return (
+          itemDate >= operatorAgendaPrintRange.startDate &&
+          itemDate <= operatorAgendaPrintRange.endDate &&
+          printableOperators.some((operator) => isSameOperatorIdentity(item, operator))
+        );
+      })
+      .sort((first, second) => {
+        const firstDate = first.data ?? oggi;
+        const secondDate = second.data ?? oggi;
+        return firstDate === secondDate
+          ? first.ora.localeCompare(second.ora)
+          : firstDate.localeCompare(secondDate);
+      });
+
+    const matchingPendingRequests = richiestePrenotazione
+      .filter((item) => {
+        return (
+          item.stato === 'In attesa' &&
+          item.data >= operatorAgendaPrintRange.startDate &&
+          item.data <= operatorAgendaPrintRange.endDate &&
+          printableOperators.some((operator) => isSameOperatorIdentity(item, operator))
+        );
+      })
+      .sort((first, second) => {
+        return first.data === second.data
+          ? first.ora.localeCompare(second.ora)
+          : first.data.localeCompare(second.data);
+      });
+
+    const datesWithActivity = Array.from(
+      new Set([
+        ...matchingAppointments.map((item) => item.data ?? oggi),
+        ...matchingPendingRequests.map((item) => item.data),
+      ])
+    ).sort((first, second) => first.localeCompare(second));
+
+    const datesToRender =
+      operatorAgendaPrintScope === 'day'
+        ? rangeDates
+        : datesWithActivity.length > 0
+          ? datesWithActivity
+          : [operatorAgendaPrintRange.startDate];
+
+    return datesToRender.map((dateValue) => {
+      const dayAppointments = matchingAppointments.filter((item) => (item.data ?? oggi) === dateValue);
+      const dayRequests = matchingPendingRequests.filter((item) => item.data === dateValue);
+
+      const slots = Array.from(
+        new Set([
+          ...dayAppointments.map((item) => item.ora),
+          ...dayRequests.map((item) => item.ora),
+        ])
+      ).sort((first, second) => first.localeCompare(second));
+
+      const rows = slots.map((slotTime) => {
+        const cells = printableOperators.map((operator) => {
+          const appointmentBlocks = dayAppointments
+            .filter((item) => item.ora === slotTime && isSameOperatorIdentity(item, operator))
+            .map((item) => {
+              const roleLabel = resolveAppointmentRoleLabel({
+                appointment: item,
+                services: servizi,
+                operators: operatori,
+              });
+              const accent = getHomePriorityAccent(item.servizio, roleLabel);
+              const durationMinutes =
+                typeof item.durataMinuti === 'number' && item.durataMinuti > 0
+                  ? item.durataMinuti
+                  : servizi.find((service) => service.nome === item.servizio)?.durataMinuti ?? 30;
+              return {
+                id: `appointment-${item.id}`,
+                title: item.cliente,
+                serviceLabel: item.servizio,
+                timeLabel: `${item.ora} - ${getAppointmentEndTime(item, servizi)}`,
+                badge: item.nonEffettuato
+                  ? 'Non effettuato'
+                  : item.completato
+                    ? 'Completato'
+                    : item.incassato
+                      ? 'Incassato'
+                      : 'Da fare',
+                accent,
+                isRequest: false,
+                durationMinutes,
+              };
+            });
+
+          const requestBlocks = dayRequests
+            .filter((item) => item.ora === slotTime && isSameOperatorIdentity(item, operator))
+            .map((item) => {
+              const roleLabel = resolveAppointmentRoleLabel({
+                appointment: item,
+                services: servizi,
+                operators: operatori,
+              });
+              const accent = getHomePriorityAccent(item.servizio, roleLabel);
+              const durationMinutes =
+                typeof item.durataMinuti === 'number' && item.durataMinuti > 0
+                  ? item.durataMinuti
+                  : servizi.find((service) => service.nome === item.servizio)?.durataMinuti ?? 30;
+              return {
+                id: `request-${item.id}`,
+                title: `${item.nome} ${item.cognome}`.trim(),
+                serviceLabel: item.servizio,
+                timeLabel: `${item.ora} - ${getAppointmentEndTime(item, servizi)}`,
+                badge: 'In attesa',
+                accent,
+                isRequest: true,
+                durationMinutes,
+              };
+            });
+
+          const allBlocks = [...appointmentBlocks, ...requestBlocks];
+
+          return {
+            operator,
+            blocks: allBlocks,
+            slotAccent: allBlocks[0]?.accent ?? getHomePriorityAccent('', operator.mestiere),
+          };
+        });
+
+        const estimateBlockHeight = ({
+          durationMinutes,
+          title,
+          serviceLabel,
+        }: {
+          durationMinutes: number;
+          title: string;
+          serviceLabel: string;
+        }) => {
+          const normalizedDuration = Math.max(30, durationMinutes);
+          const extraHalfHours = Math.max(0, Math.ceil((normalizedDuration - 30) / 30));
+          const titleOverflowLines = Math.max(0, Math.ceil(title.length / 12) - 1);
+          const serviceOverflowLines = Math.max(0, Math.ceil(serviceLabel.length / 13) - 1);
+          return 68 + extraHalfHours * 16 + titleOverflowLines * 12 + serviceOverflowLines * 8;
+        };
+
+        return {
+          slotTime,
+          cells,
+          rowHeight: Math.max(
+            64,
+            ...cells.map((cell) => {
+              if (cell.blocks.length === 0) {
+                return 86;
+              }
+
+              return cell.blocks.reduce((total, block, blockIndex) => {
+                return (
+                  total +
+                  estimateBlockHeight({
+                    durationMinutes: block.durationMinutes,
+                    title: block.title,
+                    serviceLabel: block.serviceLabel,
+                  }) +
+                  (blockIndex > 0 ? 8 : 0)
+                );
+              }, 0);
+            })
+          ),
+        };
+      });
+
+      return {
+        date: dateValue,
+        rows,
+        appointmentsCount: dayAppointments.length,
+        requestsCount: dayRequests.length,
+      };
+    });
+  }, [
+    appuntamenti,
+    androidHomeSecondaryReady,
+    getHomePriorityAccent,
+    oggi,
+    operatorAgendaPrintRange.endDate,
+    operatorAgendaPrintRange.startDate,
+    operatorAgendaPrintScope,
+    operatori,
+    printableOperators,
+    richiestePrenotazione,
+    servizi,
+  ]);
 
   const customerInsightBoards = useMemo(() => {
+    if (IS_ANDROID && !androidHomeSecondaryReady) {
+      return [];
+    }
+
     return clienti
-      .map((customer) => {
+      .map((customer, customerIndex) => {
+        const boardKey = buildCustomerInsightIdentityKey(customer, customerIndex);
         const customerAppointments = appuntamenti
           .filter((item) => isSameCustomerIdentity(item, customer))
           .sort((first, second) => {
@@ -554,7 +1736,7 @@ export default function HomeScreen() {
             return second.total - first.total;
           });
 
-        const timeline = customerAppointments.map((item) => {
+        const timeline = customerAppointments.map((item, appointmentIndex) => {
           const appointmentDate = item.data ?? oggi;
           const dateLabel = formatDateLabel(appointmentDate);
           const phase =
@@ -580,7 +1762,13 @@ export default function HomeScreen() {
               : 'past';
 
           return {
-            id: item.id,
+            id: [
+              item.id,
+              item.data ?? oggi,
+              item.ora,
+              item.servizio,
+              String(appointmentIndex),
+            ].join('|'),
             dateLabel,
             ora: item.ora,
             title: item.servizio,
@@ -592,6 +1780,7 @@ export default function HomeScreen() {
         });
 
         return {
+          boardKey,
           customer,
           customerAppointments,
           timeline,
@@ -621,31 +1810,31 @@ export default function HomeScreen() {
 
         return first.customer.nome.localeCompare(second.customer.nome, 'it');
       });
-  }, [appuntamenti, clienti, oggi]);
+  }, [androidHomeSecondaryReady, appuntamenti, clienti, oggi]);
 
-  const customerBoardsWithFuture = customerInsightBoards.filter((item) => item.futureAppointments > 0).length;
   const totalCustomerDeliveredSpend = customerInsightBoards.reduce(
     (total, item) => total + item.totalSpent,
     0
   );
-  const customerInsightPreview = customerInsightBoards.slice(0, 3);
+  const shouldHoldCustomerInsightMetrics = shouldHoldOwnerHomeData;
+  const totalCustomerDeliveredSpendCompact = `€${Math.round(totalCustomerDeliveredSpend).toLocaleString(
+    'it-IT'
+  )}`;
   const filteredCustomerInsightBoards = useMemo(() => {
-    const query = customerInsightSearchQuery.trim().toLocaleLowerCase('it-IT');
+    const query = lowerItalian(customerInsightSearchQuery.trim());
 
     if (!query) {
       return customerInsightBoards;
     }
 
     return customerInsightBoards.filter(({ customer, serviceStats }) => {
-      const searchableParts = [
+      const searchableParts = lowerItalian([
         customer.nome,
         customer.telefono,
         customer.email ?? '',
         customer.instagram ?? '',
         ...serviceStats.map((item) => item.serviceName),
-      ]
-        .join(' ')
-        .toLocaleLowerCase('it-IT');
+      ].join(' '));
 
       return searchableParts.includes(query);
     });
@@ -653,8 +1842,8 @@ export default function HomeScreen() {
 
   const selectedCustomerInsightBoard = useMemo(
     () =>
-      filteredCustomerInsightBoards.find((item) => item.customer.id === selectedCustomerInsightId) ??
-      customerInsightBoards.find((item) => item.customer.id === selectedCustomerInsightId) ??
+      filteredCustomerInsightBoards.find((item) => item.boardKey === selectedCustomerInsightId) ??
+      customerInsightBoards.find((item) => item.boardKey === selectedCustomerInsightId) ??
       filteredCustomerInsightBoards[0] ??
       null,
     [customerInsightBoards, filteredCustomerInsightBoards, selectedCustomerInsightId]
@@ -687,80 +1876,186 @@ export default function HomeScreen() {
   }, [customerAppointmentFilter, selectedCustomerInsightBoard]);
 
   useEffect(() => {
-    if (filteredCustomerInsightBoards.length === 0) {
-      if (selectedCustomerInsightId !== null) {
-        setSelectedCustomerInsightId(null);
-      }
-      return;
-    }
+    const nextSelectedCustomerInsightId =
+      filteredCustomerInsightBoards.length === 0
+        ? null
+        : !selectedCustomerInsightId ||
+            !filteredCustomerInsightBoards.some(
+              (item) => item.boardKey === selectedCustomerInsightId
+            )
+          ? filteredCustomerInsightBoards[0].boardKey
+          : selectedCustomerInsightId;
 
-    if (
-      !selectedCustomerInsightId ||
-      !filteredCustomerInsightBoards.some((item) => item.customer.id === selectedCustomerInsightId)
-    ) {
-      setSelectedCustomerInsightId(filteredCustomerInsightBoards[0].customer.id);
+    if (nextSelectedCustomerInsightId !== selectedCustomerInsightId) {
+      setSelectedCustomerInsightId(nextSelectedCustomerInsightId);
     }
   }, [filteredCustomerInsightBoards, selectedCustomerInsightId]);
 
   useEffect(() => {
-    setCustomerAppointmentFilter('all');
+    setCustomerAppointmentFilter((current) => (current === 'all' ? current : 'all'));
   }, [selectedCustomerInsightId]);
 
   const openCustomerInsightsModalForAll = useCallback(() => {
     setCustomerInsightSearchQuery('');
     setCustomerAppointmentFilter('all');
-    setSelectedCustomerInsightId(customerInsightBoards[0]?.customer.id ?? null);
+    setSelectedCustomerInsightId(customerInsightBoards[0]?.boardKey ?? null);
     setShowCustomerInsightsModal(true);
   }, [customerInsightBoards]);
 
-  const openCustomerInsightsModalForCustomer = useCallback((customerId: string) => {
+  const openCustomerInsightsModalForCustomer = useCallback((customerKey: string) => {
     setCustomerInsightSearchQuery('');
     setCustomerAppointmentFilter('all');
-    setSelectedCustomerInsightId(customerId);
+    setSelectedCustomerInsightId(customerKey);
     setShowCustomerInsightsModal(true);
   }, []);
 
   const buildOperatorAgendaPdfHtml = useCallback(() => {
-    const boards = visibleOperatorBoards;
     const title = selectedOperatorBoard
-      ? `Appuntamenti di ${selectedOperatorBoard.operator.nome}`
-      : 'Appuntamenti per operatore';
+      ? `Plancia appuntamenti · ${selectedOperatorBoard.operator.nome}`
+      : 'Plancia appuntamenti operatori';
 
-    const sectionsHtml = boards
-      .map((board) => {
-        const timelineHtml =
-          board.timeline.length === 0
-            ? '<div class="empty">Agenda libera oggi</div>'
-            : board.timeline
-                .map(
-                  (entry) => `
-                    <div class="row">
-                      <div class="time">${escapeHtml(entry.ora)}</div>
-                      <div class="content">
-                        <div class="top">
-                          <div class="title">${escapeHtml(entry.title)}</div>
-                          <div class="badge">${escapeHtml(entry.badge)}</div>
+    const resolveSlotTextScale = (value: string, thresholds: [number, number, number], sizes: [number, number, number, number]) => {
+      if (value.length <= thresholds[0]) return sizes[0];
+      if (value.length <= thresholds[1]) return sizes[1];
+      if (value.length <= thresholds[2]) return sizes[2];
+      return sizes[3];
+    };
+
+    const renderBlockBadgeClass = (badge: string) => {
+      if (badge === 'In attesa') return 'is-request';
+      if (badge === 'Completato') return 'is-done';
+      if (badge === 'Incassato') return 'is-cash';
+      if (badge === 'Non effettuato') return 'is-muted';
+      return 'is-default';
+    };
+    const splitWordsForSlot = (value: string) => {
+      const words = value
+        .split(/\s+/)
+        .map((word) => word.trim())
+        .filter(Boolean);
+
+      if (words.length === 0) {
+        return [''];
+      }
+
+      if (words.length === 1) {
+        return [words[0]];
+      }
+
+      return [words[0], words.slice(1).join(' ')];
+    };
+
+    const sectionsHtml = operatorAgendaPrintDays
+      .map((day) => {
+        const operatorHeaders = printableOperators
+          .map((operator) => {
+            const accent = getHomePriorityAccent('', operator.mestiere);
+            const nameFontSize = resolveSlotTextScale(operator.nome, [8, 12, 16], [12, 11, 10, 9]);
+            const roleFontSize = resolveSlotTextScale(operator.mestiere || 'Operatore', [8, 12, 16], [9, 8.3, 7.6, 7]);
+            return `
+              <div class="operator-head" style="background:${escapeHtml(blendHexWithWhite(accent.bg, 0.24))};border-color:${escapeHtml(accent.border)};">
+                <div class="operator-head-name" style="font-size:${nameFontSize}px;">${escapeHtml(operator.nome)}</div>
+                <div class="operator-head-role" style="font-size:${roleFontSize}px;">${escapeHtml(operator.mestiere || 'Operatore')}</div>
+              </div>
+            `;
+          })
+          .join('');
+
+        const rowsHtml =
+          day.rows.length === 0
+            ? `
+                <div class="empty-grid">
+                  Nessun appuntamento o richiesta nel periodo selezionato.
+                </div>
+              `
+            : day.rows
+                .map((row) => {
+                  const cellsHtml = row.cells
+                    .map((cell) => {
+                      const cellBg = blendHexWithWhite(cell.slotAccent.bg, 0.94);
+                      const cellEmptyBg = blendHexWithWhite(cell.slotAccent.bg, 0.9);
+                      const cellEmptyBorder = blendHexWithWhite(cell.slotAccent.border, 0.52);
+                      const blocksHtml = cell.blocks
+                        .map((block) => {
+                          const badgeFontSize = resolveSlotTextScale(block.badge, [8, 12, 18], [8, 7.5, 7, 6.5]);
+                          const timeFontSize = resolveSlotTextScale(block.timeLabel, [11, 13, 16], [8, 7.4, 6.8, 6.3]);
+                          const titleLines = splitWordsForSlot(block.title);
+                          const serviceLines = splitWordsForSlot(block.serviceLabel);
+                          const longestTitleLineLength = Math.max(...titleLines.map((line) => line.length));
+                          const longestServiceLineLength = Math.max(...serviceLines.map((line) => line.length));
+                          const titleFontSize = resolveSlotTextScale(
+                            'x'.repeat(Math.max(1, longestTitleLineLength)),
+                            [2, 4, 6],
+                            [10, 9, 8, 7]
+                          );
+                          const serviceFontSize = resolveSlotTextScale(
+                            'x'.repeat(Math.max(1, longestServiceLineLength)),
+                            [2, 4, 6],
+                            [8, 7.3, 6.7, 6.1]
+                          );
+                          return `
+                            <div
+                              class="slot-block ${renderBlockBadgeClass(block.badge)}"
+                              style="background:${escapeHtml(blendHexWithWhite(block.accent.bg, 0.32))};border-color:${escapeHtml(block.accent.border)};"
+                            >
+                              <div class="slot-block-badge" style="font-size:${badgeFontSize}px;">${escapeHtml(block.badge)}</div>
+                              <div class="slot-block-time" style="font-size:${timeFontSize}px;">${escapeHtml(block.timeLabel.split(' - ')[0] ?? row.slotTime)}</div>
+                              <div class="slot-block-time" style="font-size:${timeFontSize}px;">${escapeHtml(block.timeLabel.split(' - ')[1] ?? '')}</div>
+                              <div class="slot-block-title-group">
+                                ${titleLines
+                                  .map(
+                                    (line) =>
+                                      `<div class="slot-block-title" style="font-size:${titleFontSize}px;">${escapeHtml(line)}</div>`
+                                  )
+                                  .join('')}
+                              </div>
+                              <div class="slot-block-service-group">
+                                ${serviceLines
+                                  .map(
+                                    (line) =>
+                                      `<div class="slot-block-service" style="font-size:${serviceFontSize}px;">${escapeHtml(line)}</div>`
+                                  )
+                                  .join('')}
+                              </div>
+                            </div>
+                          `;
+                        })
+                        .join('');
+
+                      return `
+                        <div class="grid-cell" style="min-height:${Math.max(86, row.rowHeight)}px;background:${escapeHtml(cellBg)};">
+                          ${blocksHtml || `<div class="grid-cell-empty" style="background:${escapeHtml(cellEmptyBg)};border-color:${escapeHtml(cellEmptyBorder)};"></div>`}
                         </div>
-                        <div class="subtitle">${escapeHtml(entry.subtitle)}</div>
-                      </div>
+                      `;
+                    })
+                    .join('');
+
+                  return `
+                    <div class="grid-row" style="min-height:${Math.max(86, row.rowHeight)}px;">
+                      <div class="time-cell">${escapeHtml(row.slotTime)}</div>
+                      ${cellsHtml}
                     </div>
-                  `
-                )
+                  `;
+                })
                 .join('');
 
         return `
-          <section class="board">
-            <div class="board-header">
-              <div>
-                <div class="name">${escapeHtml(board.operator.nome)}</div>
-                <div class="role">${escapeHtml(board.operator.mestiere)}</div>
-              </div>
-              <div class="counters">
-                <div class="counter strong">${board.openTasks} da fare</div>
-                <div class="counter">${board.totalAssigned} totali</div>
+          <section class="day-sheet">
+            <div class="day-sheet-header">
+              <div class="day-sheet-title">${escapeHtml(formatLongDateLabel(day.date))}</div>
+              <div class="day-sheet-meta">${escapeHtml(formatDateLabel(day.date))}</div>
+              <div class="day-sheet-stats">
+                <div class="day-pill">${day.appointmentsCount} appuntamenti</div>
+                <div class="day-pill">${day.requestsCount} richieste</div>
               </div>
             </div>
-            ${timelineHtml}
+            <div class="agenda-grid">
+              <div class="grid-header">
+                <div class="time-head">Ora</div>
+                ${operatorHeaders}
+              </div>
+              ${rowsHtml}
+            </div>
           </section>
         `;
       })
@@ -771,43 +2066,306 @@ export default function HomeScreen() {
         <head>
           <meta charset="utf-8" />
           <style>
-            body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; padding: 24px; color: #0f172a; }
-            h1 { margin: 0 0 6px; font-size: 28px; }
-            .meta { margin-bottom: 24px; color: #64748b; font-size: 14px; }
-            .board { border: 1px solid #dbe4ef; border-radius: 18px; padding: 16px; margin-bottom: 16px; }
-            .board-header { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
-            .name { font-size: 20px; font-weight: 800; }
-            .role { font-size: 13px; color: #64748b; font-weight: 700; }
-            .counters { text-align: right; }
-            .counter { font-size: 12px; color: #475569; margin-bottom: 4px; font-weight: 700; }
-            .counter.strong { color: #14532d; font-size: 13px; font-weight: 800; }
-            .row { display: flex; gap: 10px; margin-bottom: 10px; }
-            .time { min-width: 72px; border: 1px solid #dbe4ef; border-radius: 12px; padding: 10px 8px; text-align: center; font-weight: 800; background: #f8fafc; }
-            .content { flex: 1; border: 1px solid #dbe4ef; border-radius: 14px; padding: 10px 12px; background: #f8fafc; }
-            .top { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 4px; align-items: center; }
-            .title { font-size: 15px; font-weight: 800; }
-            .subtitle { font-size: 12px; color: #64748b; font-weight: 700; }
-            .badge { font-size: 11px; font-weight: 800; color: #0c4a6e; background: #e0f2fe; border-radius: 999px; padding: 6px 10px; white-space: nowrap; }
-            .empty { border: 1px dashed #cbd5e1; border-radius: 14px; padding: 14px; color: #64748b; font-weight: 700; text-align: center; background: #f8fafc; }
+            @page { size: A4 portrait; margin: 8mm; }
+            * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+            html, body { margin: 0; padding: 0; background: #ffffff; color: #17223b; font-family: -apple-system, BlinkMacSystemFont, sans-serif; }
+            body { padding: 10px; }
+            .report-shell { width: 100%; }
+            .report-top { display: grid; grid-template-columns: 1fr auto; gap: 16px; align-items: start; }
+            .report-kicker { font-size: 10px; line-height: 1; font-weight: 900; letter-spacing: 0.28em; text-transform: uppercase; color: #64748b; margin-bottom: 8px; }
+            h1 { margin: 0; font-size: 31px; line-height: 0.98; letter-spacing: -0.06em; font-weight: 900; color: #16213e; max-width: 420px; }
+            .report-meta { margin-top: 10px; font-size: 14px; line-height: 1.2; color: #475569; font-weight: 800; }
+            .report-badges { display: grid; gap: 10px; justify-items: end; }
+            .report-badge {
+              min-width: 190px;
+              border: 1px solid #d8e3f1;
+              border-radius: 999px;
+              padding: 10px 16px;
+              font-size: 10px;
+              line-height: 1.2;
+              color: #334155;
+              font-weight: 900;
+              background: #ffffff;
+              text-align: center;
+            }
+            .report-divider { margin: 14px 0 18px; height: 2px; background: #e2e8f0; }
+            .day-sheet {
+              border: 1px solid #d7e2ef;
+              border-radius: 22px;
+              overflow: hidden;
+              background: #ffffff;
+              break-inside: avoid;
+              page-break-inside: avoid;
+              margin-bottom: 18px;
+            }
+            .day-sheet-header {
+              display: grid;
+              grid-template-columns: 1fr auto;
+              gap: 12px;
+              align-items: center;
+              padding: 16px 18px 14px;
+              background: linear-gradient(180deg, #f4f8ff 0%, #edf4ff 100%);
+              border-bottom: 1px solid #dce6f3;
+            }
+            .day-sheet-title { font-size: 24px; line-height: 1.05; font-weight: 900; color: #16213e; margin-bottom: 4px; }
+            .day-sheet-meta { font-size: 12px; line-height: 1.2; color: #64748b; font-weight: 900; letter-spacing: 0.06em; }
+            .day-sheet-stats { display: flex; gap: 10px; align-items: center; }
+            .day-pill {
+              border: 1px solid #d8e3f1;
+              border-radius: 999px;
+              padding: 10px 14px;
+              background: #ffffff;
+              color: #334155;
+              font-size: 10px;
+              line-height: 1.1;
+              font-weight: 900;
+              white-space: nowrap;
+            }
+            .agenda-grid { width: 100%; }
+            .grid-header, .grid-row {
+              display: grid;
+              grid-template-columns: 62px repeat(${Math.max(1, printableOperators.length)}, 1fr);
+            }
+            .time-head, .time-cell {
+              border-right: 1px solid #dce6f3;
+              border-bottom: 1px solid #dce6f3;
+              background: #ffffff;
+              color: #16213e;
+              font-weight: 900;
+              display: flex;
+              align-items: flex-start;
+              justify-content: center;
+              text-align: center;
+              padding: 12px 6px;
+              font-size: 12px;
+            }
+            .time-head { align-items: center; justify-content: center; font-size: 14px; }
+            .operator-head {
+              border-right: 1px solid #dce6f3;
+              border-bottom: 1px solid #dce6f3;
+              min-height: 50px;
+              padding: 8px 7px 6px;
+              text-align: center;
+              box-shadow: inset 0 1px 0 rgba(255,255,255,0.85);
+            }
+            .operator-head-name {
+              line-height: 1.02;
+              font-weight: 900;
+              color: #16213e;
+              margin-bottom: 4px;
+              white-space: nowrap;
+              overflow: hidden;
+              text-overflow: ellipsis;
+            }
+            .operator-head-role {
+              line-height: 1;
+              font-weight: 900;
+              color: #334155;
+              text-transform: uppercase;
+              letter-spacing: 0.16em;
+              white-space: nowrap;
+              overflow: hidden;
+              text-overflow: ellipsis;
+            }
+            .grid-cell {
+              border-right: 1px solid #dce6f3;
+              border-bottom: 1px solid #dce6f3;
+              padding: 7px 8px;
+              overflow: hidden;
+            }
+            .grid-cell-empty {
+              min-height: 100%;
+              height: 100%;
+              border-radius: 15px;
+              border: 1px solid #ebeff5;
+              box-shadow: inset 0 1px 0 rgba(255,255,255,0.95);
+              width: 100%;
+            }
+            .slot-block {
+              border: 1px solid;
+              border-radius: 15px;
+              padding: 7px 7px 7px;
+              color: #16213e;
+              margin-bottom: 6px;
+              min-height: 78px;
+              overflow: hidden;
+              width: 100%;
+              max-width: 100%;
+              box-shadow: inset 0 1px 0 rgba(255,255,255,0.55);
+            }
+            .slot-block:last-child { margin-bottom: 0; }
+            .slot-block-badge {
+              line-height: 1;
+              font-weight: 900;
+              letter-spacing: 0.14em;
+              text-transform: uppercase;
+              margin-bottom: 4px;
+              white-space: nowrap;
+              overflow: hidden;
+              text-overflow: ellipsis;
+            }
+            .slot-block-time {
+              line-height: 1;
+              font-weight: 900;
+              color: #16213e;
+              margin-bottom: 1px;
+              white-space: nowrap;
+              overflow: hidden;
+              text-overflow: ellipsis;
+            }
+            .slot-block-title {
+              line-height: 1.02;
+              font-weight: 900;
+              color: #16213e;
+              margin: 0 0 1px;
+              white-space: nowrap;
+              overflow: hidden;
+              text-overflow: ellipsis;
+              text-align: left;
+            }
+            .slot-block-service {
+              line-height: 1.08;
+              font-weight: 900;
+              color: #16213e;
+              white-space: nowrap;
+              overflow: hidden;
+              text-overflow: ellipsis;
+              text-align: left;
+              margin: 0 0 1px;
+            }
+            .slot-block-title-group { margin: 4px 0 2px; }
+            .slot-block-service-group { margin-top: 1px; }
+            .slot-block.is-default .slot-block-badge { color: #16213e; }
+            .slot-block.is-request .slot-block-badge { color: #92400e; }
+            .slot-block.is-done .slot-block-badge { color: #166534; }
+            .slot-block.is-cash .slot-block-badge { color: #3730a3; }
+            .slot-block.is-muted .slot-block-badge { color: #4b5563; }
+            .empty-grid {
+              padding: 28px;
+              text-align: center;
+              color: #64748b;
+              font-size: 13px;
+              font-weight: 800;
+              border-top: 1px solid #dce6f3;
+            }
           </style>
         </head>
         <body>
-          <h1>${escapeHtml(title)}</h1>
-          <div class="meta">${escapeHtml(formatDateLabel(oggi))} · ${escapeHtml(salonWorkspace.salonName || 'Salon Pro')}</div>
-          ${sectionsHtml}
+          <div class="report-shell">
+            <div class="report-top">
+              <div>
+                <div class="report-kicker">Agenda Operatori</div>
+                <h1>${escapeHtml(title)}</h1>
+                <div class="report-meta">${escapeHtml(salonWorkspace.salonName || 'Salon Pro')}</div>
+              </div>
+              <div class="report-badges">
+                <div class="report-badge">${escapeHtml(operatorAgendaPrintRange.label)}</div>
+                <div class="report-badge">${escapeHtml(printableOperators.length === 1 ? '1 operatore' : `${printableOperators.length} operatori`)}</div>
+              </div>
+            </div>
+            <div class="report-divider"></div>
+            ${sectionsHtml}
+          </div>
         </body>
       </html>
     `;
-  }, [oggi, salonWorkspace.salonName, selectedOperatorBoard, visibleOperatorBoards]);
+  }, [
+    getHomePriorityAccent,
+    operatorAgendaPrintDays,
+    operatorAgendaPrintRange.label,
+    printableOperators,
+    salonWorkspace.salonName,
+    selectedOperatorBoard,
+  ]);
 
   const exportOperatorAgendaPdf = useCallback(async () => {
-    if (visibleOperatorBoards.length === 0) {
+    if (printableOperators.length === 0) {
       Alert.alert('Niente da esportare', 'Non ci sono appuntamenti operatori da esportare in questo momento.');
       return;
     }
 
+    if (isOperatorAgendaSystemDialogOpen) {
+      return;
+    }
+
+    setIsOperatorAgendaSystemDialogOpen(true);
+
     try {
       const html = buildOperatorAgendaPdfHtml();
+      const fileName = [
+        'agenda-operatori',
+        selectedOperatorBoard ? sanitizeFileNameSegment(selectedOperatorBoard.operator.nome) : 'tutti',
+        operatorAgendaPrintRange.startDate === operatorAgendaPrintRange.endDate
+          ? operatorAgendaPrintRange.startDate
+          : `${operatorAgendaPrintRange.startDate}-${operatorAgendaPrintRange.endDate}`,
+      ]
+        .filter(Boolean)
+        .join('-')
+        .concat('.pdf');
+
+      if (Platform.OS === 'web') {
+        const parser = new DOMParser();
+        const parsedDocument = parser.parseFromString(html, 'text/html');
+        const previewWindow = window.open('', '_blank');
+        if (!previewWindow) {
+          throw new Error('Preview window blocked');
+        }
+
+        const previewBody = parsedDocument.body.innerHTML;
+        const previewStyles = parsedDocument.head.querySelector('style')?.textContent ?? '';
+
+        previewWindow.document.open();
+        previewWindow.document.write(`
+          <!doctype html>
+          <html>
+            <head>
+              <meta charset="utf-8" />
+              <meta name="viewport" content="width=device-width, initial-scale=1" />
+              <title>${fileName}</title>
+              <style>
+                html, body {
+                  margin: 0;
+                  padding: 0;
+                  background: #edf3fb;
+                }
+                body {
+                  min-height: 100vh;
+                  display: flex;
+                  justify-content: center;
+                  padding: 24px 0 48px;
+                }
+                .preview-page {
+                  width: 794px;
+                  max-width: 100%;
+                  background: #ffffff;
+                  box-shadow: 0 24px 80px rgba(15, 23, 42, 0.14);
+                }
+                @media print {
+                  html, body {
+                    background: #ffffff;
+                  }
+                  body {
+                    display: block;
+                    padding: 0;
+                  }
+                  .preview-page {
+                    width: auto;
+                    max-width: none;
+                    box-shadow: none;
+                  }
+                }
+              </style>
+              <style>${previewStyles}</style>
+            </head>
+            <body>
+              <div class="preview-page">${previewBody}</div>
+            </body>
+          </html>
+        `);
+        previewWindow.document.close();
+        return;
+      }
+
       const result = await Print.printToFileAsync({ html });
       if (await Sharing.isAvailableAsync()) {
         await Sharing.shareAsync(result.uri, {
@@ -822,28 +2380,95 @@ export default function HomeScreen() {
       }
     } catch {
       Alert.alert('Export non riuscito', 'Non sono riuscito a creare il PDF. Riprova tra qualche secondo.');
+    } finally {
+      setIsOperatorAgendaSystemDialogOpen(false);
     }
-  }, [buildOperatorAgendaPdfHtml, selectedOperatorBoard, visibleOperatorBoards.length]);
+  }, [
+    buildOperatorAgendaPdfHtml,
+    isOperatorAgendaSystemDialogOpen,
+    operatorAgendaPrintRange.endDate,
+    operatorAgendaPrintRange.startDate,
+    printableOperators.length,
+    selectedOperatorBoard,
+  ]);
 
   const printOperatorAgenda = useCallback(async () => {
-    if (visibleOperatorBoards.length === 0) {
+    if (printableOperators.length === 0) {
       Alert.alert('Niente da stampare', 'Non ci sono appuntamenti operatori da stampare in questo momento.');
       return;
     }
 
+    if (isOperatorAgendaSystemDialogOpen) {
+      return;
+    }
+
+    setIsOperatorAgendaSystemDialogOpen(true);
+
     try {
-      await Print.printAsync({ html: buildOperatorAgendaPdfHtml() });
+      const html = buildOperatorAgendaPdfHtml();
+      if (Platform.OS === 'web') {
+        const printFrame = document.createElement('iframe');
+        printFrame.style.position = 'fixed';
+        printFrame.style.right = '0';
+        printFrame.style.bottom = '0';
+        printFrame.style.width = '0';
+        printFrame.style.height = '0';
+        printFrame.style.border = '0';
+        printFrame.style.opacity = '0';
+        printFrame.setAttribute('aria-hidden', 'true');
+
+        const cleanup = () => {
+          window.setTimeout(() => {
+            if (document.body.contains(printFrame)) {
+              document.body.removeChild(printFrame);
+            }
+          }, 300);
+        };
+
+        printFrame.onload = () => {
+          const frameWindow = printFrame.contentWindow;
+          if (!frameWindow) {
+            cleanup();
+            return;
+          }
+
+          frameWindow.onafterprint = cleanup;
+          frameWindow.focus();
+          frameWindow.print();
+        };
+
+        document.body.appendChild(printFrame);
+        const frameDocument = printFrame.contentDocument;
+        if (!frameDocument) {
+          cleanup();
+          throw new Error('Print frame unavailable');
+        }
+
+        frameDocument.open();
+        frameDocument.write(html);
+        frameDocument.close();
+        return;
+      }
+
+      await Print.printAsync({ html });
     } catch {
       Alert.alert('Stampa non riuscita', 'Non sono riuscito ad aprire l’anteprima di stampa.');
+    } finally {
+      setIsOperatorAgendaSystemDialogOpen(false);
     }
-  }, [buildOperatorAgendaPdfHtml, visibleOperatorBoards.length]);
+  }, [buildOperatorAgendaPdfHtml, isOperatorAgendaSystemDialogOpen, printableOperators.length]);
 
   useEffect(() => {
-    setAccountEmailInput(salonAccountEmail);
+    setAccountEmailInput((current) => (current === salonAccountEmail ? current : salonAccountEmail));
   }, [salonAccountEmail]);
 
   useEffect(() => {
     if (!ownerProfileNeedsCompletion) {
+      hasConsumedOwnerProfileCompletionRef.current = false;
+      return;
+    }
+
+    if (hasConsumedOwnerProfileCompletionRef.current) {
       return;
     }
 
@@ -851,6 +2476,7 @@ export default function HomeScreen() {
       return;
     }
 
+    hasConsumedOwnerProfileCompletionRef.current = true;
     setShowProfileSection(true);
     setIsEditingSalonProfile(true);
 
@@ -869,16 +2495,32 @@ export default function HomeScreen() {
       return;
     }
 
-    setSalonNameInput(salonWorkspace.salonName);
-    setSalonNameDisplayStyleInput(salonWorkspace.salonNameDisplayStyle);
-    setSalonNameFontVariantInput(salonWorkspace.salonNameFontVariant);
-    setBusinessPhoneInput(salonWorkspace.businessPhone);
-    setActivityCategoryInput(toUppercaseField(salonWorkspace.activityCategory));
-    setStreetLineInput(
-      [salonWorkspace.streetType, salonWorkspace.streetName].filter(Boolean).join(' ').trim()
+    const nextActivityCategory = toUppercaseField(salonWorkspace.activityCategory);
+    const nextStreetLine = [salonWorkspace.streetType, salonWorkspace.streetName]
+      .filter(Boolean)
+      .join(' ')
+      .trim();
+    const nextCity = toUppercaseField(salonWorkspace.city);
+
+    setSalonNameInput((current) => (current === salonWorkspace.salonName ? current : salonWorkspace.salonName));
+    setSalonNameDisplayStyleInput((current) =>
+      current === salonWorkspace.salonNameDisplayStyle ? current : salonWorkspace.salonNameDisplayStyle
     );
-    setCityInput(toUppercaseField(salonWorkspace.city));
-    setPostalCodeInput(salonWorkspace.postalCode);
+    setSalonNameFontVariantInput((current) =>
+      current === salonWorkspace.salonNameFontVariant ? current : salonWorkspace.salonNameFontVariant
+    );
+    setAdditionalPhonesInput(salonWorkspace.additionalPhones?.length ? salonWorkspace.additionalPhones : ['']);
+    setBusinessPhoneInput((current) =>
+      current === salonWorkspace.businessPhone ? current : salonWorkspace.businessPhone
+    );
+    setActivityCategoryInput((current) =>
+      current === nextActivityCategory ? current : nextActivityCategory
+    );
+    setStreetLineInput((current) => (current === nextStreetLine ? current : nextStreetLine));
+    setCityInput((current) => (current === nextCity ? current : nextCity));
+    setPostalCodeInput((current) =>
+      current === salonWorkspace.postalCode ? current : salonWorkspace.postalCode
+    );
   }, [
     salonWorkspace.activityCategory,
     salonWorkspace.businessPhone,
@@ -911,22 +2553,14 @@ export default function HomeScreen() {
     const invalidFields: string[] = [];
 
     if (!isValidPhone10(businessPhoneInput)) {
-      invalidFields.push('Numero di telefono errato (deve avere 10 cifre)');
-    }
-
-    if (accountEmailInput.trim() && !isValidEmail(accountEmailInput)) {
-      invalidFields.push('Email non valida');
+      invalidFields.push('Numero di telefono errato (deve avere 9 o 10 cifre)');
     }
 
     if (invalidFields.length > 0) {
       setProfileFieldErrors({
         businessPhone: !isValidPhone10(businessPhoneInput)
-          ? 'Numero di telefono errato (deve avere 10 cifre)'
+          ? 'Numero di telefono errato (deve avere 9 o 10 cifre)'
           : undefined,
-        accountEmail:
-          accountEmailInput.trim() && !isValidEmail(accountEmailInput)
-            ? 'Email non valida'
-            : undefined,
       });
       Alert.alert('Campi non validi', buildInvalidFieldsMessage(invalidFields));
       return;
@@ -946,22 +2580,27 @@ export default function HomeScreen() {
         salonAddress: '',
       });
 
-      await updateSalonWorkspacePersisted((current) => ({
-        ...current,
-        salonName: salonNameInput.trim(),
-        salonNameDisplayStyle: salonNameDisplayStyleInput,
-        salonNameFontVariant: salonNameFontVariantInput,
-        ownerEmail: accountEmailInput.trim().toLowerCase(),
-        businessPhone: businessPhoneInput.trim(),
-        activityCategory: toUppercaseField(activityCategoryInput.trim()),
-        streetType: '',
-        streetName: toUppercaseField(streetLineInput.trim()),
-        streetNumber: '',
-        city: toUppercaseField(cityInput.trim()),
-        postalCode: postalCodeInput.trim(),
-        salonAddress: formattedAddress,
-        updatedAt: new Date().toISOString(),
-      }));
+      await updateSalonWorkspacePersisted(
+        (current) => ({
+          ...current,
+          salonName: salonNameInput.trim(),
+          salonNameDisplayStyle: salonNameDisplayStyleInput,
+          salonNameFontVariant: salonNameFontVariantInput,
+          // Account identity is not editable through the salon profile.
+          ownerEmail: current.ownerEmail,
+          businessPhone: businessPhoneInput.trim(),
+          additionalPhones: additionalPhonesInput.map((value) => value.trim()).filter((value, index) => index === 0 || !!value),
+          activityCategory: toUppercaseField(activityCategoryInput.trim()),
+          streetType: '',
+          streetName: toUppercaseField(streetLineInput.trim()),
+          streetNumber: '',
+          city: toUppercaseField(cityInput.trim()),
+          postalCode: postalCodeInput.trim(),
+          salonAddress: formattedAddress,
+          updatedAt: new Date().toISOString(),
+        }),
+        { requireRemoteProfileConfirmation: true },
+      );
 
       setSavingSalon(false);
 
@@ -970,10 +2609,14 @@ export default function HomeScreen() {
         'Dati salone aggiornati. La pubblicazione verso il portale cliente avviene automaticamente.'
       );
       setIsEditingSalonProfile(false);
+      returnToProfileAfterSaveRef.current = true;
       setShowProfileSection(false);
     } catch (e: any) {
       setSavingSalon(false);
-      Alert.alert('Errore generale', e.message ?? 'Errore durante il salvataggio');
+      Alert.alert(
+        'Salvataggio non completato',
+        e.message ?? 'Errore durante il salvataggio',
+      );
     }
   };
 
@@ -1123,6 +2766,7 @@ const normalizedSalonCode = useMemo(
   () => normalizeSalonCode(salonWorkspace.salonCode),
   [salonWorkspace.salonCode]
 );
+const displaySalonCode = useSalonShortCode(salonWorkspace.salonCode);
 const clientAccessDisplayName = useMemo(
   () => {
     const explicitSalonName = salonWorkspace.salonName.trim();
@@ -1151,9 +2795,13 @@ const clientQrValue =
   publicClientLinkHealth === 'ready'
     ? salonClientLink
     : 'https://configura-public-client-base-url.invalid';
+  const salonQrWordmarkUri = useMemo(
+    () => resolveBundledAssetUri(require('../../assets/images/salon-pro-logo-ui.png')),
+    []
+  );
   const canShareClientAccess = publicClientLinkStatus.canShare;
   const clientAccessStatusCopy = publicClientLinkStatus.message;
-  const contentTopPadding = Math.max(insets.top + 16, 54);
+  const contentTopPadding = Platform.OS === 'web' ? 8 : 54;
 
 const openFrontendPreviewForAdmin = useCallback(() => {
   router.push({
@@ -1168,13 +2816,34 @@ const openQrPrintPreview = useCallback(() => {
     return;
   }
 
-  router.push({
-    pathname: '/stampa-qr',
-    params: {
-      salon: salonWorkspace.salonCode,
-      name: clientAccessDisplayName,
-      link: salonClientLink,
-    },
+  if (Platform.OS === 'web') {
+    router.push({
+      pathname: '/stampa-qr',
+      params: {
+        salon: displaySalonCode,
+        name: clientAccessDisplayName,
+        link: salonClientLink,
+      },
+    });
+    return;
+  }
+
+  if (!clientQrPrintRef.current) {
+    Alert.alert('QR non pronto', 'Attendi un istante e riprova.');
+    return;
+  }
+
+  clientQrPrintRef.current.toDataURL((qrImageBase64) => {
+    const html = buildSalonQrPrintHtml({
+      qrImageBase64,
+      salonCode: displaySalonCode,
+      salonName: clientAccessDisplayName,
+      wordmarkUri: salonQrWordmarkUri,
+    });
+
+    Print.printAsync({ html }).catch(() => {
+      Alert.alert('Stampa non riuscita', 'Non sono riuscito ad aprire la stampa. Riprova tra qualche secondo.');
+    });
   });
 }, [
   canShareClientAccess,
@@ -1182,6 +2851,8 @@ const openQrPrintPreview = useCallback(() => {
   clientAccessStatusCopy,
   router,
   salonClientLink,
+  salonQrWordmarkUri,
+  displaySalonCode,
   salonWorkspace.salonCode,
 ]);
 
@@ -1212,7 +2883,7 @@ const openQrPrintPreview = useCallback(() => {
           salonClientLink,
         }),
       });
-    } catch (error) {
+    } catch {
       Alert.alert(
         'Condivisione non riuscita',
         'Non è stato possibile aprire la condivisione. Riprova tra qualche secondo.'
@@ -1220,723 +2891,29 @@ const openQrPrintPreview = useCallback(() => {
     }
   };
 
-  if (loadingSalon) {
-    return (
-      <View style={styles.container}>
-        <View style={[styles.content, styles.loadingWrap]}>
-          <ActivityIndicator size="large" />
-          <Text style={styles.loadingText}>Caricamento salone...</Text>
-        </View>
-      </View>
-    );
-  }
 
-  return (
-    <View style={styles.container}>
-      <ScrollView
-        ref={scrollRef}
-        style={styles.container}
-        contentContainerStyle={[
-          styles.content,
-          { paddingTop: contentTopPadding },
-          { paddingHorizontal: responsive.horizontalPadding },
-        ]}
-        showsVerticalScrollIndicator
-        indicatorStyle="black"
-        scrollIndicatorInsets={{ right: 2 }}
-        contentInsetAdjustmentBehavior="never"
-        keyboardDismissMode="on-drag"
-        onScrollBeginDrag={Keyboard.dismiss}
-      >
-        <View style={[styles.pageShell, { maxWidth: responsive.contentMaxWidth }]}>
-        <View style={styles.heroCard}>
-          <ModuleHeroHeader
-            moduleKey="index"
-            title={tApp(appLanguage, 'tab_home')}
-            salonName={salonNameInput || salonWorkspace.salonName}
-            salonNameDisplayStyle={salonNameDisplayStyleInput}
-            salonNameFontVariant={salonNameFontVariantInput}
-            onTitleLongPress={() => setShowAdminPanel((current) => !current)}
-          />
-
-          <Text style={styles.subtitle}>{tApp(appLanguage, 'home_subtitle')}</Text>
-
-          <View style={styles.heroTopRow}>
-            <View style={[styles.heroMetaCard, styles.heroMetaCardToday]}>
-              <Text style={[styles.heroDateLabel, styles.heroDateLabelToday]}>{tApp(appLanguage, 'common_today')}</Text>
-              <Text
-                style={[styles.heroDateValue, styles.heroDateValueToday]}
-                numberOfLines={1}
-                adjustsFontSizeToFit
-                minimumFontScale={0.72}
-              >
-                {formatDateLabel(oggi)}
-              </Text>
-            </View>
-
-            <View style={[styles.heroMetaCard, styles.heroStatusCard, livelloOperativo.tone]}>
-              <Text
-                style={[styles.statusPillText, livelloOperativo.textTone]}
-                numberOfLines={1}
-                adjustsFontSizeToFit
-                minimumFontScale={0.74}
-              >
-                {livelloOperativo.label}
-              </Text>
-            </View>
-          </View>
-
-          <View style={styles.heroMetricsRow}>
-            <View style={styles.heroMetricCardBlue}>
-              <Text
-                numberOfLines={1}
-                adjustsFontSizeToFit
-                minimumFontScale={0.72}
-                style={[styles.heroMetricNumber, styles.heroMetricNumberBlue]}
-              >
-                {appuntamentiOggi.length}
-              </Text>
-              <Text
-                style={[styles.heroMetricLabel, styles.heroMetricLabelBlue]}
-                numberOfLines={1}
-                adjustsFontSizeToFit
-                minimumFontScale={0.68}
-              >
-                {tApp(appLanguage, 'home_appointments_today')}
-              </Text>
-            </View>
-
-            <View style={styles.heroMetricCardRose}>
-              <Text
-                numberOfLines={1}
-                adjustsFontSizeToFit
-                minimumFontScale={0.72}
-                style={[styles.heroMetricNumber, styles.heroMetricNumberRose]}
-              >
-                € {valoreDaIncassare.toFixed(0)}
-              </Text>
-              <Text
-                style={[styles.heroMetricLabel, styles.heroMetricLabelRose]}
-                numberOfLines={1}
-                adjustsFontSizeToFit
-                minimumFontScale={0.68}
-              >
-                {tApp(appLanguage, 'home_to_collect')}
-              </Text>
-            </View>
-          </View>
-          <View style={styles.insightGrid}>
-            <View
-              style={[
-                styles.insightCard,
-                responsive.isTablet && styles.halfWidthCard,
-                responsive.isDesktop && styles.desktopThirdCard,
-              ]}
-            >
-              <Text style={[styles.insightTitle, styles.insightTitlePlum]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>{tApp(appLanguage, 'tab_clients')}</Text>
-              <Text
-                numberOfLines={1}
-                adjustsFontSizeToFit
-                minimumFontScale={0.72}
-                style={[styles.insightNumber, styles.insightNumberPlum]}
-              >
-                {numeroClienti}
-              </Text>
-              <Text style={[styles.insightHint, styles.insightHintPlum]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.64}>
-                {ultimoCliente
-                  ? `Ultimo: ${ultimoCliente.nome}`
-                  : tApp(appLanguage, 'home_no_customer')}
-              </Text>
-            </View>
-
-            <View
-              style={[
-                styles.insightCardMint,
-                responsive.isTablet && styles.halfWidthCard,
-                responsive.isDesktop && styles.desktopThirdCard,
-              ]}
-            >
-              <Text style={[styles.insightTitle, styles.insightTitleMint]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>{tApp(appLanguage, 'home_total_income')}</Text>
-              <Text
-                numberOfLines={1}
-                adjustsFontSizeToFit
-                minimumFontScale={0.72}
-                style={[styles.insightNumber, styles.insightNumberMint]}
-              >
-                € {incassoTotale.toFixed(0)}
-              </Text>
-              <Text style={[styles.insightHint, styles.insightHintMint]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.64}>
-                {tApp(appLanguage, 'home_registered_movements')}
-              </Text>
-            </View>
-          </View>
-
-          <View style={[styles.priorityCard, responsive.isDesktop && styles.desktopPriorityCard]}>
-            <Text style={styles.priorityEyebrow}>{tApp(appLanguage, 'home_next_priority')}</Text>
-            <Text
-              style={[
-                styles.priorityTitle,
-                !prossimoAppuntamento && styles.priorityTitleFallback,
-              ]}
-              numberOfLines={2}
-              adjustsFontSizeToFit
-              minimumFontScale={0.46}
-              ellipsizeMode="clip"
-            >
-              {prossimoAppuntamento
-                ? `${prossimoAppuntamento.ora} · ${prossimoAppuntamento.cliente}`
-                : tApp(appLanguage, 'home_no_appointment_today')}
-            </Text>
-            <Text
-              style={styles.priorityText}
-              numberOfLines={2}
-              adjustsFontSizeToFit
-              minimumFontScale={0.76}
-              ellipsizeMode="clip"
-            >
-              {prossimoAppuntamento
-                ? `${prossimoAppuntamento.servizio} · € ${prossimoAppuntamento.prezzo.toFixed(2)}`
-                : tApp(appLanguage, 'home_free_today')}
-            </Text>
-          </View>
-
-          <View style={styles.sectionRow}>
-            <View style={[styles.infoCardSun, responsive.isTablet && styles.infoCardResponsive]}>
-              <Text style={[styles.infoLabel, styles.infoLabelSun]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.58}>{tApp(appLanguage, 'home_collected')}</Text>
-              <Text
-                numberOfLines={1}
-                adjustsFontSizeToFit
-                minimumFontScale={0.72}
-                style={[styles.infoValue, styles.infoValueSun]}
-              >
-                {appuntamentiIncassati}
-              </Text>
-            </View>
-
-            <View
-              style={[styles.infoCardLavender, responsive.isTablet && styles.infoCardResponsive]}
-            >
-              <Text style={[styles.infoLabel, styles.infoLabelLavender]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.58}>{tApp(appLanguage, 'home_bookings')}</Text>
-              <Text
-                numberOfLines={1}
-                adjustsFontSizeToFit
-                minimumFontScale={0.72}
-                style={[styles.infoValue, styles.infoValueLavender]}
-              >
-                {numeroAppuntamenti}
-              </Text>
-            </View>
-
-            <View style={[styles.infoCardPeach, responsive.isTablet && styles.infoCardResponsive]}>
-              <Text style={[styles.infoLabel, styles.infoLabelPeach]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.58}>{tApp(appLanguage, 'home_to_collect')}</Text>
-              <Text
-                numberOfLines={1}
-                adjustsFontSizeToFit
-                minimumFontScale={0.72}
-                style={[styles.infoValue, styles.infoValuePeach]}
-              >
-                {appuntamentiDaIncassare}
-              </Text>
-            </View>
-          </View>
-        </View>
-
-        <HapticTouchable
-          style={[
-            styles.qrJumpButton,
-            responsive.isDesktop && styles.desktopWideCard,
-          ]}
-          onPress={scrollToQrSection}
-          pressScale={0.985}
-          pressOpacity={0.98}
-        >
-          <Ionicons name="qr-code-outline" size={18} color="#FFFFFF" />
-          <Text style={styles.qrJumpButtonText}>Vai alla sezione condividi QR-code</Text>
-        </HapticTouchable>
-
-        <View
-          style={[
-            styles.sectionCard,
-            styles.operatorAgendaCard,
-            responsive.isDesktop && styles.desktopWideCard,
-          ]}
-        >
-          <View style={styles.operatorAgendaCardHeader}>
-            <View style={styles.operatorAgendaCardTextWrap}>
-              <Text
-                style={styles.operatorAgendaCardTitle}
-                numberOfLines={1}
-                ellipsizeMode="clip"
-                adjustsFontSizeToFit
-                minimumFontScale={0.74}
-              >
-                Appuntamenti per operatore
-              </Text>
-              <Text
-                style={styles.operatorAgendaCardText}
-                numberOfLines={1}
-                ellipsizeMode="clip"
-                adjustsFontSizeToFit
-                minimumFontScale={0.66}
-              >
-                Quadro live del lavoro di oggi. Tocca la card per aprire il popup dettagliato.
-              </Text>
-            </View>
-            <HapticTouchable
-              style={styles.operatorAgendaCardAction}
-              onPress={openOperatorAgendaModalForAll}
-              pressScale={0.98}
-              pressOpacity={0.96}
-            >
-              <Text style={styles.operatorAgendaCardActionText}>Apri</Text>
-              <Ionicons name="chevron-forward" size={18} color="#1E293B" />
-            </HapticTouchable>
-          </View>
-
-          <View style={styles.operatorAgendaStatsRow}>
-            <View style={[styles.operatorAgendaStatPill, styles.operatorAgendaStatPillSky]}>
-              <Text
-                style={styles.operatorAgendaStatValue}
-                numberOfLines={1}
-                ellipsizeMode="clip"
-                adjustsFontSizeToFit
-                minimumFontScale={0.72}
-              >
-                {operatorsWithWorkToday}
-              </Text>
-              <Text
-                style={styles.operatorAgendaStatLabel}
-                numberOfLines={1}
-                ellipsizeMode="clip"
-                adjustsFontSizeToFit
-                minimumFontScale={0.6}
-              >
-                Operatori attivi
-              </Text>
-            </View>
-            <View style={[styles.operatorAgendaStatPill, styles.operatorAgendaStatPillMint]}>
-              <Text
-                style={styles.operatorAgendaStatValue}
-                numberOfLines={1}
-                ellipsizeMode="clip"
-                adjustsFontSizeToFit
-                minimumFontScale={0.72}
-              >
-                {totalOperatorOpenTasks}
-              </Text>
-              <Text
-                style={styles.operatorAgendaStatLabel}
-                numberOfLines={1}
-                ellipsizeMode="clip"
-                adjustsFontSizeToFit
-                minimumFontScale={0.6}
-              >
-                Lavori aperti
-              </Text>
-            </View>
-            <View style={[styles.operatorAgendaStatPill, styles.operatorAgendaStatPillLavender]}>
-              <Text
-                style={styles.operatorAgendaStatValue}
-                numberOfLines={1}
-                ellipsizeMode="clip"
-                adjustsFontSizeToFit
-                minimumFontScale={0.72}
-              >
-                {totalOperatorPendingRequests}
-              </Text>
-              <Text
-                style={styles.operatorAgendaStatLabel}
-                numberOfLines={1}
-                ellipsizeMode="clip"
-                adjustsFontSizeToFit
-                minimumFontScale={0.6}
-              >
-                Richieste live
-              </Text>
-            </View>
-          </View>
-
-          {operatori.length === 0 ? (
-            <View style={styles.operatorAgendaEmptyState}>
-              <Text style={styles.operatorAgendaEmptyTitle}>Nessun operatore configurato</Text>
-              <Text style={styles.operatorAgendaEmptyText}>
-                Aggiungi gli operatori nella sezione servizi e qui vedrai subito carico e appuntamenti.
-              </Text>
-            </View>
-          ) : operatorBoardPreview.length === 0 ? (
-            <View style={styles.operatorAgendaEmptyState}>
-              <Text style={styles.operatorAgendaEmptyTitle}>Agenda operatori libera oggi</Text>
-              <Text style={styles.operatorAgendaEmptyText}>
-                La sezione resta live: se arriva o viene accettata una prenotazione, qui si aggiorna in tempo reale.
-              </Text>
-            </View>
-          ) : (
-            <View style={styles.operatorAgendaPreviewStack}>
-              {operatorBoardPreview.map((item) => (
-                <HapticTouchable
-                  key={item.operator.id}
-                  style={styles.operatorAgendaPreviewRow}
-                  onPress={() => openOperatorAgendaModalForOperator(item.operator.id)}
-                  pressScale={0.987}
-                  pressOpacity={0.98}
-                >
-                  <View style={styles.operatorAgendaPreviewIdentity}>
-                    <View style={styles.operatorAgendaPreviewTextWrap}>
-                      <Text style={styles.operatorAgendaPreviewName}>{item.operator.nome}</Text>
-                      <Text style={styles.operatorAgendaPreviewRole}>{item.operator.mestiere}</Text>
-                    </View>
-                  </View>
-
-                  <View style={styles.operatorAgendaPreviewMetrics}>
-                    <Text style={styles.operatorAgendaPreviewMetric}>{item.openTasks} da fare</Text>
-                    <Text style={styles.operatorAgendaPreviewMetricSoft}>
-                      {item.nextItem ? `${item.nextItem.ora} prossimo` : 'nessun orario'}
-                    </Text>
-                  </View>
-                  <View style={styles.operatorAgendaPreviewAvatar}>
-                    {item.operator.fotoUri ? (
-                      <Image source={{ uri: item.operator.fotoUri }} style={styles.operatorAgendaPreviewAvatarImage} />
-                    ) : (
-                      <Ionicons name="person" size={18} color="#1E293B" />
-                    )}
-                  </View>
-                </HapticTouchable>
-              ))}
-            </View>
-          )}
-        </View>
-
-        <View
-          style={[
-            styles.sectionCard,
-            styles.customerInsightsCard,
-            responsive.isDesktop && styles.desktopWideCard,
-          ]}
-        >
-          <View style={styles.operatorAgendaCardHeader}>
-            <View style={styles.operatorAgendaCardTextWrap}>
-              <Text
-                style={styles.operatorAgendaCardTitle}
-                numberOfLines={1}
-                ellipsizeMode="clip"
-                adjustsFontSizeToFit
-                minimumFontScale={0.72}
-              >
-                Appuntamenti per cliente
-              </Text>
-              <Text
-                style={styles.operatorAgendaCardText}
-                numberOfLines={1}
-                ellipsizeMode="clip"
-                adjustsFontSizeToFit
-                minimumFontScale={0.62}
-              >
-                Cerca un cliente e apri il suo storico completo: passati, oggi, futuri e totale servizi.
-              </Text>
-            </View>
-            <HapticTouchable
-              style={styles.operatorAgendaCardAction}
-              onPress={openCustomerInsightsModalForAll}
-              pressScale={0.98}
-              pressOpacity={0.96}
-            >
-              <Text style={styles.operatorAgendaCardActionText}>Apri</Text>
-              <Ionicons name="chevron-forward" size={18} color="#1E293B" />
-            </HapticTouchable>
-          </View>
-
-          <View style={styles.operatorAgendaStatsRow}>
-            <View style={[styles.operatorAgendaStatPill, styles.operatorAgendaStatPillPlum]}>
-              <Text
-                style={styles.operatorAgendaStatValue}
-                numberOfLines={1}
-                ellipsizeMode="clip"
-                adjustsFontSizeToFit
-                minimumFontScale={0.72}
-              >
-                {customerInsightBoards.length}
-              </Text>
-              <Text
-                style={styles.operatorAgendaStatLabel}
-                numberOfLines={1}
-                ellipsizeMode="clip"
-                adjustsFontSizeToFit
-                minimumFontScale={0.56}
-              >
-                Clienti con storico
-              </Text>
-            </View>
-            <View style={[styles.operatorAgendaStatPill, styles.operatorAgendaStatPillSun]}>
-              <Text
-                style={styles.operatorAgendaStatValue}
-                numberOfLines={1}
-                ellipsizeMode="clip"
-                adjustsFontSizeToFit
-                minimumFontScale={0.72}
-              >
-                {customerBoardsWithFuture}
-              </Text>
-              <Text
-                style={styles.operatorAgendaStatLabel}
-                numberOfLines={1}
-                ellipsizeMode="clip"
-                adjustsFontSizeToFit
-                minimumFontScale={0.56}
-              >
-                Clienti con futuro
-              </Text>
-            </View>
-            <View style={[styles.operatorAgendaStatPill, styles.operatorAgendaStatPillRose]}>
-              <Text
-                style={styles.operatorAgendaStatValue}
-                numberOfLines={1}
-                ellipsizeMode="clip"
-                adjustsFontSizeToFit
-                minimumFontScale={0.62}
-              >
-                € {totalCustomerDeliveredSpend.toFixed(0)}
-              </Text>
-              <Text
-                style={styles.operatorAgendaStatLabel}
-                numberOfLines={1}
-                ellipsizeMode="clip"
-                adjustsFontSizeToFit
-                minimumFontScale={0.56}
-              >
-                Servizi fruiti
-              </Text>
-            </View>
-          </View>
-
-          {customerInsightBoards.length === 0 ? (
-            <View style={styles.operatorAgendaEmptyState}>
-              <Text style={styles.operatorAgendaEmptyTitle}>Nessun cliente con appuntamenti</Text>
-              <Text style={styles.operatorAgendaEmptyText}>
-                Appena registri i primi appuntamenti, qui troverai storico e valore per ogni cliente.
-              </Text>
-            </View>
-          ) : (
-            <View style={styles.operatorAgendaPreviewStack}>
-              {customerInsightPreview.map((item) => (
-                <HapticTouchable
-                  key={item.customer.id}
-                  style={styles.customerInsightPreviewRow}
-                  onPress={() => openCustomerInsightsModalForCustomer(item.customer.id)}
-                  pressScale={0.987}
-                  pressOpacity={0.98}
-                >
-                  <View style={styles.customerInsightPreviewMain}>
-                    <Text style={styles.operatorAgendaPreviewName}>{item.customer.nome}</Text>
-                    <Text style={styles.customerInsightPreviewMeta}>
-                      {item.nextAppointment
-                        ? `${formatDateLabel(item.nextAppointment.data ?? oggi)} · ${item.nextAppointment.ora} prossimo`
-                        : item.latestAppointment
-                        ? `${formatDateLabel(item.latestAppointment.data ?? oggi)} · ${item.latestAppointment.ora} ultimo`
-                        : 'Nessun dettaglio'}
-                    </Text>
-                  </View>
-
-                  <View style={styles.customerInsightPreviewMetrics}>
-                    <Text style={styles.customerInsightPreviewMetric}>
-                      {item.totalAppointments} appunt.
-                    </Text>
-                    <Text style={styles.customerInsightPreviewMetricSoft}>
-                      € {item.totalSpent.toFixed(2)}
-                    </Text>
-                  </View>
-                </HapticTouchable>
-              ))}
-            </View>
-          )}
-        </View>
-
-        <View
-          style={[styles.sectionCard, responsive.isDesktop && styles.desktopWideCard]}
-          onLayout={(event) => {
-            setClientAccessSectionY(event.nativeEvent.layout.y);
-          }}
-        >
-          <Text style={[styles.sectionTitle, styles.sectionTitleCentered]}>
-            {tApp(appLanguage, 'home_smart_indicators')}
-          </Text>
-
-          <View style={[styles.smartItem, styles.smartItemCentered]}>
-            <Text style={[styles.smartLabel, styles.smartTextCentered]}>
-              {tApp(appLanguage, 'home_top_service')}
-            </Text>
-            <Text
-              style={[styles.smartValue, styles.smartTextCentered]}
-              numberOfLines={1}
-              adjustsFontSizeToFit
-              minimumFontScale={0.74}
-              ellipsizeMode="clip"
-            >
-              {servizioTop
-                ? `${servizioTop.nome} · ${servizioTop.count} volte`
-                : 'Ancora nessun dato'}
-            </Text>
-          </View>
-
-          <View style={[styles.smartItem, styles.smartItemCentered]}>
-            <Text style={[styles.smartLabel, styles.smartTextCentered]}>
-              {tApp(appLanguage, 'home_top_duration')}
-            </Text>
-            <Text
-              style={[styles.smartValue, styles.smartTextCentered]}
-              numberOfLines={1}
-              adjustsFontSizeToFit
-              minimumFontScale={0.78}
-              ellipsizeMode="clip"
-            >
-              {servizioTop ? formatMinutes(servizioTop.durataMinuti) : '—'}
-            </Text>
-          </View>
-
-          <View style={[styles.smartItemLast, styles.smartItemCentered]}>
-            <Text style={[styles.smartLabel, styles.smartTextCentered]}>
-              {tApp(appLanguage, 'home_average_ticket')}
-            </Text>
-            <Text
-              style={[styles.smartValue, styles.smartTextCentered]}
-              numberOfLines={1}
-              adjustsFontSizeToFit
-              minimumFontScale={0.78}
-              ellipsizeMode="clip"
-            >
-              € {mediaScontrino.toFixed(2)}
-            </Text>
-          </View>
-        </View>
-
-        <View style={[styles.sectionCardDark, responsive.isDesktop && styles.desktopWideCard]}>
-          <Text style={[styles.sectionTitleDark, styles.sectionTitleCentered]}>
-            {tApp(appLanguage, 'home_quick_focus')}
-          </Text>
-          <Text style={[styles.sectionTextDark, styles.sectionTextCentered]}>
-            {appuntamentiDaIncassare > 0
-              ? `Hai ${appuntamentiDaIncassare} appuntamenti ancora da incassare. La priorita operativa è chiudere € ${valoreDaIncassare.toFixed(2)}.`
-              : 'Tutti gli appuntamenti risultano già incassati. Puoi concentrarti su nuove prenotazioni e clienti.'}
-          </Text>
-        </View>
-
-        <View
-          style={[
-            styles.sectionCard,
-            responsive.isDesktop && styles.desktopWideCard,
-          ]}
-        >
-          <HapticTouchable
-            style={styles.profileAccordionButton}
-            onPress={() => {
-              Haptics.selectionAsync().catch(() => null);
-              setShowProfileSection((current) => {
-                const nextValue = !current;
-                setIsEditingSalonProfile(nextValue);
-                return nextValue;
-              });
-            }}
-            pressScale={0.985}
-            pressOpacity={0.98}
-          >
-            <View style={styles.profileAccordionTextWrap}>
-              <Text
-                style={[
-                  styles.sectionTitle,
-                  styles.profileAccordionTitle,
-                ]}
-              >
-                Profilo salone
-              </Text>
-              <Text
-                style={[
-                  styles.sectionSubtext,
-                  styles.profileAccordionSubtext,
-                ]}
-              >
-                Moduli piu compatti per compilare tutto senza perdersi in un form lungo.
-              </Text>
-            </View>
-            <View style={styles.profileAccordionIconWrap}>
-              <AnimatedChevron expanded={showProfileSection} size={30} color="#334155" />
-            </View>
-          </HapticTouchable>
-
-          <View style={styles.profilePreviewCard}>
-            <View style={styles.profilePreviewHeader}>
-              <Text style={styles.profilePreviewEyebrow}>Preview salone</Text>
-              <Text style={styles.profilePreviewProgress}>
-                {profiloSaloneCompleto
-                  ? `${completedProfileSections}/4 moduli completi`
-                  : `${requiredFieldsFilled}/6 campi obbligatori`}
-              </Text>
-            </View>
-            <Text
-              style={[
-                styles.profilePreviewName,
-                salonNameDisplayStyleInput === 'minuscolo' && styles.profilePreviewNameLower,
-                salonNameDisplayStyleInput === 'stampatello' && styles.profilePreviewNameUpper,
-                {
-                  fontFamily: salonNameFontOptions.find(
-                    (item) => item.key === salonNameFontVariantInput
-                  )?.family,
-                },
-              ]}
-            >
-              {salonPreviewName}
-            </Text>
-            <Text style={styles.profilePreviewMeta}>
-              {activityCategoryInput.trim() || 'Categoria libera'}
-            </Text>
-            <View style={styles.profileProgressRow}>
-              {profileSections.map((section) => (
-                <View key={section.key} style={styles.profileProgressItem}>
-                  <Reanimated.View
-                    style={[
-                      styles.profileProgressDot,
-                      section.completed && styles.profileProgressDotCompleted,
-                    ]}
-                    entering={FadeIn.duration(130).easing(Easing.out(Easing.cubic))}
-                    layout={LinearTransition.duration(150).easing(Easing.out(Easing.cubic))}
-                  />
-                  <Text style={styles.profileProgressLabel}>{section.title}</Text>
-                </View>
-              ))}
-            </View>
-            <View style={styles.profilePreviewInfoRow}>
-              <View style={styles.profilePreviewInfoPill}>
-                <Ionicons name="call-outline" size={14} color="#475569" />
-                <Text style={styles.profilePreviewInfoText}>
-                  {businessPhoneInput.trim() || 'Telefono'}
-                </Text>
-              </View>
-              <View style={styles.profilePreviewInfoPill}>
-                <Ionicons name="location-outline" size={14} color="#475569" />
-                <Text style={styles.profilePreviewInfoText} numberOfLines={1}>
-                  {salonPreviewAddress || 'Indirizzo salone'}
-                </Text>
-              </View>
-            </View>
-
-          </View>
-
-          {showProfileSection ? (
+  const salonProfilePopup = (showProfileSection ? (
+          <NativePremiumScope.Provider value={Platform.OS !== 'web'}>
+          <NativeSettingsPopup premiumWeb scrollRef={profileSheetScrollRef} title="Profilo salone" icon="storefront-outline" onClose={() => { setShowProfileSection(false); setIsEditingSalonProfile(false); }}>
+            <HapticTouchableFastRegion enabled={Platform.OS !== 'web'}>
             <Reanimated.View
-              style={styles.profileEditorCard}
-              entering={FadeIn.duration(185).easing(Easing.out(Easing.cubic))}
-              exiting={FadeOut.duration(130).easing(Easing.out(Easing.cubic))}
-              layout={LinearTransition.duration(210).easing(Easing.out(Easing.cubic))}
+              {...(Platform.OS === 'web' ? { dataSet: { homeProfile: 'editor' } } : {})} style={styles.profileEditorCard}
+              entering={Platform.OS === 'web' ? FadeIn.duration(185).easing(Easing.out(Easing.cubic)) : undefined}
+              exiting={Platform.OS === 'web' ? FadeOut.duration(130).easing(Easing.out(Easing.cubic)) : undefined}
+              layout={Platform.OS === 'web' ? LinearTransition.duration(210).easing(Easing.out(Easing.cubic)) : undefined}
             >
-              <Text style={styles.profileEditorTitle}>Compila il profilo del salone</Text>
+              <Text style={styles.profileEditorTitle}>Il tuo salone, in ogni dettaglio</Text>
               <Text style={styles.profileEditorCaption}>
-                Blocchi separati, campi piu compatti e salvataggio chiaro. Tutto qui, senza dispersione.
+                Personalizza l’insegna e aggiorna i recapiti. Conferma tutto con Salva modifiche.
               </Text>
 
-              <View style={styles.profileModuleStack}>
-                <View style={styles.profileModuleCard}>
+              <View {...(Platform.OS === 'web' ? { dataSet: { homeProfile: 'modules' } } : {})} style={styles.profileModuleStack}>
+                <View {...(Platform.OS === 'web' ? { dataSet: { homeProfile: 'module' } } : {})} style={styles.profileModuleCard}>
                   <View style={styles.profileModuleHeader}>
                     <View style={styles.profileModuleTextWrap}>
-                      <Text style={styles.profileModuleTitle}>Identita salone</Text>
-                      <Text style={styles.profileModuleCaption}>Nome, categoria e insegna.</Text>
+                      <Text style={styles.profileModuleEyebrow}>01 · IDENTITÀ</Text>
+                      <Text style={styles.profileModuleTitle}>La tua insegna</Text>
+                      <Text style={styles.profileModuleCaption}>Come ti riconoscono i clienti.</Text>
                     </View>
                     <Reanimated.View
                       style={[
@@ -1974,88 +2951,35 @@ const openQrPrintPreview = useCallback(() => {
                       editable={canEditSalonProfile}
                       autoCapitalize="words"
                       returnKeyType="next"
-                      onSubmitEditing={() => focusField(activityCategoryFieldRef)}
+                      onSubmitEditing={Keyboard.dismiss}
                       blurOnSubmit={false}
                     />
                   </View>
 
                   <View style={styles.compactFieldBlock}>
-                    <Text style={styles.fieldLabel}>Categoria attivita</Text>
-                    <ClearableTextInput
-                      ref={activityCategoryFieldRef}
-                      style={[styles.accountInput, !canEditSalonProfile && styles.accountInputLocked]}
+                    <Text style={styles.fieldLabel}>Categoria attività</Text>
+                    <OwnerPremiumHomeRegion part="activity-picker"><SalonActivityPicker
                       value={activityCategoryInput}
-                      onChangeText={(value) => setActivityCategoryInput(toUppercaseField(value))}
-                      onFocus={() => scrollToField(activityCategoryFieldRef)}
-                      placeholder="Categoria attivita"
-                      placeholderTextColor="#8f8f8f"
-                      editable={canEditSalonProfile}
-                      autoCapitalize="characters"
-                      returnKeyType="next"
-                      onSubmitEditing={() => focusField(businessPhoneFieldRef)}
-                      blurOnSubmit={false}
-                    />
+                      options={configuredActivityOptions}
+                      disabled={!canEditSalonProfile}
+                      onChange={setActivityCategoryInput}
+                    /></OwnerPremiumHomeRegion>
                   </View>
 
-                  <HapticTouchable
-                    style={styles.fontDropdownButton}
-                    onPress={() => {
-                      Haptics.selectionAsync().catch(() => null);
-                      setShowFontPicker((current) => !current);
-                    }}
-                    pressScale={0.985}
-                    pressOpacity={0.98}
-                  >
-                    <View style={styles.fontDropdownTextWrap}>
-                      <Text style={styles.profileSectionTitle}>Font insegna</Text>
-                      <Text style={styles.profileSectionCaption}>
-                        {salonNameFontOptions.find((item) => item.key === salonNameFontVariantInput)?.label}
-                      </Text>
-                    </View>
-                    <View style={styles.profileAccordionIconWrap}>
-                      <AnimatedChevron expanded={showFontPicker} size={20} color="#334155" />
-                    </View>
-                  </HapticTouchable>
-
-                  {showFontPicker ? (
-                    <Reanimated.View
-                      style={styles.profileFontSelectorGrid}
-                      entering={FadeIn.duration(170).easing(Easing.out(Easing.cubic))}
-                      exiting={FadeOut.duration(120).easing(Easing.out(Easing.cubic))}
-                      layout={LinearTransition.duration(190).easing(Easing.out(Easing.cubic))}
-                    >
-                      {salonNameFontOptions.map((option) => (
-                        <HapticTouchable
-                          key={option.key}
-                          style={[
-                            styles.profileFontChip,
-                            salonNameFontVariantInput === option.key && styles.profileFontChipActive,
-                          ]}
-                          onPress={() => setSalonNameFontVariantInput(option.key)}
-                          disabled={!canEditSalonProfile}
-                          pressScale={0.98}
-                          pressOpacity={0.98}
-                        >
-                          <Text
-                            style={[
-                              styles.profileFontChipText,
-                              { fontFamily: option.family },
-                              salonNameFontVariantInput === option.key && styles.profileFontChipTextActive,
-                            ]}
-                          >
-                            {option.label}
-                          </Text>
-                        </HapticTouchable>
-                      ))}
-                    </Reanimated.View>
-                  ) : null}
+                  <OwnerPremiumHomeRegion part="logo-editor"><SalonLogoEditor
+                    workspaceId={salonWorkspace.id}
+                    name={salonPreviewName}
+                    disabled={!canEditSalonProfile}
+                  /></OwnerPremiumHomeRegion>
+                  {Platform.OS === 'web' ? <SalonBrandPlacementSettings workspaceId={salonWorkspace.id} disabled={!canEditSalonProfile} /> : null}
                 </View>
 
-                <View style={styles.profileModuleCard}>
+                <View {...(Platform.OS === 'web' ? { dataSet: { homeProfile: 'module' } } : {})} style={styles.profileModuleCard}>
                   <View style={styles.profileModuleHeader}>
                     <View style={styles.profileModuleTextWrap}>
-                      <Text style={styles.profileModuleTitle}>Contatti</Text>
-                      <Text style={styles.profileModuleCaption}>Numero aziendale chiaro e pronto all&apos;uso.</Text>
+                      <Text style={styles.profileModuleEyebrow}>02 · CONTATTI</Text>
+                      <Text style={styles.profileModuleTitle}>Come contattarti</Text>
+                      <Text style={styles.profileModuleCaption}>Cellulare, telefono e altri recapiti del salone.</Text>
                     </View>
                     <Reanimated.View
                       style={[
@@ -2112,13 +3036,38 @@ const openQrPrintPreview = useCallback(() => {
                       <Text style={styles.fieldErrorText}>{profileFieldErrors.businessPhone}</Text>
                     ) : null}
                   </View>
+                  {additionalPhonesInput.map((phone, index) => (
+                    <View key={index} style={styles.compactFieldBlock}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                        <Text style={[styles.fieldLabel, { marginBottom: 0 }]}>{index === 0 ? 'Telefono' : `Altro numero ${index}`}</Text>
+                        {index > 0 && canEditSalonProfile ? (
+                          <HapticTouchable accessibilityRole="button" accessibilityLabel={`Rimuovi altro numero ${index}`} hitSlop={8} onPress={() => setAdditionalPhonesInput((current) => current.filter((_, i) => i !== index))} style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: '#FFF1F3', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#F2D5DC', shadowColor: '#923C50', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.08, shadowRadius: 2 }}>
+                            <Ionicons name="close" size={17} color="#B44960" />
+                          </HapticTouchable>
+                        ) : null}
+                      </View>
+                      <View style={{ width: '100%' }}>
+                        <ClearableTextInput
+                          style={[styles.accountInput, !canEditSalonProfile && styles.accountInputLocked]}
+                          value={phone}
+                          onChangeText={(value) => setAdditionalPhonesInput((current) => current.map((item, i) => i === index ? value.replace(/[^0-9+() .-]/g, '') : item))}
+                          placeholder={index === 0 ? 'Telefono del salone (facoltativo)' : 'Altro recapito'}
+                          placeholderTextColor="#8f8f8f"
+                          editable={canEditSalonProfile}
+                          keyboardType="phone-pad"
+                        />
+                      </View>
+                    </View>
+                  ))}
+                  {canEditSalonProfile ? <HapticTouchable {...webHomePart('add-phone')} onPress={() => setAdditionalPhonesInput((current) => [...current, ''])} style={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8, padding: 12 }}><Ionicons name="add-circle-outline" size={21} color={Platform.OS === 'web' ? '#2563EB' : premiumPalette.ink} /><Text style={{ color: Platform.OS === 'web' ? '#2563EB' : premiumPalette.ink, fontWeight: Platform.OS === 'web' ? '700' : '500' }}>Aggiungi numero</Text></HapticTouchable> : null}
                 </View>
 
-                <View style={styles.profileModuleCard}>
+                <View {...(Platform.OS === 'web' ? { dataSet: { homeProfile: 'module' } } : {})} style={styles.profileModuleCard}>
                   <View style={styles.profileModuleHeader}>
                     <View style={styles.profileModuleTextWrap}>
-                      <Text style={styles.profileModuleTitle}>Indirizzo</Text>
-                      <Text style={styles.profileModuleCaption}>Via, citta e CAP in un blocco compatto.</Text>
+                      <Text style={styles.profileModuleEyebrow}>03 · SEDE</Text>
+                      <Text style={styles.profileModuleTitle}>Dove trovarti</Text>
+                      <Text style={styles.profileModuleCaption}>L’indirizzo completo della tua attività.</Text>
                     </View>
                     <Reanimated.View
                       style={[
@@ -2199,11 +3148,11 @@ const openQrPrintPreview = useCallback(() => {
                   </View>
                 </View>
 
-                <View style={styles.profileModuleCard}>
+                <View {...(Platform.OS === 'web' ? { dataSet: { homeProfile: 'module' } } : {})} style={styles.profileModuleCard}>
                   <View style={styles.profileModuleHeader}>
                     <View style={styles.profileModuleTextWrap}>
-                      <Text style={styles.profileModuleTitle}>Account e stato</Text>
-                      <Text style={styles.profileModuleCaption}>Email di lavoro e workspace sempre allineati.</Text>
+                      <Text style={styles.profileModuleEyebrow}>04 · ACCOUNT PROTETTO</Text>
+                      <Text style={styles.profileModuleTitle}>Accesso e abbonamento</Text>
                     </View>
                     <Reanimated.View
                       style={[
@@ -2229,7 +3178,7 @@ const openQrPrintPreview = useCallback(() => {
                   </View>
 
                   <View style={styles.compactFieldBlock}>
-                    <Text style={styles.fieldLabel}>Email account</Text>
+                    <Text style={styles.profileProtectedCaption}>Email di accesso e abbonamento · non modificabile</Text>
                     <ClearableTextInput
                       ref={accountEmailFieldRef}
                       style={[
@@ -2237,22 +3186,13 @@ const openQrPrintPreview = useCallback(() => {
                         profileFieldErrors.accountEmail && styles.accountInputError,
                         !canEditSalonProfile && styles.accountInputLocked,
                       ]}
-                      value={accountEmailInput}
-                      onChangeText={(value) => {
-                        setAccountEmailInput(value);
-                        if (profileFieldErrors.accountEmail) {
-                          setProfileFieldErrors((current) => ({
-                            ...current,
-                            accountEmail: undefined,
-                          }));
-                        }
-                      }}
+                      value={salonAccountEmail}
                       onFocus={() => scrollToField(accountEmailFieldRef)}
                       autoCapitalize="none"
                       keyboardType="email-address"
                       placeholder="email@salone.it"
                       placeholderTextColor="#8f8f8f"
-                      editable={canEditSalonProfile}
+                      editable={false}
                       returnKeyType="done"
                       onSubmitEditing={Keyboard.dismiss}
                     />
@@ -2271,16 +3211,1219 @@ const openQrPrintPreview = useCallback(() => {
                 pressScale={0.975}
                 pressOpacity={0.98}
               >
-                <Text style={styles.profileSaveButtonEyebrow}>{completedProfileSections}/4 moduli pronti</Text>
+                <Text style={styles.profileSaveButtonEyebrow}>{completedProfileSections}/4 sezioni complete</Text>
                 <Text style={styles.previewButtonText}>
                   {savingSalon ? 'Salvataggio...' : 'Salva modifiche'}
                 </Text>
               </HapticTouchable>
             </Reanimated.View>
-          ) : null}
-        </View>
+            </HapticTouchableFastRegion>
+          </NativeSettingsPopup>
+          </NativePremiumScope.Provider>
+          ) : null);
 
-        {showAdminPanel ? (
+  // Presentation slots reuse the exact existing controls, metrics, refs and callbacks.
+  const homePresentation = {
+priority: (<View {...webHomePart("priority")}
+            style={[
+              styles.priorityCard,
+              IS_ANDROID && styles.priorityCardAndroidPremium,
+              styles.priorityCardGlassBlue,
+              IS_ANDROID && styles.priorityCardGlassBlueAndroid,
+              responsive.isDesktop && styles.desktopPriorityCard,
+              Platform.OS === 'web' && styles.priorityCardWebFlat,
+            ]}
+          >
+            <Text
+              style={[
+                styles.priorityEyebrow,
+                styles.priorityEyebrowGlassBlue,
+                IS_ANDROID && styles.priorityEyebrowAndroidPremium,
+              ]}
+            >
+              {prossimoSlotPrioritario.hasMultiRole
+                ? 'Prossime priorità'
+                : tApp(appLanguage, 'home_next_priority')}
+            </Text>
+            {shouldHoldDashboardSummaryMetrics ? (
+              <>
+                <DashboardSkeletonBar
+                  width="78%"
+                  height={25}
+                  style={styles.priorityTitleSkeleton}
+                />
+                <DashboardSkeletonBar
+                  width="64%"
+                  height={18}
+                  style={styles.priorityTextSkeleton}
+                />
+              </>
+            ) : (
+              <>
+                <Text
+                  style={[
+                    styles.priorityTitle,
+                    IS_ANDROID && styles.priorityTitleAndroidPremium,
+                    !prossimoAppuntamento && !shouldHoldDashboardSummaryMetrics && styles.priorityTitleFallback,
+                    styles.priorityTitleGlassBlue,
+                  ]}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.74}
+                  ellipsizeMode="tail"
+                >
+                  {dashboardPriorityTitle}
+                </Text>
+                <Text
+                  style={[
+                    styles.priorityText,
+                    IS_ANDROID && styles.priorityTextAndroidPremium,
+                    styles.priorityTextGlassBlue,
+                  ]}
+                  numberOfLines={2}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.88}
+                  ellipsizeMode="tail"
+                >
+                  {dashboardPriorityHint}
+                </Text>
+                {prossimoSlotPrioritario.hasMultiRole ? (
+                  <View style={styles.priorityMultiArea}>
+                    <ScrollView
+                      style={styles.priorityMultiList}
+                      contentContainerStyle={styles.priorityMultiListContent}
+                      showsVerticalScrollIndicator={false}
+                      nestedScrollEnabled
+                      onLayout={(event) => {
+                        setPriorityViewportHeight(event.nativeEvent.layout.height);
+                      }}
+                      onContentSizeChange={(_, contentHeight) => {
+                        setPriorityContentHeight(contentHeight);
+                      }}
+                      onScroll={(event) => {
+                        priorityScrollOffset.value = event.nativeEvent.contentOffset.y;
+                      }}
+                      onScrollBeginDrag={() => {
+                        priorityIndicatorActive.value = withTiming(1, {
+                          duration: 160,
+                          easing: Easing.out(Easing.quad),
+                        });
+                      }}
+                      onScrollEndDrag={() => {
+                        priorityIndicatorActive.value = withTiming(0, {
+                          duration: 260,
+                          easing: Easing.out(Easing.quad),
+                        });
+                      }}
+                      onMomentumScrollBegin={() => {
+                        priorityIndicatorActive.value = withTiming(1, {
+                          duration: 160,
+                          easing: Easing.out(Easing.quad),
+                        });
+                      }}
+                      onMomentumScrollEnd={() => {
+                        priorityIndicatorActive.value = withTiming(0, {
+                          duration: 260,
+                          easing: Easing.out(Easing.quad),
+                        });
+                      }}
+                      scrollEventThrottle={16}
+                    >
+                      {prossimoSlotPrioritario.appointments.map((item, index) => {
+                        const resolvedRoleLabel =
+                          resolveAppointmentRoleLabel({
+                            appointment: item,
+                            services: servizi,
+                            operators: operatori,
+                          }) || 'Senza mestiere';
+                        const accent = getHomePriorityAccent(item.servizio, resolvedRoleLabel);
+
+                        return (
+                          <View
+                            key={item.id}
+                            style={[
+                              styles.priorityMultiItem,
+                              index < prossimoSlotPrioritario.appointments.length - 1 &&
+                                styles.priorityMultiItemSpaced,
+                            ]}
+                          >
+                            <View style={styles.priorityMultiTimeBadge}>
+                              <Text style={styles.priorityMultiTime}>{item.ora}</Text>
+                            </View>
+                            <View style={styles.priorityMultiContent}>
+                              <Text
+                                style={styles.priorityMultiClient}
+                                numberOfLines={1}
+                                adjustsFontSizeToFit
+                                minimumFontScale={0.72}
+                              >
+                                {item.cliente}
+                              </Text>
+                              <Text
+                                style={styles.priorityMultiService}
+                                numberOfLines={1}
+                                adjustsFontSizeToFit
+                                minimumFontScale={0.72}
+                              >
+                                {item.servizio}
+                              </Text>
+                              <Text
+                                style={[styles.priorityMultiRole, { color: accent.text }]}
+                                numberOfLines={1}
+                                adjustsFontSizeToFit
+                                minimumFontScale={0.72}
+                              >
+                                {resolvedRoleLabel.toUpperCase()}
+                              </Text>
+                            </View>
+                          </View>
+                        );
+                      })}
+                    </ScrollView>
+                    <View pointerEvents="none" style={styles.priorityScrollIndicatorWrap}>
+                      <View
+                        style={[
+                          styles.priorityScrollIndicatorTrack,
+                          { height: priorityIndicatorTrackHeight },
+                        ]}
+                      >
+                        <Reanimated.View
+                          style={[
+                            styles.priorityScrollIndicatorThumb,
+                            { height: priorityIndicatorThumbHeight },
+                            priorityIndicatorThumbAnimatedStyle,
+                          ]}
+                        />
+                      </View>
+                    </View>
+                  </View>
+                ) : null}
+              </>
+            )}
+          </View>),
+operators: (<View {...webHomePart("operators")}
+          style={[
+            styles.sectionCard,
+            styles.operatorAgendaCard,
+            responsive.isDesktop && styles.desktopWideCard,
+          ]}
+        >
+          <View {...webHomePart("people-header")} style={styles.operatorAgendaCardHeader}>
+            <View style={styles.operatorAgendaCardTextWrap}>
+              <Text
+                style={styles.operatorAgendaCardTitle}
+              >
+                {Platform.OS === 'web' ? 'Operatori' : 'Appuntamenti per operatore'}
+              </Text>
+            </View>
+            <HapticTouchable
+              style={styles.operatorAgendaCardAction}
+              onPress={openOperatorAgendaModalForAll}
+              accessibilityRole="button" accessibilityLabel="Apri agenda operatori"
+              immediatePress
+              pressScale={0.98}
+              pressOpacity={0.96}
+            >
+              {Platform.OS!=='web'?<Text style={styles.operatorAgendaCardActionText}>Apri</Text>:null}
+              <Ionicons name="chevron-forward" size={18} color={premiumPalette.ink} />
+            </HapticTouchable>
+          </View>
+          <Text {...webHomePart("people-caption")} style={[styles.operatorAgendaCardText, styles.insightDescription]}>
+            {Platform.OS === 'web' ? 'Il lavoro di oggi, per operatore.' : 'Il lavoro di oggi, operatore per operatore. Apri per vedere tutti i dettagli.'}
+          </Text>
+
+          <View {...webHomePart("people-stats")} style={styles.operatorAgendaStatsRow}>
+            <View style={[styles.operatorAgendaStatPill, styles.operatorAgendaStatPillSky]}>
+              {shouldHoldOperatorInsightMetrics ? (
+                <>
+                  <></>
+                  <></>
+                </>
+              ) : (
+                <>
+                  <Text
+                    style={[
+                      styles.operatorAgendaStatValue,
+                      hasWideWebMetricCards && styles.operatorAgendaStatValueWebWide,
+                    ]}
+                    numberOfLines={1}
+                    ellipsizeMode="clip"
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.72}
+                  >
+                    {operatori.length}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.operatorAgendaStatLabel,
+                      hasWideWebMetricCards && styles.operatorAgendaStatLabelWebWide,
+                    ]}
+                    numberOfLines={Platform.OS === 'web' ? 1 : 2}
+                    ellipsizeMode="clip"
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.78}
+                  >
+                    Operatori
+                  </Text>
+                </>
+              )}
+            </View>
+            <View style={[styles.operatorAgendaStatPill, styles.operatorAgendaStatPillMint]}>
+              {shouldHoldOperatorInsightMetrics ? (
+                <>
+                  <></>
+                  <></>
+                </>
+              ) : (
+                <>
+                  <Text
+                    style={[
+                      styles.operatorAgendaStatValue,
+                      hasWideWebMetricCards && styles.operatorAgendaStatValueWebWide,
+                    ]}
+                    numberOfLines={1}
+                    ellipsizeMode="clip"
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.72}
+                  >
+                    {totalOperatorOpenTasks}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.operatorAgendaStatLabel,
+                      hasWideWebMetricCards && styles.operatorAgendaStatLabelWebWide,
+                    ]}
+                    numberOfLines={Platform.OS === 'web' ? 1 : 2}
+                    ellipsizeMode="clip"
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.78}
+                  >
+                    Da fare
+                  </Text>
+                </>
+              )}
+            </View>
+            <View style={[styles.operatorAgendaStatPill, styles.operatorAgendaStatPillLavender]}>
+              {shouldHoldOperatorInsightMetrics ? (
+                <>
+                  <></>
+                  <></>
+                </>
+              ) : (
+                <>
+                  <Text
+                    style={[
+                      styles.operatorAgendaStatValue,
+                      hasWideWebMetricCards && styles.operatorAgendaStatValueWebWide,
+                    ]}
+                    numberOfLines={1}
+                    ellipsizeMode="clip"
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.72}
+                  >
+                    {totalOperatorPendingRequests}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.operatorAgendaStatLabel,
+                      hasWideWebMetricCards && styles.operatorAgendaStatLabelWebWide,
+                    ]}
+                    numberOfLines={Platform.OS === 'web' ? 1 : 2}
+                    ellipsizeMode="clip"
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.78}
+                  >
+                    Richieste
+                  </Text>
+                </>
+              )}
+            </View>
+          </View>
+
+          {operatori.length === 0 ? (
+            <View style={styles.operatorAgendaEmptyState}>
+              <Text style={styles.operatorAgendaEmptyTitle}>Nessun operatore configurato</Text>
+              <Text style={styles.operatorAgendaEmptyText}>
+                Aggiungi gli operatori nella sezione servizi e qui vedrai subito carico e appuntamenti.
+              </Text>
+            </View>
+          ) : operatorBoardPreview.length === 0 ? null : (
+            <View style={styles.operatorAgendaPreviewStack}>
+              {operatorBoardPreview.map((item) => (
+                <HapticTouchable
+                  key={item.operator.id}
+                  style={[
+                    styles.operatorAgendaPreviewRow,
+                    Platform.OS === 'web' && styles.operatorAgendaPreviewRowWeb,
+                    Platform.OS !== 'web' && styles.operatorAgendaPreviewRowNative,
+                  ]}
+                  onPress={() => openOperatorAgendaModalForOperator(item.operator.id)}
+                  immediatePress
+                  pressScale={0.987}
+                  pressOpacity={0.98}
+                >
+                  {Platform.OS !== 'web' ? (
+                    <View style={styles.operatorAgendaPreviewLeftNative}>
+                      <View
+                        style={[
+                          styles.operatorAgendaPreviewAvatar,
+                          styles.operatorAgendaPreviewAvatarNative,
+                        ]}
+                      >
+                        {item.operator.fotoUri ? (
+                          <Image
+                            source={{ uri: item.operator.fotoUri }}
+                            style={styles.operatorAgendaPreviewAvatarImage}
+                          />
+                        ) : (
+                          <Ionicons name="person" size={17} color={premiumPalette.ink} />
+                        )}
+                      </View>
+                      <View
+                        style={[
+                          styles.operatorAgendaPreviewIdentity,
+                          styles.operatorAgendaPreviewIdentityNative,
+                        ]}
+                      >
+                        <View
+                          style={[
+                            styles.operatorAgendaPreviewTextWrap,
+                            styles.operatorAgendaPreviewTextWrapNative,
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.operatorAgendaPreviewName,
+                              styles.operatorAgendaPreviewNameNative,
+                            ]}
+                            numberOfLines={1}
+                            adjustsFontSizeToFit
+                            minimumFontScale={0.78}
+                          >
+                            {item.operator.nome}
+                          </Text>
+                          <Text
+                            style={[
+                              styles.operatorAgendaPreviewRole,
+                              styles.operatorAgendaPreviewRoleNative,
+                            ]}
+                            numberOfLines={1}
+                            adjustsFontSizeToFit
+                            minimumFontScale={0.78}
+                          >
+                            {item.operator.mestiere}
+                          </Text>
+                        </View>
+                      </View>
+                    </View>
+                  ) : (
+                    <View style={styles.operatorAgendaPreviewLeftWeb}>
+                      <View
+                        style={[
+                          styles.operatorAgendaPreviewAvatar,
+                          styles.operatorAgendaPreviewAvatarWeb,
+                        ]}
+                      >
+                        {item.operator.fotoUri ? (
+                          <Image
+                            source={{ uri: item.operator.fotoUri }}
+                            style={styles.operatorAgendaPreviewAvatarImage}
+                          />
+                        ) : (
+                          <Ionicons name="person-outline" size={20} color={Platform.OS === 'web' ? premiumPalette.ink : "#1E293B"} />
+                        )}
+                      </View>
+                      <View
+                        style={[
+                          styles.operatorAgendaPreviewIdentity,
+                          styles.operatorAgendaPreviewIdentityWeb,
+                        ]}
+                      >
+                        <View
+                          style={[
+                            styles.operatorAgendaPreviewTextWrap,
+                            styles.operatorAgendaPreviewTextWrapWeb,
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.operatorAgendaPreviewName,
+                              styles.operatorAgendaPreviewNameWeb,
+                            ]}
+                            numberOfLines={undefined}
+                          >
+                            {item.operator.nome}
+                          </Text>
+                          <Text
+                            style={[
+                              styles.operatorAgendaPreviewRole,
+                              styles.operatorAgendaPreviewRoleWeb,
+                            ]}
+                            numberOfLines={undefined}
+                          >
+                            {item.operator.mestiere}
+                          </Text>
+                        </View>
+                      </View>
+                    </View>
+                  )}
+
+                  <View
+                    style={[
+                      styles.operatorAgendaPreviewMetrics,
+                      Platform.OS === 'web' && styles.operatorAgendaPreviewMetricsWeb,
+                      Platform.OS !== 'web' && styles.operatorAgendaPreviewMetricsNative,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.operatorAgendaPreviewMetric,
+                        Platform.OS === 'web' && styles.operatorAgendaPreviewMetricWeb,
+                        Platform.OS !== 'web' && styles.operatorAgendaPreviewMetricNative,
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {item.openTasks} da fare
+                    </Text>
+                    <Text
+                      style={[
+                        styles.operatorAgendaPreviewMetricSoft,
+                        Platform.OS === 'web' && styles.operatorAgendaPreviewMetricSoftWeb,
+                        Platform.OS !== 'web' && styles.operatorAgendaPreviewMetricSoftNative,
+                      ]}
+                      numberOfLines={1}
+                      adjustsFontSizeToFit
+                      minimumFontScale={0.78}
+                    >
+                      {item.nextItem ? `${item.nextItem.ora} prossimo` : 'nessun orario'}
+                    </Text>
+                  </View>
+                </HapticTouchable>
+              ))}
+            </View>
+          )}
+        </View>),
+customers: (<View {...webHomePart("customers")}
+          style={[
+            styles.sectionCard,
+            styles.customerInsightsCard,
+            responsive.isDesktop && styles.desktopWideCard,
+          ]}
+        >
+          <View {...webHomePart("people-header")} style={styles.operatorAgendaCardHeader}>
+            <View style={styles.operatorAgendaCardTextWrap}>
+              <Text
+                style={styles.operatorAgendaCardTitle}
+              >
+                {Platform.OS === 'web' ? 'Clienti' : 'Appuntamenti per cliente'}
+              </Text>
+            </View>
+            <CustomerInsightsOpenButton
+              style={styles.operatorAgendaCardAction}
+              onPress={openCustomerInsightsModalForAll}
+              accessibilityLabel="Apri dettagli clienti"
+            >
+              {Platform.OS!=='web'?<Text style={styles.operatorAgendaCardActionText}>Apri</Text>:null}
+              <Ionicons name="chevron-forward" size={18} color={premiumPalette.ink} />
+            </CustomerInsightsOpenButton>
+          </View>
+          <Text {...webHomePart("people-caption")} style={[styles.operatorAgendaCardText, styles.insightDescription]}>
+            {Platform.OS === 'web' ? 'Storico, agenda e totale servizi.' : 'Cerca un cliente: appuntamenti passati e futuri, quelli di oggi e totale servizi.'}
+          </Text>
+
+          <View {...webHomePart("people-stats")} style={styles.operatorAgendaStatsRow}>
+            <View style={[styles.operatorAgendaStatPill, styles.operatorAgendaStatPillPlum]}>
+              {shouldHoldCustomerInsightMetrics ? (
+                <>
+                  <></>
+                  <></>
+                </>
+              ) : (
+                <>
+                  <Text
+                    style={[
+                      styles.operatorAgendaStatValue,
+                      hasWideWebMetricCards && styles.operatorAgendaStatValueWebWide,
+                    ]}
+                    numberOfLines={1}
+                    ellipsizeMode="clip"
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.72}
+                  >
+                    {customerInsightBoards.reduce((total, item) => total + item.pastAppointments, 0)}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.operatorAgendaStatLabel,
+                      hasWideWebMetricCards && styles.operatorAgendaStatLabelWebWide,
+                    ]}
+                    numberOfLines={Platform.OS === 'web' ? 1 : 2}
+                    ellipsizeMode="clip"
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.78}
+                  >
+                    App. passati
+                  </Text>
+                </>
+              )}
+            </View>
+            <View style={[styles.operatorAgendaStatPill, styles.operatorAgendaStatPillSun]}>
+              {shouldHoldCustomerInsightMetrics ? (
+                <>
+                  <></>
+                  <></>
+                </>
+              ) : (
+                <>
+                  <Text
+                    style={[
+                      styles.operatorAgendaStatValue,
+                      hasWideWebMetricCards && styles.operatorAgendaStatValueWebWide,
+                    ]}
+                    numberOfLines={1}
+                    ellipsizeMode="clip"
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.72}
+                  >
+                    {customerInsightBoards.reduce((total, item) => total + item.futureAppointments, 0)}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.operatorAgendaStatLabel,
+                      hasWideWebMetricCards && styles.operatorAgendaStatLabelWebWide,
+                    ]}
+                    numberOfLines={Platform.OS === 'web' ? 1 : 2}
+                    ellipsizeMode="clip"
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.78}
+                  >
+                    App. futuri
+                  </Text>
+                </>
+              )}
+            </View>
+            <View
+              style={[
+                styles.operatorAgendaStatPill,
+                styles.operatorAgendaStatPillRose,
+              ]}
+            >
+              {shouldHoldCustomerInsightMetrics ? (
+                <>
+                  <></>
+                  <></>
+                </>
+              ) : (
+                <>
+                  <Text
+                    style={[
+                      styles.operatorAgendaStatValue,
+                      styles.operatorAgendaStatValueCompact,
+                      hasWideWebMetricCards && styles.operatorAgendaStatValueWebWide,
+                    ]}
+                    numberOfLines={1}
+                    ellipsizeMode="clip"
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.72}
+                  >
+                    {totalCustomerDeliveredSpendCompact}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.operatorAgendaStatLabel,
+                      hasWideWebMetricCards && styles.operatorAgendaStatLabelWebWide,
+                    ]}
+                    numberOfLines={Platform.OS === 'web' ? 1 : 2}
+                    ellipsizeMode="clip"
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.78}
+                  >
+                    Tot servizi
+                  </Text>
+                </>
+              )}
+            </View>
+          </View>
+
+
+        </View>),
+focus: (<View {...webHomePart("focus")} style={[styles.sectionCardDark, responsive.isDesktop && styles.desktopWideCard]}>
+          <Text style={[styles.sectionTitleDark, styles.sectionTitleCentered]}>
+            {tApp(appLanguage, 'home_quick_focus')}
+          </Text>
+          <Text style={[styles.sectionTextDark, styles.sectionTextCentered]}>
+            {shouldHoldOwnerHomeData ? 'Sto aggiornando le attività del salone…' : quickFocusText}
+          </Text>
+        </View>),
+indicators: (<View {...webHomePart("smart")}
+          style={[styles.sectionCard, responsive.isDesktop && styles.desktopWideCard]}
+        >
+          <Text style={[styles.sectionTitle, styles.sectionTitleCentered]}>
+            {tApp(appLanguage, 'home_smart_indicators')}
+          </Text>
+
+          <View style={[styles.smartItem, styles.smartItemCentered]}>
+            <Text style={[styles.smartLabel, styles.smartTextCentered]}>
+              {tApp(appLanguage, 'home_top_service')}
+            </Text>
+            <Text
+              style={[styles.smartValue, styles.smartTextCentered]}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.74}
+              ellipsizeMode="clip"
+            >
+              {servizioTop
+                ? `${servizioTop.nome} · ${servizioTop.count} volte`
+                : 'Ancora nessun dato'}
+            </Text>
+          </View>
+
+          <View style={[styles.smartItem, styles.smartItemCentered]}>
+            <Text style={[styles.smartLabel, styles.smartTextCentered]}>
+              {tApp(appLanguage, 'home_top_duration')}
+            </Text>
+            <Text
+              style={[styles.smartValue, styles.smartTextCentered]}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.78}
+              ellipsizeMode="clip"
+            >
+              {servizioTop ? formatMinutes(servizioTop.durataMinuti) : '—'}
+            </Text>
+          </View>
+
+          <View style={[styles.smartItemLast, styles.smartItemCentered]}>
+            <Text style={[styles.smartLabel, styles.smartTextCentered]}>
+              {tApp(appLanguage, 'home_average_ticket')}
+            </Text>
+            <Text
+              style={[styles.smartValue, styles.smartTextCentered]}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.78}
+              ellipsizeMode="clip"
+            >
+              {formatCash(mediaScontrino)}
+            </Text>
+          </View>
+        </View>),
+invite: (<View {...webHomePart("invite")}
+          style={[styles.sectionCard, responsive.isDesktop && styles.desktopWideCard]}
+          onLayout={(event) => setClientAccessSectionY(event.nativeEvent.layout.y)}
+        >
+          <Text style={[styles.sectionTitle, styles.sectionTitleCentered]}>Invita i tuoi clienti</Text>
+
+          {publicClientLinkHealth !== 'ready' ? (
+            <View {...webHomePart("access-warning")} style={styles.accessWarningCard}>
+              <Text style={styles.accessWarningTitle}>
+                {publicClientLinkHealth === 'missing-salon-code'
+                  ? 'Codice salone non ancora pronto'
+                  : 'Accesso cliente non pronto'}
+              </Text>
+              <Text style={styles.accessWarningText}>
+                {clientAccessStatusCopy}
+              </Text>
+            </View>
+          ) : null}
+
+          <View {...webHomePart("link")} style={styles.accessCard}>
+            <View {...webHomePart("invite-glow")} style={styles.accessCardGlow} />
+            <Text {...webHomePart("invite-label")} style={styles.accessLabel}>{Platform.OS === 'web' ? 'Condividi il tuo salone' : 'Link da condividere'}</Text>
+            <Text {...webHomePart("invite-name")} style={styles.accessCode}>{clientAccessDisplayName}</Text>{Platform.OS === 'web' ? <Text {...webHomePart("invite-description")}>Invita i clienti a prenotare nella tua area dedicata.</Text> : null}
+            <View {...webHomePart("invite-url")} style={styles.accessLinkPlate}>
+              <Text style={styles.accessLink} selectable>
+                {salonClientLink || 'Configura publicClientBaseUrl per generare il link pubblico.'}
+              </Text>
+            </View>
+          <HapticTouchable
+            style={[
+              styles.resetButton,
+              styles.clientAccessPrimaryButton,
+              !canShareClientAccess && styles.buttonDisabled,
+            ]}
+            {...webHomePart("invite-share")} onPress={condividiAccessoCliente}
+            disabled={!canShareClientAccess}
+            pressScale={0.975}
+            pressOpacity={0.98}
+          >
+            <Ionicons name="share-outline" size={18} color={Platform.OS === 'web' ? premiumPalette.actionText : "#FFFFFF"} />
+            <Text style={[styles.resetButtonText, styles.clientAccessPrimaryButtonText]}>
+              Condividi link cliente
+            </Text>
+          </HapticTouchable>
+          </View>
+
+          <View {...webHomePart("qr")} style={[styles.qrCard, responsive.isTablet && styles.qrCardResponsive]}>
+            <View style={styles.qrCardGlow} />
+            <Text {...webHomePart("qr-title")} style={styles.qrTitle}>{Platform.OS === 'web' ? 'Inquadra e prenota' : 'Inquadra e accedi'}</Text>
+            <Text {...webHomePart("qr-subtitle")} style={[styles.qrText, { marginBottom: 18 }]}>Senza digitare il codice</Text>
+            <View {...webHomePart("qr-frame")} style={styles.qrFrame}>
+              <View style={styles.qrPlate}>
+                {!IS_ANDROID || androidHomeQrReady ? (
+                  <QRCode
+                    getRef={(ref) => {
+                      clientQrPrintRef.current = ref;
+                    }}
+                    value={clientQrValue}
+                    size={196}
+                    color="#111111"
+                    backgroundColor="#ffffff"
+                  />
+                ) : (
+                  <View style={styles.androidHomeQrPlaceholder}>
+                    <Ionicons
+                      name="qr-code-outline"
+                      size={78}
+                      color="#CBD5E1"
+                    />
+                  </View>
+                )}
+              </View>
+            </View>
+            <View {...webHomePart("qr-badge")} style={styles.qrSalonBadge}>
+              <Text style={styles.manualCodeLabel}>CODICE IDENTIFICATIVO SALONE</Text>
+              <SalonCodeBadge code={displaySalonCode} />
+              <Text style={styles.manualCodeHint}>In alternativa al QR code, il cliente può inserire questo codice nell’app per associare il salone.</Text>
+            </View>
+          </View>
+
+
+
+          <HapticTouchable
+            {...webHomePart("print")}
+            style={[
+              styles.secondaryActionButton,
+              styles.clientAccessSecondaryButton,
+              !canShareClientAccess && styles.buttonDisabled,
+            ]}
+            onPress={openQrPrintPreview}
+            disabled={!canShareClientAccess}
+            pressScale={0.975}
+            pressOpacity={0.98}
+          >
+            <Ionicons name="print-outline" size={18} color={Platform.OS === 'web' ? premiumPalette.ink : "#17233A"} />
+            <Text style={[styles.secondaryActionButtonText, styles.clientAccessSecondaryButtonText]}>
+              Stampa e affiggi il QR in salone
+            </Text>
+          </HapticTouchable>
+        </View>),
+profile: (<View ref={profileSectionElementRef} {...webHomePart("profile")}
+          {...getWebExpandableCardProps(toggleProfileSection, {
+            expanded: showProfileSection,
+          })}
+          onLayout={(event) => {
+            let sectionY = event.nativeEvent.layout.y;
+            if (Platform.OS === 'web') {
+              // Columns add layout parents: retain the original return-to-profile scroll target.
+              const element = profileSectionElementRef.current as unknown as HTMLElement | null;
+              const scrollElement = scrollRef.current?.getScrollableNode() as HTMLElement | undefined;
+              if (element?.getBoundingClientRect && scrollElement?.getBoundingClientRect) {
+                sectionY = element.getBoundingClientRect().top - scrollElement.getBoundingClientRect().top + scrollElement.scrollTop;
+              }
+            }
+            profileSectionYRef.current = sectionY;
+            if (returnToProfileAfterSaveRef.current) {
+              returnToProfileAfterSaveRef.current = false;
+              scrollRef.current?.scrollTo({ y: Math.max(0, profileSectionYRef.current - 12), animated: false });
+            }
+          }}
+          style={[
+            styles.sectionCard,
+            responsive.isDesktop && styles.desktopWideCard,
+            getWebExpandableCardStyle(showProfileSection),
+          ]}
+        >
+          {Platform.OS==='web'?<Pressable accessibilityRole="button" accessibilityLabel="Apri Profilo salone" onPress={toggleProfileSection} style={{position:'absolute',inset:0,zIndex:3,borderRadius:15}}/>:null}
+          <View {...(Platform.OS==='web'?{dataSet:{homeProfileHeader:'true'}}:{})} pointerEvents={Platform.OS==='web'?'none':'auto'} style={styles.profileAccordionButton}>
+            <View style={styles.profileAccordionTextWrap}>
+              <Text
+                style={[
+                  styles.sectionTitle,
+                  styles.profileAccordionTitle,
+                ]}
+              >
+                Profilo salone
+              </Text>
+              <Text
+                style={[
+                  styles.sectionSubtext,
+                  styles.profileAccordionSubtext,
+                ]}
+              >
+                Insegna, recapiti e dati del tuo salone.
+              </Text>
+            </View>
+            {Platform.OS !== 'web' ? (
+              <HapticTouchable
+                onPress={toggleProfileSection}
+                accessibilityRole="button"
+                accessibilityLabel="Modifica profilo salone"
+                hapticType="light"
+                style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: '#F0F4F8', alignItems: 'center', justifyContent: 'center' }}
+              >
+                <Ionicons name="create-outline" size={23} color="#334B65" />
+              </HapticTouchable>
+            ) : (
+            <View pointerEvents="none" style={{width:30,alignItems:'center'}}><Ionicons name="chevron-forward" size={18} color={premiumPalette.ink}/></View>
+            )}
+          </View>
+
+          <View {...webHomePart("profile-preview")} style={styles.profilePreviewCard}>
+            <View style={styles.profilePreviewHeader}>
+              <Text style={styles.profilePreviewEyebrow}>LA TUA INSEGNA</Text>
+              <Text style={styles.profilePreviewProgress}>
+                {profiloSaloneCompleto
+                  ? `${completedProfileSections}/4 sezioni complete`
+                  : `${requiredFieldsFilled}/6 campi obbligatori`}
+              </Text>
+            </View>
+            <OwnerPremiumHomeRegion part="plaque"><SalonLogoPlaque workspaceId={salonWorkspace.id} name={salonPreviewName}>
+            <Text
+              style={[
+                styles.profilePreviewName,
+                salonNameDisplayStyleInput === 'minuscolo' && styles.profilePreviewNameLower,
+                salonNameDisplayStyleInput === 'stampatello' && styles.profilePreviewNameUpper,
+                {
+                  fontFamily: salonNameFontOptions.find(
+                    (item) => item.key === salonNameFontVariantInput
+                  )?.family,
+                },
+              ]}
+            >
+              {salonPreviewName}
+            </Text>
+            </SalonLogoPlaque></OwnerPremiumHomeRegion>
+            <Text style={styles.profilePreviewMeta}>
+              {activityCategoryInput.trim() || 'Categoria libera'}
+            </Text>
+            <View style={styles.profileProgressRow}>
+              {profileSections.map((section) => (
+                <View
+                  key={section.key}
+                  style={[
+                    styles.profileProgressItem,
+                    section.completed && styles.profileProgressItemCompleted,
+                  ]}
+                >
+                  <Reanimated.View
+                    style={[
+                      styles.profileProgressDot,
+                      section.completed && styles.profileProgressDotCompleted,
+                    ]}
+                    entering={FadeIn.duration(130).easing(Easing.out(Easing.cubic))}
+                    layout={LinearTransition.duration(150).easing(Easing.out(Easing.cubic))}
+                  />
+                  <Text style={styles.profileProgressLabel}>{section.title}</Text>
+                </View>
+              ))}
+            </View>
+            <View style={styles.profilePreviewInfoRow}>
+              <View style={styles.profilePreviewInfoPill}>
+                <Ionicons name="call-outline" size={14} color="#475569" />
+                <Text style={styles.profilePreviewInfoText}>
+                  {businessPhoneInput.trim() || 'Telefono'}
+                </Text>
+              </View>
+              <View style={styles.profilePreviewInfoPill}>
+                <Ionicons name="location-outline" size={14} color="#475569" />
+                <Text style={styles.profilePreviewInfoText} numberOfLines={1}>
+                  {salonPreviewAddress || 'Indirizzo salone'}
+                </Text>
+              </View>
+            </View>
+
+          </View>
+
+          {Platform.OS === 'web' ? salonProfilePopup : null}
+        </View>),
+heading: (<OwnerPremiumHomeRegion part="heading">{Platform.OS === 'web' ? <OwnerPremiumHomeHeading salonName={salonNameInput || salonWorkspace.salonName} onLongPress={() => setShowAdminPanel((current) => !current)} /> : null}</OwnerPremiumHomeRegion>),
+summary: (<OwnerPremiumHomeRegion part="summary">
+          <Text accessibilityRole="header" style={styles.dashboardSectionHeading}>
+            {tApp(appLanguage, 'home_appointments_summary')}
+          </Text>
+          <View style={styles.sectionRow}>
+            <View style={[styles.infoCardSun, responsive.isTablet && styles.infoCardResponsive]}>
+              <Text
+                style={[styles.infoLabel, styles.infoLabelSun]}
+                numberOfLines={1}
+                ellipsizeMode="tail"
+                adjustsFontSizeToFit
+                minimumFontScale={0.66}
+                maxFontSizeMultiplier={1}
+              >
+                {tApp(appLanguage, 'home_collected')}
+              </Text>
+              {shouldHoldBottomSummaryMetrics ? (
+                <DashboardSkeletonBar
+                  width="54%"
+                  height={30}
+                  style={styles.infoValueSkeleton}
+                />
+              ) : (
+                <Text
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.72}
+                  style={[styles.infoValue, styles.infoValueSun]}
+                >
+                  {dashboardCollectedAppointmentsLabel}
+                </Text>
+              )}
+            </View>
+
+            <View
+              style={[styles.infoCardLavender, responsive.isTablet && styles.infoCardResponsive]}
+            >
+              <Text
+                style={[styles.infoLabel, styles.infoLabelLavender]}
+                numberOfLines={1}
+                ellipsizeMode="tail"
+                adjustsFontSizeToFit
+                minimumFontScale={0.66}
+                maxFontSizeMultiplier={1}
+              >
+                {tApp(appLanguage, 'home_bookings')}
+              </Text>
+              {shouldHoldBottomSummaryMetrics ? (
+                <DashboardSkeletonBar
+                  width="54%"
+                  height={30}
+                  style={styles.infoValueSkeleton}
+                />
+              ) : (
+                <Text
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.72}
+                  style={[styles.infoValue, styles.infoValueLavender]}
+                >
+                  {dashboardBookingsCountLabel}
+                </Text>
+              )}
+            </View>
+
+            <View style={[styles.infoCardPeach, responsive.isTablet && styles.infoCardResponsive]}>
+              <Text
+                style={[styles.infoLabel, styles.infoLabelPeach]}
+                numberOfLines={1}
+                ellipsizeMode="tail"
+                adjustsFontSizeToFit
+                minimumFontScale={0.66}
+                maxFontSizeMultiplier={1}
+              >
+                {tApp(appLanguage, 'home_to_collect')}
+              </Text>
+              {shouldHoldBottomSummaryMetrics ? (
+                <DashboardSkeletonBar
+                  width="54%"
+                  height={30}
+                  style={styles.infoValueSkeleton}
+                />
+              ) : (
+                <Text
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.72}
+                  style={[styles.infoValue, styles.infoValuePeach]}
+                >
+                  {dashboardToCollectAppointmentsCountLabel}
+                </Text>
+              )}
+            </View>
+          </View>
+          </OwnerPremiumHomeRegion>),
+shop: (<OwnerPremiumHomeRegion part="shop"><ShopEntry workspaceId={salonWorkspace.id} compact={Platform.OS === 'web'} /></OwnerPremiumHomeRegion>),
+date: (<View style={[styles.heroMetaCard, styles.heroMetaCardToday]}>
+              <Text style={[styles.heroDateLabel, styles.heroDateLabelToday]}>{tApp(appLanguage, 'common_today')}</Text>
+              <Text
+                style={[styles.heroDateValue, styles.heroDateValueToday]}
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                minimumFontScale={0.72}
+              >
+                {formatDateLabel(oggi)}
+              </Text>
+            </View>),
+status: (<View {...(Platform.OS === 'web' ? {dataSet:{availabilityTone:shouldHoldDashboardSummaryMetrics?'neutral':dashboardStatusLabel==='Salone chiuso oggi'?'neutral':livelloOperativo.tone===styles.statusHot?'full':livelloOperativo.tone===styles.statusWarm?'limited':'available'}} : {})} style={[styles.heroMetaCard, styles.heroStatusCard, livelloOperativo.tone]}>
+              {shouldHoldDashboardSummaryMetrics ? (
+                <DashboardSkeletonBar width="68%" height={24} />
+              ) : (
+                <Text
+                  style={[styles.statusPillText, livelloOperativo.textTone]}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.74}
+                >
+                  {dashboardStatusLabel}
+                </Text>
+              )}
+            </View>),
+appointments: (<View style={styles.heroMetricCardBlue}>
+              {shouldHoldAppointmentsTodayMetric ? (
+                <DashboardSkeletonBar
+                  width="42%"
+                  height={34}
+                  style={styles.heroMetricSkeleton}
+                />
+              ) : (
+                <Text
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.72}
+                  style={[styles.heroMetricNumber, styles.heroMetricNumberBlue]}
+                >
+                  {dashboardAppointmentsTodayLabel}
+                </Text>
+              )}
+              <Text
+                style={[styles.heroMetricLabel, styles.heroMetricLabelBlue]}
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                minimumFontScale={0.78}
+              >
+                {tApp(appLanguage, 'home_appointments_today')}
+              </Text>
+            </View>),
+unpaid: (<View style={styles.heroMetricCardRose}>
+              {shouldHoldToCollectMetric ? (
+                <DashboardSkeletonBar
+                  width="56%"
+                  height={34}
+                  style={styles.heroMetricSkeleton}
+                />
+              ) : (
+                <Text
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.72}
+                  style={[styles.heroMetricNumber, styles.heroMetricNumberRose]}
+                >
+                  {dashboardToCollectLabel}
+                </Text>
+              )}
+              <Text
+                style={[styles.heroMetricLabel, styles.heroMetricLabelRose]}
+                numberOfLines={2}
+                adjustsFontSizeToFit
+                minimumFontScale={0.78}
+              >
+                {tApp(appLanguage, 'home_unpaid_appointments_today')}
+              </Text>
+            </View>),
+clientTotal: (<View
+              style={[
+                styles.insightCard,
+                responsive.isTablet && styles.halfWidthCard,
+                responsive.isDesktop && styles.desktopThirdCard,
+                compactSalonTotals && styles.insightCardCompact,
+              ]}
+            >
+              <HomeMetricCopy
+                text={tApp(appLanguage, 'tab_clients')}
+                textStyle={[styles.insightTitle, styles.insightTitlePlum]}
+                viewportStyle={styles.homeMetricTitleViewport}
+              />
+              {shouldHoldClientMetric ? (
+                <>
+                  <DashboardSkeletonBar
+                    width="36%"
+                    height={36}
+                    style={styles.insightNumberSkeleton}
+                  />
+                  {!compactSalonTotals && <DashboardSkeletonBar
+                    width="78%"
+                    height={18}
+                    style={styles.insightHintSkeleton}
+                  />}
+                </>
+              ) : (
+                <>
+                  <HomeMetricAmount value={dashboardClientCountLabel} style={[styles.insightNumber, styles.insightNumberPlum]} />
+                  {!compactSalonTotals && <HomeMetricCopy
+                    scrolling
+                    text={dashboardLastClientLabel}
+                    textStyle={[styles.insightHint, styles.insightHintPlum]}
+                  />}
+                </>
+              )}
+            </View>),
+income: (<View
+              style={[
+                styles.insightCardMint,
+                responsive.isTablet && styles.halfWidthCard,
+                responsive.isDesktop && styles.desktopThirdCard,
+                compactSalonTotals && styles.insightCardCompact,
+              ]}
+            >
+              <HomeMetricCopy
+                  text={tApp(appLanguage, 'home_total_income')}
+                  textStyle={[styles.insightTitle, styles.insightTitleMint]}
+                  viewportStyle={styles.homeMetricTitleViewport}
+                />
+              {shouldHoldTotalIncomeMetric ? (
+                <DashboardSkeletonBar
+                  width="58%"
+                  height={38}
+                  style={styles.insightNumberSkeleton}
+                />
+              ) : (
+                <HomeMetricAmount value={dashboardTotalIncomeLabel} style={[styles.insightNumber, styles.insightNumberMint]} />
+              )}
+              {!compactSalonTotals && <HomeMetricCopy
+                  scrolling
+                  text={tApp(appLanguage, 'home_registered_movements')}
+                  textStyle={[styles.insightHint, styles.insightHintMint]}
+                />}
+            </View>),
+finance: (([
+              {
+                title: 'home_pending_cash',
+                compactTitle: 'Da saldare',
+                hint: 'home_pending_cash_hint',
+                value: dashboardPendingCashLabel,
+                cardStyle: styles.insightCardPending,
+                textStyle: styles.cashPendingText,
+              },
+              {
+                title: 'home_legacy_cash',
+                compactTitle: 'Da verificare',
+                hint: 'home_legacy_cash_hint',
+                value: dashboardLegacyCashLabel,
+                cardStyle: styles.insightCardLegacy,
+                textStyle: styles.cashLegacyText,
+              },
+            ] as const).map(metric => (
+              <View
+                key={metric.title}
+                style={[
+                  styles.insightCard,
+                  metric.cardStyle,
+                  responsive.isTablet && styles.halfWidthCard,
+                  responsive.isDesktop && styles.desktopThirdCard,
+                  compactSalonTotals && styles.insightCardCompact,
+                ]}
+              >
+                <HomeMetricCopy
+                  text={compactSalonTotals ? metric.compactTitle : tApp(appLanguage, metric.title)}
+                  textStyle={[styles.insightTitle, metric.textStyle]}
+                  viewportStyle={styles.homeMetricTitleViewport}
+                />
+                {shouldHoldTotalIncomeMetric ? (
+                  <DashboardSkeletonBar width="58%" height={38} style={styles.insightNumberSkeleton} />
+                ) : (
+                  <HomeMetricAmount value={metric.value} style={styles.insightNumber} />
+                )}
+                {!compactSalonTotals && <HomeMetricCopy
+                  scrolling
+                  text={tApp(appLanguage, metric.hint)}
+                  textStyle={[styles.insightHint, metric.textStyle]}
+                />}
+              </View>
+            ))),
+reminder: (<DirectoryReminder workspaceId={salonWorkspace.id} active={isHomeScreenFocused && isAuthenticated && !ownerInitialDataHydrating} />),
+admin: (showAdminPanel ? (
           <View style={[styles.sectionCard, responsive.isDesktop && styles.desktopWideCard]}>
             <Text style={[styles.sectionTitle, styles.sectionTitleCentered]}>Admin account</Text>
             <Text style={[styles.sectionSubtext, styles.sectionSubtextCentered]}>
@@ -2396,152 +4539,104 @@ const openQrPrintPreview = useCallback(() => {
               </HapticTouchable>
             </View>
           </View>
-        ) : null}
-
-        <View style={[styles.sectionCard, responsive.isDesktop && styles.desktopWideCard]}>
-          <Text style={[styles.sectionTitle, styles.sectionTitleCentered]}>Accesso cliente</Text>
-          <Text style={[styles.sectionSubtext, styles.sectionSubtextCentered]}>
-            Questo codice collega il frontend cliente direttamente a questo salone. Condividi il link
-            oppure fai scansionare il QR al cliente.
-          </Text>
-
-          {publicClientLinkHealth !== 'ready' ? (
-            <View style={styles.accessWarningCard}>
-              <Text style={styles.accessWarningTitle}>
-                {publicClientLinkHealth === 'missing-salon-code'
-                  ? 'Codice salone non ancora pronto'
-                  : 'Accesso cliente non pronto'}
-              </Text>
-              <Text style={styles.accessWarningText}>
-                {clientAccessStatusCopy}
-              </Text>
-            </View>
-          ) : null}
-
-          <View style={styles.accessCard}>
-            <View style={styles.accessCardGlow} />
-            <Text style={styles.accessLabel}>Link web cliente</Text>
-            <Text style={styles.accessCode}>{clientAccessDisplayName}</Text>
-            <View style={styles.accessLinkPlate}>
-              <Text style={styles.accessLink} numberOfLines={2}>
-                {salonClientLink || 'Configura publicClientBaseUrl per generare il link pubblico.'}
-              </Text>
-            </View>
-            <Reanimated.View
-              style={[
-                styles.accessHealthBadge,
-                publicClientLinkHealth === 'ready'
-                  ? styles.accessHealthBadgeReady
-                  : styles.accessHealthBadgeWarning,
-              ]}
-              entering={FadeIn.duration(140).easing(Easing.out(Easing.cubic))}
-              layout={LinearTransition.duration(160).easing(Easing.out(Easing.cubic))}
-            >
-              <Text
-                style={[
-                  styles.accessHealthText,
-                  publicClientLinkHealth === 'ready'
-                    ? styles.accessHealthTextReady
-                    : styles.accessHealthTextWarning,
-                ]}
-              >
-                {clientAccessStatusCopy}
-              </Text>
-            </Reanimated.View>
-          </View>
-
-          <View style={[styles.qrCard, responsive.isTablet && styles.qrCardResponsive]}>
-            <View style={styles.qrCardGlow} />
-            <View style={styles.qrFrame}>
-              <View style={styles.qrPlate}>
-                <QRCode
-                  value={clientQrValue}
-                  size={170}
-                  color="#111111"
-                  backgroundColor="#ffffff"
-                />
-              </View>
-            </View>
-            <View style={styles.qrSalonBadge}>
-              <Text
-                style={styles.qrSalonBadgeText}
-                numberOfLines={1}
-                adjustsFontSizeToFit
-                minimumFontScale={0.75}
-                ellipsizeMode="tail"
-              >
-                {salonWorkspace.salonCode || salonNameInput.trim() || salonWorkspace.salonName || 'Salon Pro'}
-              </Text>
-            </View>
-            <Text
-              style={styles.qrTitle}
-              numberOfLines={1}
-              adjustsFontSizeToFit
-              minimumFontScale={0.76}
-              ellipsizeMode="clip"
-            >
-              QR cliente del salone
-            </Text>
-            <Text
-              style={styles.qrText}
-              numberOfLines={2}
-              adjustsFontSizeToFit
-              minimumFontScale={0.78}
-              ellipsizeMode="clip"
-            >
-              {publicClientLinkHealth === 'ready'
-                ? "Questo QR apre direttamente l'area cliente del tuo salone nell'app."
-                : "Il QR resta bloccato finché il salone non ha un codice valido da aprire nell'app."}
-            </Text>
-          </View>
-
-          <HapticTouchable
-            style={[styles.resetButton, !canShareClientAccess && styles.buttonDisabled]}
-            onPress={condividiAccessoCliente}
-            disabled={!canShareClientAccess}
-            pressScale={0.975}
-            pressOpacity={0.98}
-          >
-            <Text style={styles.resetButtonText}>Condividi link cliente</Text>
-          </HapticTouchable>
-
-          <HapticTouchable
-            style={[styles.secondaryActionButton, !canShareClientAccess && styles.buttonDisabled]}
-            onPress={openQrPrintPreview}
-            disabled={!canShareClientAccess}
-            pressScale={0.975}
-            pressOpacity={0.98}
-          >
-            <Text style={styles.secondaryActionButtonText}>Stampa QR code salone</Text>
-          </HapticTouchable>
-        </View>
-
+        ) : null),
+  };
+  return (
+    <View
+      style={styles.container}
+      onLayout={() => {
+        setOwnerHomeReady(true);
+      }}
+    >
+      <ScrollView
+        {...(Platform.OS==='web'?({dataSet:{premiumPageScroll:"true"}} as any):{})}
+        ref={scrollRef}
+        style={styles.container}
+        contentContainerStyle={[
+          styles.content,
+          Platform.OS==='web'?{paddingBottom:responsive.width<1000?80:24}:null,
+          { paddingTop: contentTopPadding },
+          { paddingHorizontal: responsive.horizontalPadding },
+        ]}
+        showsVerticalScrollIndicator
+        bounces
+        alwaysBounceVertical
+        overScrollMode="auto"
+        indicatorStyle="black"
+        scrollIndicatorInsets={{ right: 2 }}
+        contentInsetAdjustmentBehavior="never"
+        keyboardDismissMode="on-drag"
+        keyboardShouldPersistTaps="handled"
+        onScrollBeginDrag={Keyboard.dismiss}
+        onScroll={(event) => {
+          if (
+            IS_ANDROID &&
+            androidHomeSecondaryReady &&
+            !androidHomeQrReady &&
+            clientAccessSectionY > 0 &&
+            event.nativeEvent.contentOffset.y >= clientAccessSectionY - 900
+          ) {
+            setAndroidHomeQrReady(true);
+          }
+        }}
+        scrollEventThrottle={32}
+      >
+        <OwnerPremiumHomeCss />
+        <View {...webHomePart("dashboard-host")} style={[styles.pageShell, { maxWidth: Platform.OS === 'web' ? '100%' : responsive.contentMaxWidth }]}>{Platform.OS === 'web' ? <OwnerPremiumDashboard privacyScope={salonWorkspace.id&&salonAccountEmail?`${salonWorkspace.id}:${salonAccountEmail.toLowerCase()}`:''} secondaryMetrics={[
+      {label:'Richieste da confermare',value:shouldHoldOwnerHomeData?'—':String(premiumOperationalMetrics.pending),hint:'Oggi e prossimi giorni',icon:'notifications-outline'},
+      {label:'Fasce libere oggi',value:shouldHoldOwnerHomeData?'—':String(premiumOperationalMetrics.remaining),hint:premiumOperationalMetrics.closed?'Salone chiuso':'Fasce residue · stima agenda',icon:'calendar-clear-outline'},
+      {label:'Occupazione agenda',value:shouldHoldOwnerHomeData||premiumOperationalMetrics.occupancy===null?'—':`${premiumOperationalMetrics.occupancy}%`,hint:'Fasce occupate della giornata',icon:'pie-chart-outline'},
+      {label:'Nuovi clienti del mese',value:shouldHoldOwnerHomeData||premiumOperationalMetrics.newClients===null?'—':String(premiumOperationalMetrics.newClients),hint:premiumOperationalMetrics.newClients===null?'Date di creazione incomplete':'In base alla data di creazione',icon:'person-add-outline'}
+    ]} today={oggi} slots={homePresentation} profileProgress={`${completedProfileSections}/4 sezioni complete`} profileOpen={showProfileSection} inviteLabel={clientAccessDisplayName} /> : <OwnerPremiumNativeHome
+      today={oggi} income={reserveCashAmounts?'Riservato':shouldHoldTotalIncomeMetric?'—':dashboardTotalIncomeLabel}
+      appointments={shouldHoldDashboardSummaryMetrics?'—':dashboardAppointmentsTodayLabel}
+      unpaid={shouldHoldDashboardSummaryMetrics?'—':dashboardToCollectLabel}
+      clients={shouldHoldDashboardSummaryMetrics?'—':dashboardClientCountLabel}
+      pending={shouldHoldDashboardSummaryMetrics?'—':String(premiumOperationalMetrics.pending)}
+      pendingCash={reserveCashAmounts?'Riservato':shouldHoldDashboardSummaryMetrics?'—':dashboardPendingCashLabel}
+      legacyCash={reserveCashAmounts?'Riservato':shouldHoldDashboardSummaryMetrics?'—':dashboardLegacyCashLabel}
+      available={shouldHoldDashboardSummaryMetrics||premiumOperationalMetrics.occupancy===null?null:100-premiumOperationalMetrics.occupancy}
+      operatorSummary={shouldHoldOperatorInsightMetrics?'—':`${operatori.length} attivi · ${totalOperatorOpenTasks} da fare`}
+      customerSummary={shouldHoldCustomerInsightMetrics?'—':`${customerInsightBoards.reduce((t,c)=>t+c.pastAppointments,0)} passati · ${customerInsightBoards.reduce((t,c)=>t+c.futureAppointments,0)} futuri`}
+      onOperators={openOperatorAgendaModalForAll} onCustomers={openCustomerInsightsModalForAll}
+      onAgenda={()=>router.navigate('/(tabs)/agenda')} onRequests={()=>router.navigate('/(tabs)/prenotazioni')}
+      onAdmin={()=>setShowAdminPanel(current=>!current)}
+      priority={homePresentation.priority} reminder={homePresentation.reminder}
+      details={{results:reserveCashAmounts?<Text style={styles.sectionSubtext}>Apri Cassa per consultare gli importi riservati al titolare.</Text>:<NativeHomeResults pending={shouldHoldDashboardSummaryMetrics?'—':dashboardPendingCashLabel} legacy={shouldHoldDashboardSummaryMetrics?'—':dashboardLegacyCashLabel} settled={shouldHoldBottomSummaryMetrics?'—':dashboardCollectedAppointmentsLabel} bookings={shouldHoldBottomSummaryMetrics?'—':dashboardBookingsCountLabel} unpaid={shouldHoldBottomSummaryMetrics?'—':dashboardToCollectAppointmentsCountLabel} focus={homePresentation.focus}/>,indicators:<NativeHomeIndicators service={shouldHoldOwnerHomeData?'—':servizioTop?`${servizioTop.nome} · ${servizioTop.count} volte`:'Ancora nessun dato'} duration={shouldHoldOwnerHomeData?'—':servizioTop?formatMinutes(servizioTop.durataMinuti):'—'} average={reserveCashAmounts?'Riservato':shouldHoldOwnerHomeData?'—':formatCash(mediaScontrino)}/>,invite:<NativeHomeInvite name={clientAccessDisplayName} link={salonClientLink || 'Link cliente non ancora disponibile'} code={displaySalonCode} enabled={canShareClientAccess} warning={publicClientLinkHealth==='ready'?null:clientAccessStatusCopy} onShare={condividiAccessoCliente} onPrint={openQrPrintPreview} qr={<QRCode getRef={(ref)=>{clientQrPrintRef.current=ref;}} value={clientQrValue} size={196} color="#111111" backgroundColor="#FFFFFF"/>}/>}}
+      profile={homePresentation.profile} admin={homePresentation.admin} onProfile={toggleProfileSection}
+      onInvite={()=>setAndroidHomeQrReady(true)}
+      onAvailability={()=>router.navigate({pathname:'/(tabs)/agenda',params:{availabilityToken:String(Date.now()),availabilityFrom:'home'}})}
+      shop={<ShopEntry premiumNative workspaceId={salonWorkspace.id} renderTrigger={(onPress,attention)=><NativeHomeQuickAction title="Shop e magazzino" icon="bag-handle-outline" hint="Prodotti, ordini e scorte" onPress={onPress} attention={attention}/>}/>}
+    />}
         </View>
       </ScrollView>
 
-      <Modal
+      {Platform.OS !== 'web' ? salonProfilePopup : null}
+
+      {showOperatorAgendaModal ? (
+      <HapticTouchableFastRegion>
+      <Modal supportedOrientations={TABLET_MODAL_ORIENTATIONS}
         visible={showOperatorAgendaModal}
         transparent
-        animationType="fade"
+        animationType="none"
         onRequestClose={() => {
           setShowOperatorAgendaModal(false);
-          setSelectedOperatorBoardId(null);
         }}
       >
         <View style={styles.operatorModalBackdrop}>
-          <View style={styles.operatorModalCard}>
-            <View style={styles.operatorModalHeader}>
+          <DockedSheetSurface {...(Platform.OS !== 'web' ? {onClose: () => {
+          setShowOperatorAgendaModal(false);
+        }, includeBottomSafeArea:false, bottomSafeAreaSpacing:0} : {})} style={styles.operatorModalCard}>
+            {Platform.OS==='web'?<OwnerWebSheetHeader title={selectedOperatorBoard?`Appuntamenti di ${selectedOperatorBoard.operator.nome}`:'Agenda operatori'} subtitle="Appuntamenti, richieste e lavoro da chiudere." closeLabel="Chiudi agenda operatori" onClose={()=>setShowOperatorAgendaModal(false)}/>:(            <View style={[styles.operatorModalHeader, { marginBottom: 8 }]}>
               <View style={styles.operatorModalHeaderTextWrap}>
-                <Text style={styles.operatorModalEyebrow}>Live operatori</Text>
-                <Text style={styles.operatorModalTitle}>
+                <Text style={[styles.operatorModalEyebrow, { fontSize: 10, marginBottom: 3 }]}>Live operatori</Text>
+                <Text style={[styles.operatorModalTitle, { fontSize: Platform.OS === 'web' ? 27 : 24, marginBottom: 3 }]}>
                   {selectedOperatorBoard
                     ? `Appuntamenti di ${selectedOperatorBoard.operator.nome}`
-                    : 'Appuntamenti per operatore'}
+                    : 'Agenda operatori'}
                 </Text>
                 <Text style={styles.operatorModalText}>
-                  {selectedOperatorBoard
-                    ? 'Vista dedicata del singolo operatore, con appuntamenti, richieste in attesa e lavoro da chiudere.'
-                    : 'Situazione aggiornata in tempo reale: appuntamenti, richieste in attesa e lavoro ancora da chiudere.'}
+                  Appuntamenti, richieste e lavoro da chiudere.
                 </Text>
               </View>
 
@@ -2549,39 +4644,104 @@ const openQrPrintPreview = useCallback(() => {
                 style={styles.operatorModalCloseButton}
                 onPress={() => {
                   setShowOperatorAgendaModal(false);
-                  setSelectedOperatorBoardId(null);
                 }}
+                accessibilityLabel="Chiudi agenda operatori"
+                accessibilityRole="button"
                 pressScale={0.97}
                 pressOpacity={0.96}
               >
-                <Ionicons name="close" size={22} color="#0F172A" />
+                {Platform.OS === 'web' ? <Text style={{fontSize:12,color:premiumPalette.ink}}>Chiudi</Text> : null}<Ionicons name="close-outline" size={19} color={premiumPalette.ink} />
               </HapticTouchable>
             </View>
 
+)}
             <View style={styles.operatorModalToolbar}>
+              {Platform.OS !== 'web' ? <Text style={{width:'100%',fontSize:11,lineHeight:16,color:premiumPalette.muted}}>Periodo del report · PDF o stampa</Text> : null}
+              <View style={styles.operatorModalScopeRow}>
+                {([
+                  { key: 'day', label: 'Giorno' },
+                  { key: 'week', label: 'Settimana' },
+                  { key: 'month', label: 'Mese' },
+                ] as const).map((item) => {
+                  const active = operatorAgendaPrintScope === item.key;
+                  return (
+                    <HapticTouchable
+                      key={item.key}
+                      style={[
+                        styles.operatorModalScopeChip,
+                        active && styles.operatorModalScopeChipActive,
+                      ]}
+                      onPress={() => setOperatorAgendaPrintScope(item.key)}
+                      pressScale={0.98}
+                      pressOpacity={0.96}
+                    >
+                      <Text
+                        style={[
+                          styles.operatorModalScopeChipText,
+                          active && styles.operatorModalScopeChipTextActive,
+                        ]}
+                      >
+                        {item.label}
+                      </Text>
+                    </HapticTouchable>
+                  );
+                })}
+              </View>
               <HapticTouchable
-                style={styles.operatorModalToolbarButton}
+                style={[
+                  styles.operatorModalToolbarButton,
+                  isOperatorAgendaSystemDialogOpen && styles.operatorModalToolbarButtonDisabled,
+                ]}
                 onPress={exportOperatorAgendaPdf}
+                disabled={isOperatorAgendaSystemDialogOpen}
                 pressScale={0.98}
                 pressOpacity={0.96}
               >
-                <Ionicons name="document-text-outline" size={16} color="#0F172A" />
-                <Text style={styles.operatorModalToolbarButtonText}>PDF</Text>
+                <Ionicons
+                  name="document-text-outline"
+                  size={16}
+                  color={isOperatorAgendaSystemDialogOpen ? '#94A3B8' : premiumPalette.ink}
+                />
+                <Text
+                  style={[
+                    styles.operatorModalToolbarButtonText,
+                    isOperatorAgendaSystemDialogOpen && styles.operatorModalToolbarButtonTextDisabled,
+                  ]}
+                >
+                  PDF
+                </Text>
               </HapticTouchable>
-              <HapticTouchable
-                style={styles.operatorModalToolbarButton}
-                onPress={printOperatorAgenda}
-                pressScale={0.98}
-                pressOpacity={0.96}
-              >
-                <Ionicons name="print-outline" size={16} color="#0F172A" />
-                <Text style={styles.operatorModalToolbarButtonText}>Stampa</Text>
-              </HapticTouchable>
+              {Platform.OS !== 'web' ? (
+                <HapticTouchable
+                  style={[
+                    styles.operatorModalToolbarButton,
+                    isOperatorAgendaSystemDialogOpen && styles.operatorModalToolbarButtonDisabled,
+                  ]}
+                  onPress={printOperatorAgenda}
+                  disabled={isOperatorAgendaSystemDialogOpen}
+                  pressScale={0.98}
+                  pressOpacity={0.96}
+                >
+                  <Ionicons
+                    name="print-outline"
+                    size={16}
+                    color={isOperatorAgendaSystemDialogOpen ? '#94A3B8' : premiumPalette.ink}
+                  />
+                  <Text
+                    style={[
+                      styles.operatorModalToolbarButtonText,
+                      isOperatorAgendaSystemDialogOpen && styles.operatorModalToolbarButtonTextDisabled,
+                    ]}
+                  >
+                    Stampa
+                  </Text>
+                </HapticTouchable>
+              ) : null}
             </View>
 
             <ScrollView
               style={styles.operatorModalScroll}
-              contentContainerStyle={styles.operatorModalScrollContent}
+              {...webHomePart("insight-scroll")} contentContainerStyle={[styles.operatorModalScrollContent, Platform.OS !== 'web' && {paddingBottom:homeSheetInsets.bottom+8}]}
               showsVerticalScrollIndicator
               indicatorStyle="black"
             >
@@ -2594,14 +4754,14 @@ const openQrPrintPreview = useCallback(() => {
                 </View>
               ) : (
                 visibleOperatorBoards.map((item) => (
-                  <View key={item.operator.id} style={styles.operatorModalBoard}>
+                  <View {...webHomePart("operator-detail")} key={item.operator.id} style={styles.operatorModalBoard}>
                     <View style={styles.operatorModalBoardHeader}>
                       <View style={styles.operatorModalBoardIdentity}>
                         <View style={styles.operatorModalBoardAvatar}>
                           {item.operator.fotoUri ? (
                             <Image source={{ uri: item.operator.fotoUri }} style={styles.operatorModalBoardAvatarImage} />
                           ) : (
-                            <Ionicons name="person" size={18} color="#1E293B" />
+                            <Ionicons name="person-outline" size={20} color={Platform.OS === 'web' ? premiumPalette.ink : "#1E293B"} />
                           )}
                         </View>
                         <View style={styles.operatorModalBoardTextWrap}>
@@ -2672,27 +4832,27 @@ const openQrPrintPreview = useCallback(() => {
                 ))
               )}
             </ScrollView>
-          </View>
+          </DockedSheetSurface>
         </View>
       </Modal>
+      </HapticTouchableFastRegion>
+      ) : null}
 
-      <Modal
-        visible={showCustomerInsightsModal}
-        transparent
-        animationType="fade"
-        onRequestClose={() => {
+      <HapticTouchableFastRegion>
+      <CustomerInsightsOverlay
+        visible={showCustomerInsightsModal && isHomeScreenFocused}
+        onClose={() => {
           setShowCustomerInsightsModal(false);
-          setCustomerInsightSearchQuery('');
         }}
       >
         <View style={styles.operatorModalBackdrop}>
-          <View style={styles.customerInsightModalCard}>
-            <View style={styles.operatorModalHeader}>
+          <DockedSheetSurface {...(Platform.OS !== 'web' ? {onClose: () => setShowCustomerInsightsModal(false), includeBottomSafeArea:false, bottomSafeAreaSpacing:0} : {})} style={styles.customerInsightModalCard}>
+            {Platform.OS==='web'?<OwnerWebSheetHeader title="Clienti del salone" subtitle="Storico, agenda e servizi richiesti." closeLabel="Chiudi appuntamenti cliente" onClose={()=>setShowCustomerInsightsModal(false)}/>:(            <View style={styles.operatorModalHeader}>
               <View style={styles.operatorModalHeaderTextWrap}>
                 <Text style={styles.operatorModalEyebrow}>Focus clienti</Text>
-                <Text style={styles.operatorModalTitle}>Dettagli appuntamenti clienti</Text>
+                <Text style={styles.operatorModalTitle}>{Platform.OS === 'web' ? 'Dettagli appuntamenti clienti' : 'Clienti del salone'}</Text>
                 <Text style={styles.operatorModalText}>
-                  Cerca il cliente e consulta storico, agenda attiva, spesa totale e servizi più richiesti.
+                  {Platform.OS === 'web' ? 'Cerca il cliente e consulta storico, agenda attiva, spesa totale e servizi più richiesti.' : 'Storico, prossimi appuntamenti e servizi.'}
                 </Text>
               </View>
 
@@ -2700,43 +4860,46 @@ const openQrPrintPreview = useCallback(() => {
                 style={styles.operatorModalCloseButton}
                 onPress={() => {
                   setShowCustomerInsightsModal(false);
-                  setCustomerInsightSearchQuery('');
-                  setCustomerAppointmentFilter('all');
                 }}
+                accessibilityRole="button"
+                accessibilityLabel="Chiudi appuntamenti cliente"
                 pressScale={0.97}
                 pressOpacity={0.96}
               >
-                <Ionicons name="close" size={22} color="#0F172A" />
+                {Platform.OS === 'web' ? <Text style={{fontSize:12,color:premiumPalette.ink}}>Chiudi</Text> : null}<Ionicons name="close-outline" size={19} color={premiumPalette.ink} />
               </HapticTouchable>
             </View>
 
-            <ClearableTextInput
-              style={styles.customerInsightSearchInput}
-              placeholder="Cerca cliente, telefono, email o servizio"
-              placeholderTextColor="#8A94A6"
+)}
+            <DeferredCustomerInsightSearchInput
+              active={showCustomerInsightsModal}
               value={customerInsightSearchQuery}
-              onChangeText={setCustomerInsightSearchQuery}
-              autoCapitalize="words"
-              returnKeyType="search"
+              onCommit={setCustomerInsightSearchQuery}
             />
 
-            <ScrollView
+            <FlatList
               horizontal
               style={styles.customerInsightPickerScroll}
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.customerInsightPickerRow}
-            >
-              {filteredCustomerInsightBoards.map((item) => {
-                const selected = item.customer.id === selectedCustomerInsightBoard?.customer.id;
+              data={filteredCustomerInsightBoards}
+              extraData={selectedCustomerInsightBoard?.boardKey}
+              keyExtractor={(item) => item.boardKey}
+              initialNumToRender={8}
+              maxToRenderPerBatch={8}
+              windowSize={3}
+              keyboardShouldPersistTaps="handled"
+              renderItem={({ item }) => {
+                const selected = item.boardKey === selectedCustomerInsightBoard?.boardKey;
 
                 return (
                   <HapticTouchable
-                    key={item.customer.id}
+                    key={item.boardKey}
                     style={[
                       styles.customerInsightPickerChip,
                       selected && styles.customerInsightPickerChipActive,
                     ]}
-                    onPress={() => setSelectedCustomerInsightId(item.customer.id)}
+                    onPress={() => setSelectedCustomerInsightId(item.boardKey)}
                     pressScale={0.98}
                     pressOpacity={0.98}
                   >
@@ -2745,8 +4908,8 @@ const openQrPrintPreview = useCallback(() => {
                         styles.customerInsightPickerChipTitle,
                         selected && styles.customerInsightPickerChipTitleActive,
                       ]}
-                      numberOfLines={1}
-                      adjustsFontSizeToFit
+                      numberOfLines={Platform.OS === 'web' ? 1 : 2}
+                      adjustsFontSizeToFit={Platform.OS === 'web'}
                       minimumFontScale={0.78}
                       allowFontScaling={false}
                     >
@@ -2764,12 +4927,12 @@ const openQrPrintPreview = useCallback(() => {
                     </Text>
                   </HapticTouchable>
                 );
-              })}
-            </ScrollView>
+              }}
+            />
 
             <ScrollView
               style={styles.operatorModalScroll}
-              contentContainerStyle={styles.operatorModalScrollContent}
+              contentContainerStyle={[styles.operatorModalScrollContent, Platform.OS !== 'web' && {paddingBottom:homeSheetInsets.bottom+8}]}
               showsVerticalScrollIndicator
               indicatorStyle="black"
             >
@@ -2781,7 +4944,7 @@ const openQrPrintPreview = useCallback(() => {
                   </Text>
                 </View>
               ) : (
-                <View style={styles.customerInsightBoard}>
+                <View {...webHomePart("customer-detail")} style={styles.customerInsightBoard}>
                   <View style={styles.customerInsightBoardHeader}>
                     <View style={styles.customerInsightBoardIdentity}>
                       <Text style={styles.customerInsightBoardName}>
@@ -2807,7 +4970,7 @@ const openQrPrintPreview = useCallback(() => {
                     </View>
                   </View>
 
-                  <View style={styles.customerInsightStatsGrid}>
+                  <View {...webHomePart("customer-stats")} style={styles.customerInsightStatsGrid}>
                     <View style={styles.customerInsightStatCard}>
                       <Text style={styles.customerInsightStatValue}>
                         {selectedCustomerInsightBoard.pastAppointments}
@@ -2828,7 +4991,7 @@ const openQrPrintPreview = useCallback(() => {
                     </View>
                     <View style={styles.customerInsightStatCard}>
                       <Text style={styles.customerInsightStatValue}>
-                        € {selectedCustomerInsightBoard.averageTicket.toFixed(0)}
+                        {reserveCashAmounts?'Riservato':`€ ${selectedCustomerInsightBoard.averageTicket.toFixed(0)}`}
                       </Text>
                       <Text style={styles.customerInsightStatLabel}>Ticket medio</Text>
                     </View>
@@ -2840,7 +5003,7 @@ const openQrPrintPreview = useCallback(() => {
                     </View>
                     <View style={styles.customerInsightStatCard}>
                       <Text style={styles.customerInsightStatValue}>
-                        € {selectedCustomerInsightBoard.collectedSpent.toFixed(0)}
+                        {reserveCashAmounts?'Riservato':`€ ${selectedCustomerInsightBoard.collectedSpent.toFixed(0)}`}
                       </Text>
                       <Text style={styles.customerInsightStatLabel}>Incassato</Text>
                     </View>
@@ -2876,7 +5039,7 @@ const openQrPrintPreview = useCallback(() => {
                     </View>
                   </View>
 
-                  <View style={styles.customerInsightServicesCard}>
+                  <View {...webHomePart("customer-services")} style={styles.customerInsightServicesCard}>
                     <Text style={styles.customerInsightSectionTitle}>Servizi fruiti</Text>
                     {selectedCustomerInsightBoard.serviceStats.length === 0 ? (
                       <Text style={styles.customerInsightSectionEmpty}>
@@ -2885,7 +5048,7 @@ const openQrPrintPreview = useCallback(() => {
                     ) : (
                       <View style={styles.customerInsightServiceList}>
                         {selectedCustomerInsightBoard.serviceStats.slice(0, 6).map((item) => (
-                          <View key={`${selectedCustomerInsightBoard.customer.id}-${item.serviceName}`} style={styles.customerInsightServiceRow}>
+                          <View key={`${selectedCustomerInsightBoard.boardKey}-${item.serviceName}`} style={styles.customerInsightServiceRow}>
                             <Text style={styles.customerInsightServiceName}>{item.serviceName}</Text>
                             <Text style={styles.customerInsightServiceMeta}>
                               {item.count}x · € {item.total.toFixed(2)}
@@ -2896,20 +5059,26 @@ const openQrPrintPreview = useCallback(() => {
                     )}
                   </View>
 
-                  <View style={styles.customerInsightTimelineCard}>
+                  <View {...webHomePart("customer-timeline")} style={styles.customerInsightTimelineCard}>
                     <Text style={styles.customerInsightSectionTitle}>Lista appuntamenti</Text>
-                    <View style={styles.customerInsightFilterRow}>
+                    <View style={premiumFilterStyles.panel}>
+                      <View style={premiumFilterStyles.icon} accessibilityLabel="Filtri appuntamenti">
+                        <Ionicons name="funnel-outline" size={18} color={premiumPalette.muted} />
+                      </View>
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={premiumFilterStyles.viewport} contentContainerStyle={styles.customerInsightFilterRow} keyboardShouldPersistTaps="handled">
                       {customerAppointmentFilterOptions.map((option) => {
                         const active = customerAppointmentFilter === option.key;
 
                         return (
                           <HapticTouchable
-                            key={`${selectedCustomerInsightBoard.customer.id}-${option.key}`}
+            key={`${selectedCustomerInsightBoard.boardKey}-${option.key}`}
                             style={[
                               styles.customerInsightFilterChip,
                               active && styles.customerInsightFilterChipActive,
                             ]}
                             onPress={() => setCustomerAppointmentFilter(option.key)}
+                            accessibilityRole="button"
+                            accessibilityState={{ selected: active }}
                             pressScale={0.98}
                             pressOpacity={0.98}
                           >
@@ -2929,9 +5098,15 @@ const openQrPrintPreview = useCallback(() => {
                             >
                               {option.count}
                             </Text>
+                            {active && (
+                              <View style={styles.customerInsightFilterSeal} pointerEvents="none">
+                                <FilterCheckmark />
+                              </View>
+                            )}
                           </HapticTouchable>
                         );
                       })}
+                      </ScrollView>
                     </View>
 
                     {visibleCustomerTimeline.length === 0 ? (
@@ -2941,7 +5116,7 @@ const openQrPrintPreview = useCallback(() => {
                     ) : (
                     <View style={styles.customerInsightTimeline}>
                       {visibleCustomerTimeline.map((entry) => (
-                        <View key={`${selectedCustomerInsightBoard.customer.id}-${entry.id}`} style={styles.customerInsightTimelineRow}>
+                        <View key={`${selectedCustomerInsightBoard.boardKey}-${entry.id}`} style={styles.customerInsightTimelineRow}>
                           <View style={styles.customerInsightDateBadge}>
                             <Text style={styles.customerInsightDateBadgeDay}>{entry.dateLabel}</Text>
                             <Text style={styles.customerInsightDateBadgeTime}>{entry.ora}</Text>
@@ -2983,35 +5158,41 @@ const openQrPrintPreview = useCallback(() => {
                 </View>
               )}
             </ScrollView>
-          </View>
+          </DockedSheetSurface>
         </View>
-      </Modal>
+      </CustomerInsightsOverlay>
+      </HapticTouchableFastRegion>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
+const baseHomeStyles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#F3F6FA',
   },
   content: {
     flexGrow: 1,
-    paddingBottom: 140,
-  },
-  loadingWrap: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  loadingText: {
-    marginTop: 12,
-    color: '#475569',
-    fontWeight: '700',
+    paddingBottom: Platform.OS === 'web' ? 24 : 100,
   },
   pageShell: {
     width: '100%',
     alignSelf: 'center',
+  },
+  androidHomeSecondaryPlaceholder: {
+    minHeight: 520,
+    paddingTop: 18,
+    gap: 16,
+  },
+  androidHomeSecondaryPlaceholderRow: {
+    height: 112,
+    borderRadius: 24,
+    backgroundColor: '#EEF3F8',
+  },
+  androidHomeSecondaryPlaceholderCard: {
+    height: 280,
+    borderRadius: 28,
+    backgroundColor: '#F8FAFC',
   },
   heroCard: {
     backgroundColor: '#FFFFFF',
@@ -3027,15 +5208,18 @@ const styles = StyleSheet.create({
     shadowRadius: 30,
     shadowOffset: { width: 0, height: 18 },
     elevation: 12,
+    position: 'relative',
+    overflow: 'visible',
   },
   settingsIcon: {
     textShadowColor: 'transparent',
     textShadowOffset: { width: 0, height: 0 },
     textShadowRadius: 0,
   },
+  dashboardSectionHeading: { fontSize: 16, fontWeight: '700', color: '#334155', textAlign: 'center', alignSelf: 'stretch', marginTop: 10, marginBottom: 10 },
   heroTopRow: {
     flexDirection: 'row',
-    marginTop: 6,
+    marginTop: 0,
     marginBottom: 14,
     gap: 14,
   },
@@ -3108,10 +5292,21 @@ const styles = StyleSheet.create({
   statusCalmText: {
     color: '#2A5DB8',
   },
+  dashboardSkeletonBar: {
+    alignSelf: 'center',
+    backgroundColor: 'rgba(232, 239, 248, 0.96)',
+    borderWidth: 1,
+    borderColor: 'rgba(148, 163, 184, 0.42)',
+    shadowColor: '#94A3B8',
+    shadowOpacity: 0.28,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 6 },
+    overflow: 'hidden',
+  },
   heroMetricsRow: {
     flexDirection: 'row',
     gap: 14,
-    marginBottom: 16,
+    marginBottom: 8,
   },
   heroMetricCardBlue: {
     flex: 1,
@@ -3157,6 +5352,10 @@ const styles = StyleSheet.create({
   heroMetricNumberRose: {
     color: '#0F172A',
   },
+  heroMetricSkeleton: {
+    marginBottom: 7,
+    marginTop: 1,
+  },
   heroMetricLabel: {
     fontSize: 13,
     fontWeight: '800',
@@ -3185,37 +5384,92 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     justifyContent: 'space-between',
     marginBottom: 16,
-    gap: 14,
+    gap: 8,
   },
   insightCard: {
     flex: 1,
     minWidth: '47%',
-    backgroundColor: '#FDEBEC',
-    borderRadius: 26,
-    paddingHorizontal: IS_ANDROID ? 24 : 14,
-    paddingVertical: 18,
+    backgroundColor: '#F2E6DA',
+    borderRadius: 18,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
     borderWidth: 0,
     alignItems: 'center',
     shadowColor: '#0F172A',
-    shadowOpacity: 0.06,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 4,
+    shadowOpacity: 0.03,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 2,
   },
   insightCardMint: {
     flex: 1,
     minWidth: '47%',
     backgroundColor: '#ECF6D9',
-    borderRadius: 26,
-    paddingHorizontal: IS_ANDROID ? 24 : 14,
-    paddingVertical: 18,
+    borderRadius: 18,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
     borderWidth: 0,
     alignItems: 'center',
     shadowColor: '#0F172A',
-    shadowOpacity: 0.06,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 4,
+    shadowOpacity: 0.03,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 2,
+  },
+  insightCardPending: {
+    backgroundColor: '#FFF1E2',
+  },
+  insightGridCompact: {
+    gap: 10,
+    marginBottom: 4,
+  },
+  insightCardCompact: {
+    minHeight: 84,
+    paddingVertical: 12,
+    justifyContent: 'center',
+  },
+  salonTotalDetails: {
+    marginBottom: 0,
+  },
+  salonTotalDetailsExpanded: {
+    marginBottom: 10,
+  },
+  salonTotalDetailsButton: {
+    minHeight: 40,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  salonTotalDetailsButtonText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#64748B',
+  },
+  salonTotalDetailsBody: {
+    borderRadius: 14,
+    backgroundColor: '#F8FAFC',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    gap: 8,
+  },
+  salonTotalDetailsText: {
+    fontSize: 12,
+    lineHeight: 18,
+    color: '#64748B',
+  },
+  salonTotalDetailsEmphasis: {
+    fontWeight: '700',
+    color: '#334155',
+  },
+  insightCardLegacy: {
+    backgroundColor: '#FDE8E7',
+  },
+  cashPendingText: {
+    color: '#9A6225',
+  },
+  cashLegacyText: {
+    color: '#A33D3A',
   },
   halfWidthCard: {
     minWidth: '48%',
@@ -3224,30 +5478,33 @@ const styles = StyleSheet.create({
     minWidth: '48%',
   },
   insightTitle: {
-    fontSize: 14,
+    fontSize: 13,
+    lineHeight: 17,
+    minHeight: 0,
     fontWeight: '800',
     color: '#475569',
-    marginBottom: 8,
+    marginBottom: 3,
     textAlign: 'center',
-    paddingHorizontal: IS_ANDROID ? 8 : 0,
+    paddingHorizontal: 0,
     width: IS_ANDROID ? '100%' : undefined,
     alignSelf: IS_ANDROID ? 'stretch' : undefined,
   },
   insightTitlePlum: {
-    color: '#C1332B',
+    color: '#8A5A34',
   },
   insightTitleMint: {
     color: '#678126',
   },
   insightNumber: {
-    fontSize: IS_ANDROID ? 30 : 28,
+    fontSize: 24,
+    lineHeight: 29,
     fontWeight: '900',
     color: '#0F172A',
     marginBottom: 6,
     textAlign: 'center',
-    paddingHorizontal: IS_ANDROID ? 10 : 0,
-    width: IS_ANDROID ? '100%' : undefined,
-    alignSelf: IS_ANDROID ? 'stretch' : undefined,
+    paddingHorizontal: 0,
+    width: '100%',
+    alignSelf: 'stretch',
   },
   insightNumberPlum: {
     color: '#0F172A',
@@ -3255,81 +5512,259 @@ const styles = StyleSheet.create({
   insightNumberMint: {
     color: '#0F172A',
   },
+  insightNumberSkeleton: {
+    marginTop: 2,
+    marginBottom: 3,
+  },
   insightHint: {
-    fontSize: 13,
-    lineHeight: 18,
+    fontSize: 12,
+    lineHeight: 17,
+    minHeight: 0,
     color: '#64748B',
-    fontWeight: '700',
+    fontWeight: '500',
     textAlign: 'center',
-    paddingHorizontal: IS_ANDROID ? 8 : 0,
+    paddingHorizontal: 0,
     width: IS_ANDROID ? '100%' : undefined,
     alignSelf: IS_ANDROID ? 'stretch' : undefined,
   },
+  homeMetricTitleViewport: {
+    marginBottom: 3,
+  },
   insightHintPlum: {
-    color: '#C1332B',
+    color: '#8A5A34',
   },
   insightHintMint: {
     color: '#7A8E3B',
   },
+  insightHintSkeleton: {
+    marginTop: 0,
+  },
   priorityCard: {
-    backgroundColor: '#243245',
-    borderRadius: 26,
-    paddingHorizontal: IS_ANDROID ? 24 : 18,
-    paddingVertical: 22,
-    minHeight: IS_ANDROID ? 152 : 140,
+    backgroundColor: 'rgba(248, 250, 253, 0.62)',
+    borderRadius: 24,
+    paddingTop: 18,
+    paddingBottom: 16,
+    paddingHorizontal: 16,
+    minHeight: 0,
     marginBottom: 14,
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
     borderWidth: 1,
-    borderColor: '#324763',
-    shadowColor: '#1B2635',
-    shadowOpacity: 0.28,
-    shadowRadius: 24,
+    borderColor: 'rgba(148, 163, 184, 0.16)',
+    shadowColor: '#0F172A',
+    shadowOpacity: 0.08,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 4,
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  priorityCardWebFlat: {
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 0,
+    boxShadow: 'none',
+  },
+  priorityCardAndroidPremium: {
+    backgroundColor: '#F8FAFC',
+    borderColor: 'rgba(203, 213, 225, 0.72)',
+    shadowColor: '#0F172A',
+    shadowOpacity: 0.11,
+    shadowRadius: 22,
     shadowOffset: { width: 0, height: 12 },
-    elevation: 8,
+    elevation: 6,
+  },
+  priorityCardGlassBlue: {
+    backgroundColor: 'rgba(22, 117, 241, 0.26)',
+    borderColor: 'rgba(74, 163, 255, 0.62)',
+    shadowColor: '#0878E8',
+    shadowOpacity: 0.22,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 13 },
+    elevation: 9,
+  },
+  priorityCardGlassBlueAndroid: {
+    backgroundColor: '#C3DCFB',
+    borderColor: '#70B1F5',
+    shadowOpacity: 0.12,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 4,
   },
   desktopPriorityCard: {
     alignSelf: 'stretch',
   },
   priorityEyebrow: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '800',
-    color: '#CBD5E1',
-    letterSpacing: IS_ANDROID ? 1.6 : 2.8,
-    marginBottom: 10,
+    color: '#556274',
+    letterSpacing: 1.2,
+    marginBottom: 4,
     textAlign: 'center',
-    paddingHorizontal: IS_ANDROID ? 8 : 0,
-    width: IS_ANDROID ? '100%' : undefined,
-    alignSelf: IS_ANDROID ? 'stretch' : undefined,
+    width: '100%',
+    textTransform: 'uppercase',
+  },
+  priorityEyebrowGlassBlue: {
+    color: '#28639D',
+  },
+  priorityEyebrowAndroidPremium: {
+    backgroundColor: '#C3DCFB',
   },
   priorityTitle: {
-    fontSize: 24,
+    fontSize: 20,
     fontWeight: '900',
-    color: '#ffffff',
+    color: '#0F172A',
     textAlign: 'center',
-    marginBottom: 8,
-    lineHeight: 28,
-    paddingHorizontal: IS_ANDROID ? 10 : 0,
+    marginTop: 0,
+    marginBottom: 4,
+    lineHeight: 24,
+    paddingHorizontal: 0,
     width: '100%',
     maxWidth: '100%',
-    alignSelf: 'stretch',
+    alignSelf: 'center',
     flexShrink: 1,
+  },
+  priorityTitleAndroidPremium: {
+    backgroundColor: '#C3DCFB',
+    paddingHorizontal: 8,
+  },
+  priorityTitleGlassBlue: {
+    color: '#0F3158',
   },
   priorityTitleFallback: {
-    fontSize: IS_ANDROID ? 22 : 23,
-    lineHeight: IS_ANDROID ? 25 : 27,
+    fontSize: 19,
+    lineHeight: 23,
   },
   priorityText: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: '#E2E8F0',
-    lineHeight: 22,
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#4B5563',
+    lineHeight: 18,
     textAlign: 'center',
-    paddingHorizontal: IS_ANDROID ? 10 : 0,
+    width: '94%',
+    maxWidth: '94%',
+    alignSelf: 'center',
+    flexShrink: 1,
+  },
+  priorityTextAndroidPremium: {
+    backgroundColor: '#C3DCFB',
     width: '100%',
     maxWidth: '100%',
-    alignSelf: 'stretch',
-    flexShrink: 1,
+    paddingHorizontal: 8,
+  },
+  priorityTextGlassBlue: {
+    color: '#315D89',
+  },
+  priorityTitleSkeleton: {
+    marginTop: 6,
+    marginBottom: 8,
+  },
+  priorityTextSkeleton: {
+    marginBottom: 3,
+  },
+  priorityMultiArea: {
+    width: '100%',
+    marginTop: 10,
+    paddingRight: 14,
+    position: 'relative',
+    alignSelf: 'center',
+  },
+  priorityMultiList: {
+    width: '100%',
+    maxHeight: 156,
+    marginTop: 0,
+  },
+  priorityMultiListContent: {
+    gap: 0,
+    paddingRight: 2,
+    paddingBottom: 0,
+  },
+  priorityMultiItem: {
+    width: '100%',
+    minHeight: 74,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    borderRadius: 16,
+    backgroundColor: 'rgba(241, 246, 253, 0.88)',
+    borderWidth: 1,
+    borderColor: 'rgba(216, 228, 243, 0.92)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    shadowColor: '#FFFFFF',
+    shadowOpacity: 0.46,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 1 },
+  },
+  priorityMultiItemSpaced: {
+    marginBottom: 8,
+    borderBottomWidth: 0,
+  },
+  priorityMultiTimeBadge: {
+    width: 62,
+    minWidth: 62,
+    height: 42,
+    borderRadius: 12,
+    backgroundColor: 'rgba(210, 221, 238, 0.92)',
+    borderWidth: 1,
+    borderColor: 'rgba(199, 213, 232, 0.96)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  priorityMultiTime: {
+    fontSize: 15,
+    lineHeight: 17,
+    fontWeight: '900',
+    color: '#0F172A',
+  },
+  priorityMultiContent: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+  priorityMultiClient: {
+    fontSize: 16,
+    lineHeight: 18,
+    fontWeight: '900',
+    color: '#0F172A',
+  },
+  priorityMultiService: {
+    marginTop: 2,
+    fontSize: 13,
+    lineHeight: 16,
+    fontWeight: '600',
+    color: '#607086',
+  },
+  priorityMultiRole: {
+    marginTop: 3,
+    fontSize: 11,
+    lineHeight: 12,
+    fontWeight: '900',
+    letterSpacing: 1.6,
+    color: '#4F46E5',
+  },
+  priorityScrollIndicatorWrap: {
+    position: 'absolute',
+    top: 6,
+    bottom: 6,
+    right: -6,
+    width: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  priorityScrollIndicatorTrack: {
+    width: 4,
+    borderRadius: 999,
+    backgroundColor: 'rgba(214, 223, 236, 0.72)',
+    overflow: 'visible',
+    justifyContent: 'flex-start',
+  },
+  priorityScrollIndicatorThumb: {
+    borderRadius: 999,
+    height: '100%',
+    backgroundColor: 'rgba(125, 146, 174, 0.86)',
+    shadowColor: 'rgba(15,23,42,0.08)',
+    shadowOffset: { width: 0, height: 1 },
   },
   sectionRow: {
     flexDirection: 'row',
@@ -3342,7 +5777,7 @@ const styles = StyleSheet.create({
     minWidth: '30%',
     backgroundColor: '#EAF7EF',
     borderRadius: 24,
-    paddingHorizontal: IS_ANDROID ? 24 : 14,
+    paddingHorizontal: IS_ANDROID ? 18 : 8,
     paddingVertical: 18,
     borderWidth: 0,
     alignItems: 'center',
@@ -3357,7 +5792,7 @@ const styles = StyleSheet.create({
     minWidth: '30%',
     backgroundColor: '#F8EBD8',
     borderRadius: 24,
-    paddingHorizontal: IS_ANDROID ? 24 : 14,
+    paddingHorizontal: IS_ANDROID ? 18 : 8,
     paddingVertical: 18,
     borderWidth: 0,
     alignItems: 'center',
@@ -3372,7 +5807,7 @@ const styles = StyleSheet.create({
     minWidth: '30%',
     backgroundColor: '#FCE7F3',
     borderRadius: 24,
-    paddingHorizontal: IS_ANDROID ? 24 : 14,
+    paddingHorizontal: IS_ANDROID ? 18 : 8,
     paddingVertical: 18,
     borderWidth: 0,
     alignItems: 'center',
@@ -3386,14 +5821,17 @@ const styles = StyleSheet.create({
     minWidth: '31%',
   },
   infoLabel: {
-    fontSize: 13,
+    fontSize: 11.5,
+    lineHeight: 14,
     fontWeight: '800',
     color: '#64748b',
-    marginBottom: 6,
+    marginBottom: 8,
+    minHeight: 14,
     textAlign: 'center',
-    paddingHorizontal: IS_ANDROID ? 8 : 0,
-    width: IS_ANDROID ? '100%' : undefined,
-    alignSelf: IS_ANDROID ? 'stretch' : undefined,
+    paddingHorizontal: IS_ANDROID ? 4 : 0,
+    width: '100%',
+    alignSelf: 'stretch',
+    flexShrink: 1,
   },
   infoLabelSun: {
     color: '#2E8B72',
@@ -3422,6 +5860,9 @@ const styles = StyleSheet.create({
   infoValuePeach: {
     color: '#0F172A',
   },
+  infoValueSkeleton: {
+    marginTop: 2,
+  },
   operatorAgendaCard: {
     marginTop: 0,
     paddingHorizontal: 18,
@@ -3449,11 +5890,28 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     justifyContent: 'space-between',
     gap: 14,
-    marginBottom: 14,
+    marginBottom: 6,
+    ...Platform.select({
+      web: {
+        position: 'relative',
+        alignItems: 'center',
+        justifyContent: 'center',
+        minHeight: 52,
+      },
+    }),
   },
   operatorAgendaCardTextWrap: {
     flex: 1,
     minWidth: 0,
+    paddingRight: 4,
+    alignItems: 'center',
+    ...Platform.select({
+      web: {
+        width: '100%',
+        paddingHorizontal: 104,
+        paddingRight: 104,
+      },
+    }),
   },
   operatorAgendaCardTitle: {
     fontSize: 20,
@@ -3462,6 +5920,7 @@ const styles = StyleSheet.create({
     marginBottom: 5,
     letterSpacing: -0.3,
     flexShrink: 1,
+    textAlign: 'center',
   },
   operatorAgendaCardText: {
     fontSize: 13,
@@ -3469,10 +5928,18 @@ const styles = StyleSheet.create({
     color: '#4E5A68',
     fontWeight: '700',
     flexShrink: 1,
+    textAlign: 'center',
+  },
+  insightDescription: {
+    width: '100%',
+    marginBottom: 14,
+    fontWeight: '500',
   },
   operatorAgendaCardAction: {
     flexDirection: 'row',
     alignItems: 'center',
+    alignSelf: 'flex-start',
+    flexShrink: 0,
     gap: 4,
     backgroundColor: 'rgba(255, 255, 255, 0.96)',
     borderRadius: 999,
@@ -3485,6 +5952,13 @@ const styles = StyleSheet.create({
     shadowRadius: 14,
     shadowOffset: { width: 0, height: 6 },
     elevation: 3,
+    ...Platform.select({
+      web: {
+        position: 'absolute',
+        right: 0,
+        top: 0,
+      },
+    }),
   },
   operatorAgendaCardActionText: {
     fontSize: 13,
@@ -3493,20 +5967,27 @@ const styles = StyleSheet.create({
   },
   operatorAgendaStatsRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-    marginBottom: 16,
+    flexWrap: 'nowrap',
+    justifyContent: 'space-between',
+    gap: 8,
+    marginBottom: Platform.OS === 'web' ? 16 : 4,
   },
   operatorAgendaStatPill: {
-    flex: 1,
-    minWidth: '30%',
+    flexGrow: 0,
+    flexShrink: 1,
+    flexBasis: '31%',
+    width: '31%',
+    maxWidth: '31%',
+    aspectRatio: Platform.OS === 'web' ? undefined : 1,
+    height: Platform.OS === 'web' ? 132 : undefined,
     backgroundColor: 'rgba(255, 255, 255, 0.98)',
     borderRadius: 20,
-    paddingHorizontal: 12,
-    paddingVertical: 14,
+    paddingHorizontal: 8,
+    paddingVertical: 10,
     borderWidth: 1,
     borderColor: '#DDDAD2',
     alignItems: 'center',
+    justifyContent: 'center',
     shadowColor: '#C2B9AD',
     shadowOpacity: 0.12,
     shadowRadius: 14,
@@ -3538,42 +6019,103 @@ const styles = StyleSheet.create({
     borderColor: '#FECDD3',
   },
   operatorAgendaStatValue: {
-    fontSize: 24,
+    fontSize: 20,
     fontWeight: '900',
     color: '#0F172A',
-    marginBottom: 4,
+    marginBottom: 3,
     flexShrink: 1,
+    width: '100%',
+    textAlign: 'center',
+    includeFontPadding: false,
+  },
+  operatorAgendaStatValueCompact: {
+    fontSize: 18,
+  },
+  operatorAgendaStatValueWebWide: {
+    fontSize: 30,
+    lineHeight: 34,
+    marginBottom: 5,
   },
   operatorAgendaStatLabel: {
-    fontSize: 11,
+    fontSize: Platform.OS === 'web' ? 9 : 12,
     fontWeight: '800',
     color: '#5E6876',
     textAlign: 'center',
     flexShrink: 1,
+    width: '100%',
+    lineHeight: Platform.OS === 'web' ? 12 : 16,
+    minHeight: Platform.OS === 'web' ? 12 : 32,
+    textAlignVertical: 'center',
+    includeFontPadding: false,
+  },
+  operatorAgendaStatLabelWebWide: {
+    fontSize: 14,
+    lineHeight: 19,
+    minHeight: 19,
   },
   operatorAgendaPreviewStack: {
     gap: 10,
   },
   operatorAgendaPreviewRow: {
-    flexDirection: 'row',
+    flexDirection: 'column',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
+    justifyContent: 'center',
+    gap: 7,
     backgroundColor: 'rgba(255, 255, 255, 0.98)',
     borderRadius: 18,
     borderWidth: 1,
     borderColor: '#DFD8CE',
-    paddingLeft: 14,
-    paddingRight: 12,
-    paddingVertical: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
     shadowColor: '#C6BCB0',
     shadowOpacity: 0.12,
     shadowRadius: 12,
     shadowOffset: { width: 0, height: 5 },
     elevation: 2,
   },
+  operatorAgendaPreviewRowNative: {
+    minHeight: 82,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  operatorAgendaPreviewRowWeb: {
+    minHeight: 82,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  operatorAgendaPreviewLeftNative: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  operatorAgendaPreviewLeftWeb: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
   operatorAgendaPreviewIdentity: {
     flex: 1,
+    alignItems: 'center',
+  },
+  operatorAgendaPreviewIdentityNative: {
+    minWidth: 0,
+    alignItems: 'flex-start',
+  },
+  operatorAgendaPreviewIdentityWeb: {
+    minWidth: 0,
+    alignItems: 'flex-start',
   },
   operatorAgendaPreviewAvatar: {
     width: 52,
@@ -3590,36 +6132,91 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
   },
+  operatorAgendaPreviewAvatarNative: {
+    width: 44,
+    height: 44,
+    borderRadius: 15,
+    flexShrink: 0,
+  },
+  operatorAgendaPreviewAvatarWeb: {
+    width: 44,
+    height: 44,
+    borderRadius: 15,
+    flexShrink: 0,
+  },
   operatorAgendaPreviewTextWrap: {
     flex: 1,
+    alignItems: 'center',
+  },
+  operatorAgendaPreviewTextWrapNative: {
+    width: '100%',
+    alignItems: 'flex-start',
+  },
+  operatorAgendaPreviewTextWrapWeb: {
+    width: '100%',
+    alignItems: 'flex-start',
   },
   operatorAgendaPreviewName: {
     fontSize: 15,
     fontWeight: '900',
     color: '#0F172A',
     marginBottom: 2,
+    textAlign: 'center',
+  },
+  operatorAgendaPreviewNameNative: {
+    width: '100%',
+    marginBottom: 1,
+    textAlign: 'left',
+  },
+  operatorAgendaPreviewNameWeb: {
+    width: '100%',
+    marginBottom: 1,
+    textAlign: 'left',
   },
   operatorAgendaPreviewRole: {
     fontSize: 11,
     fontWeight: '800',
     color: '#6C6F78',
+    textAlign: 'center',
+  },
+  operatorAgendaPreviewRoleNative: {
+    width: '100%',
+    textAlign: 'left',
+  },
+  operatorAgendaPreviewRoleWeb: {
+    width: '100%',
+    textAlign: 'left',
   },
   operatorAgendaPreviewMetrics: {
+    alignItems: 'center',
+    marginRight: 0,
+    minWidth: 92,
+  },
+  operatorAgendaPreviewMetricsNative: {
+    flexShrink: 0,
+    minWidth: 88,
+    maxWidth: 112,
     alignItems: 'flex-end',
-    marginRight: 2,
+    marginRight: 0,
+  },
+  operatorAgendaPreviewMetricsWeb: {
+    flexShrink: 0,
+    minWidth: 104,
+    maxWidth: 140,
+    alignItems: 'flex-end',
+    marginRight: 0,
   },
   customerInsightPreviewRow: {
-    flexDirection: 'row',
+    flexDirection: 'column',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
+    justifyContent: 'center',
+    gap: 7,
     backgroundColor: 'rgba(255, 255, 255, 0.98)',
     borderRadius: 18,
     borderWidth: 1,
     borderColor: '#E1D7C8',
-    paddingLeft: 14,
-    paddingRight: 12,
-    paddingVertical: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
     shadowColor: '#CBBEAA',
     shadowOpacity: 0.12,
     shadowRadius: 12,
@@ -3629,59 +6226,83 @@ const styles = StyleSheet.create({
   qrJumpButton: {
     marginTop: 6,
     marginBottom: 14,
-    borderRadius: 22,
-    backgroundColor: '#0F172A',
+    borderRadius: 999,
+    backgroundColor: '#17233A',
+    borderWidth: 1.5,
+    borderColor: '#243552',
     paddingHorizontal: 18,
     paddingVertical: 18,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 10,
-    shadowColor: '#0F172A',
-    shadowOpacity: 0.18,
-    shadowRadius: 18,
+    shadowColor: '#0B1324',
+    shadowOpacity: 0.24,
+    shadowRadius: 20,
     shadowOffset: { width: 0, height: 10 },
-    elevation: 7,
+    elevation: 6,
   },
   qrJumpButtonText: {
     fontSize: 16,
     fontWeight: '900',
-    color: '#FFFFFF',
+    color: '#F8FAFC',
     textAlign: 'center',
   },
   customerInsightPreviewMain: {
     flex: 1,
+    alignItems: 'center',
   },
   customerInsightPreviewMeta: {
     fontSize: 11,
     fontWeight: '800',
     color: '#696960',
     marginTop: 3,
+    textAlign: 'center',
   },
   customerInsightPreviewMetrics: {
-    alignItems: 'flex-end',
+    alignItems: 'center',
+    minWidth: 92,
   },
   customerInsightPreviewMetric: {
     fontSize: 13,
     fontWeight: '900',
     color: '#6D5338',
     marginBottom: 2,
+    textAlign: 'center',
   },
   customerInsightPreviewMetricSoft: {
     fontSize: 11,
     fontWeight: '800',
     color: '#756858',
+    textAlign: 'center',
   },
   operatorAgendaPreviewMetric: {
     fontSize: 13,
     fontWeight: '900',
     color: '#33577d',
     marginBottom: 2,
+    textAlign: 'center',
+  },
+  operatorAgendaPreviewMetricNative: {
+    textAlign: 'right',
+  },
+  operatorAgendaPreviewMetricWeb: {
+    width: '100%',
+    textAlign: 'right',
   },
   operatorAgendaPreviewMetricSoft: {
     fontSize: 11,
     fontWeight: '800',
     color: '#475569',
+    textAlign: 'center',
+  },
+  operatorAgendaPreviewMetricSoftNative: {
+    width: '100%',
+    textAlign: 'right',
+  },
+  operatorAgendaPreviewMetricSoftWeb: {
+    width: '100%',
+    textAlign: 'right',
   },
   operatorAgendaEmptyState: {
     borderRadius: 20,
@@ -3716,8 +6337,8 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     paddingHorizontal: 18,
     paddingVertical: 18,
-    marginTop: 16,
-    marginBottom: 14,
+    marginTop: Platform.OS === 'web' ? 16 : 0,
+    marginBottom: Platform.OS === 'web' ? 14 : 10,
     borderWidth: 0,
     borderColor: 'transparent',
     shadowColor: '#000000',
@@ -3813,11 +6434,10 @@ const styles = StyleSheet.create({
   operatorModalBackdrop: {
     flex: 1,
     backgroundColor: 'rgba(15, 23, 42, 0.44)',
-    justifyContent: 'center',
+    justifyContent: 'flex-end',
     alignItems: 'center',
     paddingHorizontal: 18,
-    paddingVertical: 28,
-  },
+    paddingVertical: 28, paddingBottom: 0 },
   operatorModalCard: {
     width: '100%',
     maxWidth: 560,
@@ -4082,33 +6702,48 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
   },
   customerInsightFilterRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
+    
+    
+    
+    
+    
     marginBottom: 12,
+    ...premiumFilterStyles.row,
   },
   customerInsightFilterChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    paddingHorizontal: 10,
-    paddingVertical: 8,
+    
+    position: 'relative',
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    ...premiumFilterStyles.card,
   },
   customerInsightFilterChipActive: {
-    backgroundColor: '#0F172A',
-    borderColor: '#0F172A',
+    
+    
+    
+    ...premiumFilterStyles.selected,
+  },
+  customerInsightFilterSeal: {
+       zIndex: 1,
+     
+     
+    ...premiumFilterStyles.check,
   },
   customerInsightFilterChipText: {
-    fontSize: 11,
-    fontWeight: '900',
-    color: '#334155',
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#64748B',
   },
   customerInsightFilterChipTextActive: {
-    color: '#FFFFFF',
+    
+    ...premiumFilterStyles.selectedText,
   },
   customerInsightFilterChipCount: {
     minWidth: 20,
@@ -4232,10 +6867,46 @@ const styles = StyleSheet.create({
   },
   operatorModalToolbar: {
     flexDirection: 'row',
-    gap: 10,
-    marginBottom: 14,
+    flexWrap: 'wrap',
+    alignItems: 'flex-start',
+    gap: 8,
+    marginBottom: 10,
+  },
+  operatorModalScopeRow: {
+    flexDirection: 'row',
+    flexWrap: 'nowrap',
+    gap: 6,
+    width: '100%',
+  },
+  operatorModalScopeChip: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#DDE6F0',
+    paddingHorizontal: 6,
+    paddingVertical: 8,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  operatorModalScopeChipActive: {
+    backgroundColor: '#0F172A',
+    borderColor: '#0F172A',
+  },
+  operatorModalScopeChipText: {
+    fontSize: 12,
+    fontWeight: '900',
+    color: '#0F172A',
+  },
+  operatorModalScopeChipTextActive: {
+    color: '#F8FAFC',
   },
   operatorModalToolbarButton: {
+    flex: 1,
+    minHeight: 44,
+    justifyContent: 'center',
+    alignSelf: 'flex-start',
     flexDirection: 'row',
     alignItems: 'center',
     gap: 7,
@@ -4246,10 +6917,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
   },
+  operatorModalToolbarButtonDisabled: {
+    backgroundColor: '#F8FAFC',
+    borderColor: '#E2E8F0',
+  },
   operatorModalToolbarButtonText: {
     fontSize: 12,
     fontWeight: '900',
     color: '#0F172A',
+  },
+  operatorModalToolbarButtonTextDisabled: {
+    color: '#94A3B8',
   },
   operatorModalHeaderTextWrap: {
     flex: 1,
@@ -4514,10 +7192,15 @@ const styles = StyleSheet.create({
     color: '#4B5563',
   },
   profileAccordionButton: {
+    position: 'relative',
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
-    marginBottom: 6,
+    paddingHorizontal: 0,
+    gap: 12,
+    paddingTop: 2,
+    paddingBottom: 12,
+    marginBottom: 4,
   },
   mandatoryIntroCard: {
     position: 'relative',
@@ -4581,83 +7264,98 @@ const styles = StyleSheet.create({
   },
   profileAccordionTextWrap: {
     flex: 1,
-    paddingRight: 12,
+    minWidth: 0,
+    alignItems: 'flex-start',
   },
   profileAccordionTitle: {
     marginBottom: 4,
+    textAlign: 'left',
+    width: '100%',
   },
   profileAccordionSubtext: {
     marginBottom: 0,
+    textAlign: 'left',
+    width: '100%',
   },
   profileAccordionIconWrap: {
-    width: 40,
-    height: 40,
+    flexShrink: 0,
+    width: 44,
+    height: 44,
     borderRadius: 999,
-    backgroundColor: '#F8FAFC',
+    backgroundColor: '#F0F4F8',
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: '#000000',
-    shadowOpacity: 0.04,
+    shadowOpacity: 0,
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 3 },
-    elevation: 2,
+    elevation: 0,
   },
   profileEditorCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 22,
+    backgroundColor: 'transparent',
+    borderRadius: 0,
     borderWidth: 0,
     borderColor: 'transparent',
-    paddingHorizontal: 18,
-    paddingVertical: 18,
+    paddingHorizontal: 0,
+    paddingVertical: 8,
     marginTop: 16,
     shadowColor: '#000',
-    shadowOpacity: 0.05,
+    shadowOpacity: 0,
     shadowRadius: 16,
     shadowOffset: { width: 0, height: 8 },
-    elevation: 4,
+    elevation: 0,
   },
   profileEditorTitle: {
-    fontSize: 17,
-    fontWeight: '900',
-    color: '#0f172a',
-    textAlign: 'center',
-    marginBottom: 4,
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#183451',
+    textAlign: 'left',
+    marginBottom: 6,
   },
   profileEditorCaption: {
     fontSize: 12,
     lineHeight: 18,
     color: '#64748b',
-    textAlign: 'center',
-    marginBottom: 14,
+    textAlign: 'left',
+    marginBottom: 18,
   },
   profileModuleStack: {
-    gap: 14,
+    gap: 12,
   },
   profileModuleCard: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 22,
-    borderWidth: 0,
-    borderColor: 'transparent',
-    padding: 18,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: '#DFE7EF',
+    padding: 14,
     shadowColor: '#000',
-    shadowOpacity: 0.05,
+    shadowOpacity: 0,
     shadowRadius: 16,
     shadowOffset: { width: 0, height: 8 },
-    elevation: 4,
+    elevation: 0,
   },
   profileModuleHeader: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     justifyContent: 'space-between',
     gap: 10,
-    marginBottom: 8,
+    marginBottom: 14,
   },
   profileModuleTextWrap: {
     flex: 1,
+    minWidth: 0,
+  },
+  profileModuleEyebrow: {
+    fontSize: 10,
+    lineHeight: 15,
+    fontWeight: '700',
+    letterSpacing: 1,
+    color: '#51769A',
+    marginBottom: 4,
   },
   profileModuleTitle: {
-    fontSize: 14,
-    fontWeight: '900',
+    fontSize: 17,
+    fontWeight: '700',
     color: '#182235',
     marginBottom: 3,
     letterSpacing: IS_ANDROID ? 0 : 0.3,
@@ -4667,15 +7365,22 @@ const styles = StyleSheet.create({
     fontSize: 11,
     lineHeight: 16,
     color: '#6a7384',
-    fontWeight: '700',
+    fontWeight: '500',
+  },
+  profileProtectedCaption: {
+    fontSize: 11,
+    lineHeight: 16,
+    color: '#64748B',
+    marginBottom: 6,
   },
   profileModuleBadge: {
     backgroundColor: '#F8FAFC',
     borderRadius: 999,
     borderWidth: 1,
     borderColor: 'transparent',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    flexShrink: 0,
   },
   profileModuleBadgeComplete: {
     backgroundColor: '#ECFDF5',
@@ -4724,34 +7429,34 @@ const styles = StyleSheet.create({
     gap: 14,
   },
   profilePreviewCard: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#F0F5FA',
     borderRadius: 22,
-    borderWidth: 0,
-    borderColor: 'transparent',
-    paddingHorizontal: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(226, 232, 240, 0.88)',
+    paddingHorizontal: 16,
     paddingVertical: 18,
     marginTop: 16,
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOpacity: 0.05,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 4,
+    shadowColor: '#94A3B8',
+    shadowOpacity: 0,
+    shadowRadius: 28,
+    shadowOffset: { width: 0, height: 14 },
+    elevation: 0,
   },
   profilePreviewHeader: {
     width: '100%',
     flexDirection: 'row',
     flexWrap: 'wrap',
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'space-between',
     gap: 8,
     marginBottom: 10,
   },
   profilePreviewEyebrow: {
     fontSize: 11,
     fontWeight: '900',
-    letterSpacing: IS_ANDROID ? 1 : 3.2,
-    color: '#8b98ab',
+    letterSpacing: 1.2,
+    color: '#51769A',
     textTransform: 'uppercase',
     textAlign: 'center',
     includeFontPadding: true,
@@ -4764,9 +7469,8 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   profilePreviewName: {
-    fontSize: 26,
-    fontWeight: '900',
-    color: '#0f172a',
+    fontSize: 30,
+    color: '#183451',
     marginBottom: 6,
     textAlign: 'center',
   },
@@ -4792,22 +7496,31 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     justifyContent: 'center',
     gap: 6,
-    marginBottom: 12,
+    marginBottom: 10,
   },
   profileProgressItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    backgroundColor: '#F8FAFC',
-    borderWidth: 0,
-    borderColor: 'transparent',
+    gap: 8,
+    paddingHorizontal: 9,
+    paddingVertical: 6,
+    backgroundColor: 'rgba(248, 250, 252, 0.96)',
+    borderWidth: 1,
+    borderColor: 'rgba(203, 213, 225, 0.72)',
     borderRadius: 999,
+    shadowColor: '#94A3B8',
+    shadowOpacity: 0,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 0,
+  },
+  profileProgressItemCompleted: {
+    backgroundColor: 'rgba(236, 253, 245, 0.96)',
+    borderColor: 'rgba(20, 184, 166, 0.28)',
   },
   profileProgressDot: {
-    width: 8,
-    height: 8,
+    width: 10,
+    height: 10,
     borderRadius: 999,
     backgroundColor: '#cbd5e1',
   },
@@ -4832,11 +7545,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 10,
     backgroundColor: '#F8FAFC',
-    borderRadius: 18,
+    borderRadius: 10,
     borderWidth: 0,
     borderColor: 'transparent',
     paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingVertical: 8,
   },
   profilePreviewInfoText: {
     flex: 1,
@@ -4951,7 +7664,7 @@ const styles = StyleSheet.create({
   profileFontChip: {
     flex: 1,
     minWidth: 96,
-    backgroundColor: '#e8eef5',
+    backgroundColor: '#F7FAFD',
     borderRadius: 14,
     borderWidth: 1,
     borderColor: '#d2dbe5',
@@ -4960,8 +7673,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   profileFontChipActive: {
-    backgroundColor: '#111827',
-    borderColor: '#111827',
+    backgroundColor: '#193B60',
+    borderColor: '#193B60',
   },
   profileFontChipText: {
     fontSize: 13,
@@ -4988,6 +7701,8 @@ const styles = StyleSheet.create({
   profileSaveButton: {
     marginTop: 14,
     paddingVertical: 13,
+    backgroundColor: '#193B60',
+    borderRadius: 16,
   },
   profileSaveButtonEyebrow: {
     fontSize: 11,
@@ -5059,6 +7774,50 @@ const styles = StyleSheet.create({
     color: '#1E293B',
     textAlign: 'center',
   },
+  clientAccessPrimaryButton: {
+    width: '100%',
+    maxWidth: 520,
+    alignSelf: 'center',
+    minHeight: 54,
+    marginTop: 18,
+    borderRadius: 999,
+    backgroundColor: '#111827',
+    borderColor: 'rgba(255, 255, 255, 0.45)',
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 10,
+    shadowColor: '#0B1324',
+    shadowOpacity: 0.22,
+    shadowRadius: 22,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 7,
+  },
+  clientAccessPrimaryButtonText: {
+    color: '#FFFFFF',
+    letterSpacing: 0.2,
+  },
+  clientAccessSecondaryButton: {
+    width: '100%',
+    maxWidth: 520,
+    alignSelf: 'center',
+    minHeight: 54,
+    marginTop: Platform.OS === 'web' ? 12 : 6,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255, 255, 255, 0.94)',
+    borderColor: 'rgba(148, 163, 184, 0.34)',
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 10,
+    shadowColor: '#94A3B8',
+    shadowOpacity: 0.12,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 3,
+  },
+  clientAccessSecondaryButtonText: {
+    color: '#17233A',
+    letterSpacing: 0.15,
+  },
   buttonDisabled: {
     opacity: 0.5,
   },
@@ -5104,20 +7863,23 @@ const styles = StyleSheet.create({
     color: '#b91c1c',
   },
   accessCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 22,
-    paddingVertical: 16,
-    paddingHorizontal: IS_ANDROID ? 20 : 16,
-    borderWidth: 0,
-    borderColor: 'transparent',
-    marginTop: 14,
-    marginBottom: 20,
+    width: '100%',
+    maxWidth: 720,
+    alignSelf: 'center',
+    backgroundColor: 'rgba(248, 251, 255, 0.96)',
+    borderRadius: 32,
+    paddingVertical: 18,
+    paddingHorizontal: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(191, 219, 254, 0.72)',
+    marginTop: 18,
+    marginBottom: 18,
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOpacity: 0.06,
-    shadowRadius: 20,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 4,
+    shadowColor: '#7AA7E8',
+    shadowOpacity: 0.12,
+    shadowRadius: 28,
+    shadowOffset: { width: 0, height: 14 },
+    elevation: 5,
     overflow: IS_ANDROID ? 'visible' : 'hidden',
     position: 'relative',
   },
@@ -5126,8 +7888,8 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
-    height: 128,
-    backgroundColor: 'rgba(239, 246, 255, 0.95)',
+    height: 2,
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
   },
   accessLabel: {
     fontSize: 12,
@@ -5141,10 +7903,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: IS_ANDROID ? 6 : 0,
   },
   accessCode: {
-    fontSize: 34,
+    fontSize: 24,
     fontWeight: '900',
     color: '#0f172a',
-    marginBottom: 16,
+    marginBottom: 12,
     textAlign: 'center',
     letterSpacing: IS_ANDROID ? 0 : 0.2,
     includeFontPadding: true,
@@ -5152,22 +7914,23 @@ const styles = StyleSheet.create({
   },
   accessLinkPlate: {
     width: '100%',
-    borderRadius: 26,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 0,
-    borderColor: 'transparent',
-    paddingHorizontal: 18,
-    paddingVertical: 18,
-    shadowColor: '#000000',
-    shadowOpacity: 0.06,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 3,
+    maxWidth: 620,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.92)',
+    borderWidth: 1,
+    borderColor: 'rgba(203, 213, 225, 0.72)',
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    shadowColor: '#64748B',
+    shadowOpacity: 0.1,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 7 },
+    elevation: 4,
   },
   accessLink: {
-    fontSize: 14,
-    fontWeight: '900',
-    lineHeight: 22,
+    fontSize: 13,
+    fontWeight: '500',
+    lineHeight: 20,
     color: '#334155',
     textAlign: 'center',
   },
@@ -5207,86 +7970,110 @@ const styles = StyleSheet.create({
     color: '#9a3412',
   },
   qrCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 24,
-    paddingVertical: 18,
-    paddingHorizontal: IS_ANDROID ? 24 : 18,
-    borderWidth: 0,
-    borderColor: 'transparent',
-    marginTop: 16,
-    marginBottom: 16,
+    width: '100%',
+    maxWidth: 520,
+    alignSelf: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.98)',
+    borderRadius: 36,
+    paddingVertical: Platform.OS === 'web' ? 30 : 18,
+    paddingHorizontal: IS_ANDROID ? 26 : 28,
+    borderWidth: 1,
+    borderColor: 'rgba(226, 232, 240, 0.96)',
+    marginTop: 10,
+    marginBottom: Platform.OS === 'web' ? 18 : 4,
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowRadius: 20,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 5,
+    shadowColor: '#8090A8',
+    shadowOpacity: 0.18,
+    shadowRadius: 34,
+    shadowOffset: { width: 0, height: 18 },
+    elevation: 8,
     overflow: IS_ANDROID ? 'visible' : 'hidden',
     position: 'relative',
   },
   qrCardGlow: {
     position: 'absolute',
     top: 0,
-    left: 0,
-    right: 0,
-    height: 136,
-    backgroundColor: 'rgba(245, 243, 255, 0.92)',
+    left: 26,
+    right: 26,
+    height: 2,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
   },
   qrCardResponsive: {
     alignSelf: 'center',
   },
   qrFrame: {
-    borderRadius: 20,
-    padding: 12,
-    backgroundColor: '#F8FAFC',
-    borderWidth: 0,
-    borderColor: 'transparent',
-    shadowColor: 'transparent',
-    shadowOpacity: 0,
-    shadowRadius: 0,
-    shadowOffset: { width: 0, height: 0 },
-    elevation: 0,
+    borderRadius: 34,
+    padding: 16,
+    backgroundColor: 'rgba(241, 245, 249, 0.82)',
+    borderWidth: 1,
+    borderColor: 'rgba(226, 232, 240, 0.88)',
+    shadowColor: '#CBD5E1',
+    shadowOpacity: 0.2,
+    shadowRadius: 22,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 4,
   },
   qrPlate: {
     borderRadius: 30,
-    padding: 16,
+    padding: 18,
     backgroundColor: '#FFFFFF',
-    borderWidth: 0,
-    borderColor: 'transparent',
+    borderWidth: 1,
+    borderColor: 'rgba(226, 232, 240, 0.9)',
     shadowColor: '#000000',
-    shadowOpacity: 0.04,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 3 },
-    elevation: 2,
+    shadowOpacity: 0.08,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 3,
+  },
+  androidHomeQrPlaceholder: {
+    width: 196,
+    height: 196,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F8FAFC',
   },
   qrSalonBadge: {
-    marginTop: 16,
-    marginBottom: 4,
-    borderRadius: 999,
-    backgroundColor: '#EFF6FF',
-    borderWidth: 1,
-    borderColor: '#BFDBFE',
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    minWidth: 148,
-    maxWidth: '88%',
+    marginTop: Platform.OS === 'web' ? 22 : 12,
+    marginBottom: 0,
+    borderTopWidth: 1,
+    borderColor: '#E2E8F0',
+    paddingTop: Platform.OS === 'web' ? 18 : 10,
+    paddingHorizontal: 8,
+    width: '100%',
     alignItems: 'center',
     justifyContent: 'center',
   },
   qrSalonBadgeText: {
-    fontSize: 13,
-    lineHeight: 16,
-    fontWeight: '900',
-    color: '#1E3A8A',
+    fontSize: 30,
+    lineHeight: 40,
+    letterSpacing: 4,
+    fontVariant: ['tabular-nums'],
+    fontWeight: '600',
+    color: '#243957',
     textAlign: 'center',
-    textTransform: 'capitalize',
+  },
+  manualCodeLabel: {
+    fontSize: 10,
+    letterSpacing: 1.5,
+    fontWeight: '700',
+    color: '#64748B',
+    textAlign: 'center',
+    marginBottom: 4,
+  },
+  manualCodeHint: {
+    fontSize: 12,
+    lineHeight: 18,
+    color: '#64748B',
+    textAlign: 'center',
+    marginTop: 4,
   },
   qrTitle: {
     fontSize: 20,
     fontWeight: '900',
     color: '#0F172A',
     textAlign: 'center',
-    marginTop: 22,
+    marginTop: 0,
     marginBottom: 10,
     paddingHorizontal: IS_ANDROID ? 10 : 0,
     width: IS_ANDROID ? '100%' : undefined,
@@ -5390,3 +8177,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 });
+
+// Auxiliary components retain their original platform styles.
+const styles = baseHomeStyles;

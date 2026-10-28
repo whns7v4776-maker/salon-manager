@@ -1,0 +1,15 @@
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const ts=require('typescript');
+const vm=require('node:vm');
+const result={exports:{}};
+vm.runInNewContext(ts.transpileModule(fs.readFileSync('src/lib/loyalty-earning.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText,{exports:result.exports,require});
+const {defaultLoyaltyEarning:d,parseLoyaltyCents:parse,validateLoyaltyRule:validate,loyaltyRuleSummary:summary}=result.exports;
+assert.equal(parse('5'),500);assert.equal(parse('5,25'),525);assert.equal(parse('0.01'),1);
+for(const bad of ['', '5,234', '-1', '1e3', 'five', '5,'])assert(Number.isNaN(parse(bad)),bad);
+assert.equal(validate(d),null);
+assert.equal(validate({...d,loyalty_earning_mode:'spend',loyalty_spend_step_cents:250,loyalty_spend_points:3}),null);
+for(const patch of [{points_per_service:0},{points_per_service:1.5},{loyalty_spend_points:0},{loyalty_spend_step_cents:NaN},{loyalty_spend_step_cents:0},{loyalty_minimum_cents:-1},{loyalty_minimum_cents:0.5},{loyalty_earning_mode:'spend',loyalty_spend_services:false,loyalty_spend_products:false},{loyalty_rule_description:'x'.repeat(181)}])assert(validate({...d,...patch}));
+assert.equal(summary(d),'1 punto per servizio effettuato');
+assert.match(summary({...d,loyalty_earning_mode:'spend'}),/^1 punto ogni 5,00\s€/);
+console.log('Loyalty inputs: exact cents, decimal/integer validation, invalid scope and public summary passed.');

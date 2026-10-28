@@ -1,0 +1,30 @@
+{
+  "web": {
+    "id": "dpl_JAs5PBok6WEYDAHPcNmjyqSRHcV1",
+    "url": "https://salon-manager-7u16n4zkn-6rwdtrgntc-3362s-projects.vercel.app",
+    "inspectorUrl": "https://vercel.com/6rwdtrgntc-3362s-projects/salon-manager/JAs5PBok6WEYDAHPcNmjyqSRHcV1",
+    "readyState": "READY",
+    "target": "production",
+    "deploymentApiUrl": "https://api.vercel.com/v13/deployments/dpl_JAs5PBok6WEYDAHPcNmjyqSRHcV1"
+  },
+  "ota": [
+    {
+      "platform": "android",
+      "id": "01a0f3f1-1af1-7528-a580-93fb68056f51",
+      "group": "b19b9d93-5250-4f77-bbed-5e67aca64ebe",
+      "runtime": "1.0.18-meta1"
+    },
+    {
+      "platform": "ios",
+      "id": "01a0f3f1-1af1-7a3b-b8ac-4e81e5146d98",
+      "group": "b19b9d93-5250-4f77-bbed-5e67aca64ebe",
+      "runtime": "1.0.18-meta1"
+    }
+  ],
+  "nativeBuildCreated": false,
+  "stripeRolloutPublic": false,
+  "morphStripeConnected": false,
+  "fiscal": "sandbox-only",
+  "terminalEnabled": false,
+  "securityProbe": "work/cassa-production-audit/pilot-security.json"
+}

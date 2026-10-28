@@ -1,0 +1,10 @@
+import assert from 'node:assert/strict';
+import * as XLSX from 'xlsx-js-style';
+import {createFiscalWorkbook} from '../src/lib/fiscal-workbook';
+import {fiscalSummary,FiscalReceipt} from '../src/lib/fiscal-archive';
+const rows:FiscalReceipt[]=[{id:'one',created_at:'2026-09-28T08:00:00Z',status:'ready',provider_id:'a',document_number:'DOC-001',email_status:'delivered',archived_at:'2026-09-28T08:01:00Z',void_status:'ready',void_number:'VOID-001',void_email_status:'accepted'},{id:'two',created_at:'2026-09-28T08:02:00Z',status:'failed',payment_status:'failed'}];
+const stats=fiscalSummary(rows);assert.equal(stats.issued,1);assert.equal(stats.cancelled,1);assert.equal(stats.declined,1);
+const wb=createFiscalWorkbook(rows);assert.deepEqual(wb.SheetNames,['Panoramica','Documenti','Annullamenti','Invii email']);
+assert.equal(wb.Sheets.Documenti.D5.v,'');assert.equal(wb.Sheets.Documenti.D6.v,25.5);assert.equal(wb.Sheets.Documenti.A6.t,'d');
+assert.ok(wb.Sheets.Documenti['!autofilter']);assert.ok(wb.Sheets.Panoramica.B5.s.font.sz>=24);
+const bytes=XLSX.write(wb,{type:'buffer',bookType:'xlsx',cellStyles:true});const reopened=XLSX.read(bytes,{type:'buffer',cellDates:true,cellStyles:true});assert.equal(reopened.Sheets.Documenti.B6.v,'DOC-001');assert.equal(reopened.Sheets.Panoramica.B5.v,1);assert.equal(reopened.Sheets.Documenti.D6.z,'#,##0.00 "€"');console.log('Fiscal workbook: counts, failure exclusion, dates, currency, styles and XLSX roundtrip passed.');

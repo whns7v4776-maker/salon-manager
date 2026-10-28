@@ -1,0 +1,17 @@
+import assert from 'node:assert/strict';
+import { beginStationaryTap, moveStationaryTap, claimStationaryTap } from '../src/lib/stationary-tap';
+const tap = beginStationaryTap(10, 10, 100);
+moveStationaryTap(tap, 12, 13);
+assert.equal(claimStationaryTap(tap, 200), true);
+assert.equal(claimStationaryTap(tap, 201), false, 'normal press after recovered tap cannot toggle twice');
+const swipe = beginStationaryTap(10, 10, 100);
+moveStationaryTap(swipe, 10, 35);
+moveStationaryTap(swipe, 10, 10);
+assert.equal(claimStationaryTap(swipe, 200), false, 'returning to origin is still a swipe');
+assert.equal(claimStationaryTap(beginStationaryTap(0, 0, 100), 600), false);
+const cancelled = beginStationaryTap(0, 0, 100); cancelled.moved = true;
+assert.equal(claimStationaryTap(cancelled, 150), false);
+const normalFirst = beginStationaryTap(0, 0, 100); normalFirst.handled = true;
+assert.equal(claimStationaryTap(normalFirst, 150), false);
+assert.equal(claimStationaryTap(beginStationaryTap(0, 0, 200), 240), true, 'next touch must work immediately');
+console.log('Stationary tap: tiny movement, swipe, cancellation, long press and double-toggle guards OK');

@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Scarica SalonPro per iPhone, iPad e Android. Agenda, clienti e servizi per il tuo salone.">
+  <title>Scarica SalonPro</title>
+  <style>
+    *{box-sizing:border-box}body{margin:0;min-height:100svh;display:grid;place-items:center;padding:24px;background:#101823;color:#fff;font:17px/1.55 system-ui,-apple-system,sans-serif}main{width:100%;max-width:480px;text-align:center}img{width:88px;height:88px;border-radius:22px}h1{font-size:2rem;line-height:1.2;margin:24px 0 12px}p{color:#cbd5e1}nav{display:grid;gap:14px;margin:30px 0}a{display:block;padding:17px 20px;border-radius:14px;background:#fff;color:#101823;text-decoration:none;font-weight:650}a:focus-visible{outline:3px solid #64c9ff;outline-offset:5px}small{display:block;color:#b9c4d1;font-size:.875rem}#status{min-height:3em}
+  </style>
+</head>
+<body>
+  <main>
+    <img src="/apple-touch-icon.png" alt="SalonPro" width="88" height="88">
+    <h1>Scarica SalonPro</h1>
+    <p>Agenda, clienti, operatori e servizi per il tuo salone.</p>
+    <p id="status" role="status">Scegli lo store del tuo dispositivo.</p>
+    <nav aria-label="Scarica l’app">
+      <a id="ios" href="https://apps.apple.com/it/app/salonpro/id6760840153">Scarica su App Store</a>
+      <a id="android" href="https://play.google.com/store/apps/details?id=com.marzix91.salonmanager">Scarica su Google Play</a>
+    </nav>
+    <small>Ogni salone richiede un account e un abbonamento dedicati.</small>
+  </main>
+  <script>
+    (function () {
+      var ua = navigator.userAgent || '';
+      var ios = /iPhone|iPad|iPod/i.test(ua) || (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1);
+      var android = /Android/i.test(ua);
+      var store = ios ? 'ios' : android ? 'android' : null;
+      // Unknown devices and disabled JavaScript retain both working store links.
+      if (store) {
+        document.getElementById('status').textContent = 'Apertura dello store… Se non si apre, tocca il pulsante qui sotto.';
+        window.location.replace(document.getElementById(store).href);
+      }
+    }());
+  </script>
+</body>
+</html>

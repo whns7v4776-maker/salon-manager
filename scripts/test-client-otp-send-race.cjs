@@ -1,0 +1,20 @@
+const fs=require('node:fs');
+const assert=require('node:assert/strict');
+const {PGlite}=require(process.env.PGLITE_MODULE||'@electric-sql/pglite');
+(async()=>{
+ const db=new PGlite();
+ await db.exec(`create table public.email_otp_verifications(id serial primary key,email text,purpose text,salon_code text,last_sent_at timestamptz default now());`);
+ await db.exec(fs.readFileSync('supabase/migrations/20260915160000_serialize_client_registration_otp.sql','utf8'));
+ const send=(email='client@example.invalid',salon='salon-a',purpose='client_registration')=>db.query('insert into email_otp_verifications(email,purpose,salon_code) values($1,$2,$3) returning id',[email,purpose,salon]);
+ const results=await Promise.allSettled(Array.from({length:20},()=>send()));
+ assert.equal(results.filter(r=>r.status==='fulfilled').length,1);
+ for(const r of results.filter(r=>r.status==='rejected')) assert.match(r.reason.message,/otp_send_rate_limited/);
+ await send('other@example.invalid'); await send('client@example.invalid','salon-b');
+ await send('owner@example.invalid','salon-a','owner_registration');await send('owner@example.invalid','salon-a','owner_registration');
+ await db.exec("update email_otp_verifications set last_sent_at=now()-interval '46 seconds' where email='client@example.invalid' and salon_code='salon-a'");
+ await send();
+ await db.exec("update email_otp_verifications set last_sent_at='1970-01-01' where email='client@example.invalid' and salon_code='salon-a'");
+ await send();
+ console.log('PASS: 20 submissions yield one challenge; cooldown, failed-send retry, other recipients/salons and owner flow preserved. PGlite serializes connections.');
+ await db.close();
+})().catch(e=>{console.error(e);process.exit(1)});

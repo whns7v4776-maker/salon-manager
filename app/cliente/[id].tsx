@@ -21,10 +21,10 @@ export default function ClienteDetailScreen() {
   const appuntamentiCliente = useMemo(() => {
     if (!cliente) return [];
 
-    return appuntamenti.filter(
-      (app) =>
-        app.cliente.trim().toLowerCase() === cliente.nome.trim().toLowerCase()
-    );
+    const clienteId = cliente.id.trim();
+    if (!clienteId) return [];
+
+    return appuntamenti.filter((app) => app.customerId?.trim() === clienteId);
   }, [appuntamenti, cliente]);
 
   const movimentiCliente = useMemo(() => {
@@ -72,7 +72,9 @@ export default function ClienteDetailScreen() {
       keyboardDismissMode="on-drag"
       onScrollBeginDrag={Keyboard.dismiss}
       keyboardShouldPersistTaps="handled"
-      showsVerticalScrollIndicator={false}
+      showsVerticalScrollIndicator
+      indicatorStyle="black"
+      scrollIndicatorInsets={{ right: 2 }}
     >
       <Text style={styles.overline}>SALON PRO</Text>
       <Text style={styles.title}>Scheda cliente</Text>

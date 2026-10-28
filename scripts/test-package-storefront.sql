@@ -1,0 +1,30 @@
+do $$
+declare w uuid=gen_random_uuid();u uuid=gen_random_uuid();c uuid=gen_random_uuid();s uuid=gen_random_uuid();oid uuid=gen_random_uuid();cat service_package_catalog;o service_package_orders;pid uuid;failed boolean;
+begin
+ insert into auth.users(id,email) values(u,u||'@example.invalid');
+ insert into workspaces(id,salon_name,slug,owner_email,subscription_status) values(w,'Storefront fixture','store-'||w,u||'@example.invalid','active');
+ update workspaces set subscription_ends_at=now()+interval '1 year' where id=w;
+ insert into workspace_members(workspace_id,user_id,email) values(w,u,u||'@example.invalid');
+ perform set_config('request.jwt.claim.sub',u::text,true);
+ insert into customers(id,workspace_id,full_name,phone,email) values(c,w,'Storefront fixture','390000000001',c||'@example.invalid');
+ insert into services(id,workspace_id,name,price,duration_minutes) values(s,w,'Fixture service',20,30);
+ perform save_salon_benefit_settings(true,false,false,1,1);
+ cat=save_service_package(null,0,'Online fixture',jsonb_build_array(jsonb_build_object('kind','service','id',s)),3,3,5700,0);
+ begin perform prepare_service_package_order(oid,w,c,cat.id,cat.revision);raise exception 'TEST private model allowed';exception when others then if SQLERRM='TEST private model allowed' then raise;end if;end;
+ perform set_package_online_visibility(cat.id,true);
+ select * into cat from service_package_catalog where id=cat.id;
+ o=prepare_service_package_order(oid,w,c,cat.id,cat.revision);
+ if exists(select 1 from customer_service_packages where id=oid) then raise exception 'TEST unpaid activation';end if;
+ perform save_service_package(cat.id,cat.revision,'Edited',cat.entitlements,6,6,9900,0);
+ o=prepare_service_package_order(oid,w,c,cat.id,cat.revision);
+ if o.amount_cents<>5700 or (o.terms->>'uses')::integer<>3 then raise exception 'TEST snapshot changed';end if;
+ update service_package_orders set account_id='acct_fixture',livemode=false,provider_session_id='cs_fixture_'||oid where id=oid;
+ begin perform settle_service_package_order(oid,'cs_fixture_'||oid,'acct_other',false,5700,'eur','pi_fixture');raise exception 'TEST wrong account allowed';exception when others then if SQLERRM='TEST wrong account allowed' then raise;end if;end;
+ begin perform settle_service_package_order(oid,'cs_fixture_'||oid,'acct_fixture',false,5701,'eur','pi_fixture');raise exception 'TEST wrong amount allowed';exception when others then if SQLERRM='TEST wrong amount allowed' then raise;end if;end;
+ pid=settle_service_package_order(oid,'cs_fixture_'||oid,'acct_fixture',false,5700,'eur','pi_fixture');
+ perform settle_service_package_order(oid,'cs_fixture_'||oid,'acct_fixture',false,5700,'eur','pi_fixture');
+ if pid<>oid or (select count(*) from cash_movements where workspace_id=w)<>1 or (select count(*) from cash_stripe_payments where workspace_id=w)<>1 then raise exception 'TEST duplicate payment';end if;
+ if (select uses from customer_service_packages where id=pid)<>3 then raise exception 'TEST wrong purchased terms';end if;
+ update cash_stripe_payments set refunded_cents=5700 where id=oid;
+ if (select status from service_package_orders where id=oid)<>'refunded' or (select expires_on from customer_service_packages where id=pid)>=current_date then raise exception 'TEST refund not suspended';end if;
+end $$;

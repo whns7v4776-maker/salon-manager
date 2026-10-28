@@ -1,0 +1,35 @@
+do $$
+declare w uuid=gen_random_uuid();u uuid=gen_random_uuid();c uuid=gen_random_uuid();c2 uuid=gen_random_uuid();aid uuid=gen_random_uuid();g customer_gift_cards;mid uuid;failed boolean;rev bigint;
+begin
+ insert into auth.users(id,email) values(u,u||'@example.invalid');
+ insert into workspaces(id,salon_name,slug,owner_email,subscription_status,subscription_ends_at) values(w,'Audit fixture','audit-'||w,u||'@example.invalid','active',now()+interval '1 year');
+ insert into workspace_members(workspace_id,user_id,email) values(w,u,u||'@example.invalid');
+ perform set_config('request.jwt.claim.sub',u::text,true);
+ insert into customers(id,workspace_id,full_name,phone) values(c,w,'Same name','390000000001'),(c2,w,'Same name','390000000002');
+ insert into push_devices(workspace_id,owner_email,expo_push_token,recipient_kind,customer_phone,is_active) values(w,u||'@example.invalid','ExponentPushToken['||gen_random_uuid()||']','client','390000000001',true),(w,u||'@example.invalid','ExponentPushToken['||gen_random_uuid()||']','client','390000000002',true);
+ perform record_benefit_notification(w,c,'first','Same title','Same body');
+ perform record_benefit_notification(w,c2,'second','Same title','Same body');
+ if (select count(*) from push_notifications where workspace_id=w)<>2 then raise exception 'AUDIT: same-name customers suppress each others push';end if;
+ perform save_salon_benefit_settings(false,false,true,1,1);
+ g=issue_customer_gift_card(gen_random_uuid(),c,5000,null,'','',null);
+ insert into appointments(id,workspace_id,customer_id,appointment_date,appointment_time,customer_name,service_name,price,duration_minutes) values(aid,w,c,current_date,'12:00','Same name','Audit service',20,30);
+ perform apply_customer_gift_card(g.id,aid,500);
+ failed=false;
+ begin insert into cash_movements(workspace_id,appointment_id,description,amount,payment_method) values(w,aid,'Wrong full price',20,'cash'); exception when others then failed=true;end;
+ if not failed then raise exception 'AUDIT: gift-covered appointment charged at full price';end if;
+ insert into cash_movements(workspace_id,appointment_id,description,amount,payment_method) values(w,aid,'Correct balance',15,'cash') returning id into mid;
+ set constraints all immediate;
+ if (select state from gift_card_uses where appointment_id=aid)<>'consumed' then raise exception 'AUDIT: gift remains reserved after balance was paid';end if;
+ failed=false;
+ begin update appointments set no_show=true where id=aid;exception when others then failed=true;end;
+ if not failed then raise exception 'AUDIT: already-used gift credit returned after payment';end if;
+ select revision into rev from benefit_sync_revisions where workspace_id=w;
+ if rev is null then raise exception 'AUDIT: missing sync revision';end if;
+ perform save_salon_benefit_settings(true,false,true,1,2);
+ if (select revision from benefit_sync_revisions where workspace_id=w)<=rev then raise exception 'AUDIT: sync revision not advanced';end if;
+ failed=false;
+ begin perform save_salon_benefit_settings(false,true,false,2,2);exception when others then failed=true;end;
+ if not failed then raise exception 'AUDIT: stale settings overwrite newer settings';end if;
+ if not exists(select 1 from pg_publication_tables where pubname='supabase_realtime' and tablename='benefit_sync_revisions') then raise exception 'AUDIT: realtime publication missing';end if;
+ if has_table_privilege('anon','benefit_sync_revisions','SELECT') or has_table_privilege('authenticated','benefit_sync_revisions','UPDATE') then raise exception 'AUDIT: sync revision permissions too broad';end if;
+end $$;

@@ -1,44 +1,112 @@
 import { Ionicons } from '@expo/vector-icons';
-import React, { useEffect, useMemo, useState } from 'react';
-import { Keyboard, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Dimensions, Keyboard, Platform, StyleSheet, Text, TextInput, View } from 'react-native';
+import { IosSimpleTouchable as TouchableOpacity } from "./ios-simple-touchable";
 
 type KeyboardNextToolbarProps = {
   onNext: () => void;
   label?: string;
+  shouldShow?: (focusedInput: TextInput | null) => boolean;
 };
 
-export function KeyboardNextToolbar({ onNext, label = 'Next' }: KeyboardNextToolbarProps) {
+const MIN_KEYBOARD_HEIGHT = 80;
+
+const getFocusedInput = () => {
+  const state = TextInput.State as unknown as {
+    currentlyFocusedInput?: () => TextInput | null;
+  };
+
+  return state.currentlyFocusedInput?.() ?? null;
+};
+
+export function KeyboardNextToolbar({
+  onNext,
+  label = 'Next',
+  shouldShow,
+}: KeyboardNextToolbarProps) {
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [visible, setVisible] = useState(false);
+
+  const canShowForCurrentFocus = useCallback(() => {
+    const focusedInput = getFocusedInput();
+    return Boolean(focusedInput) && (shouldShow ? shouldShow(focusedInput) : true);
+  }, [shouldShow]);
+
+  const hideToolbar = useCallback(() => {
+    setVisible(false);
+    setKeyboardHeight(0);
+  }, []);
 
   useEffect(() => {
     if (Platform.OS === 'web') return;
 
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
-    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
 
     const showSub = Keyboard.addListener(showEvent, (event) => {
-      setKeyboardHeight(event.endCoordinates?.height ?? 0);
+      const nextHeight = event.endCoordinates?.height ?? 0;
+      const screenHeight = Dimensions.get('screen').height;
+      const keyboardLooksClosed =
+        nextHeight < MIN_KEYBOARD_HEIGHT ||
+        (event.endCoordinates?.screenY ?? screenHeight) >= screenHeight - 2;
+
+      if (keyboardLooksClosed || !canShowForCurrentFocus()) {
+        hideToolbar();
+        return;
+      }
+
+      setKeyboardHeight(nextHeight);
       setVisible(true);
     });
 
-    const hideSub = Keyboard.addListener(hideEvent, () => {
-      setVisible(false);
-      setKeyboardHeight(0);
-    });
+    const changeSub =
+      Platform.OS === 'ios'
+        ? Keyboard.addListener('keyboardWillChangeFrame', (event) => {
+            const nextHeight = event.endCoordinates?.height ?? 0;
+            const screenHeight = Dimensions.get('screen').height;
+            const keyboardLooksClosed =
+              nextHeight < MIN_KEYBOARD_HEIGHT ||
+              (event.endCoordinates?.screenY ?? screenHeight) >= screenHeight - 2;
+
+            if (keyboardLooksClosed || !canShowForCurrentFocus()) {
+              hideToolbar();
+              return;
+            }
+
+            setKeyboardHeight(nextHeight);
+            setVisible(true);
+          })
+        : null;
+
+    const hideWillSub =
+      Platform.OS === 'ios' ? Keyboard.addListener('keyboardWillHide', hideToolbar) : null;
+    const hideDidSub = Keyboard.addListener('keyboardDidHide', hideToolbar);
 
     return () => {
       showSub.remove();
-      hideSub.remove();
+      changeSub?.remove();
+      hideWillSub?.remove();
+      hideDidSub.remove();
     };
-  }, []);
+  }, [canShowForCurrentFocus, hideToolbar]);
+
+  useEffect(() => {
+    if (!visible || Platform.OS === 'web') return;
+
+    const guard = setInterval(() => {
+      if (keyboardHeight < MIN_KEYBOARD_HEIGHT || !canShowForCurrentFocus()) {
+        hideToolbar();
+      }
+    }, 250);
+
+    return () => clearInterval(guard);
+  }, [canShowForCurrentFocus, hideToolbar, keyboardHeight, visible]);
 
   const bottomOffset = useMemo(() => {
     if (!visible) return -100;
     return Math.max(12, keyboardHeight + 8);
   }, [keyboardHeight, visible]);
 
-  if (Platform.OS === 'web') return null;
+  if (Platform.OS === 'web' || !visible) return null;
 
   return (
     <View pointerEvents="box-none" style={styles.overlay}>

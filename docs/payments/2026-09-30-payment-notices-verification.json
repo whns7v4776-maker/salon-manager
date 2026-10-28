@@ -1,0 +1,51 @@
+{
+  "sourceHashes": {
+    "components/client-booking-payment.tsx": "d8b50b77465ee865eb7262d17d496c17eb8120722a9d8697f7f7a810f00316a3",
+    "app/cliente-screen.tsx": "6628abeb1148558c7845c21158e017885009fe84011d7530714cdf8e1c3134af",
+    "supabase/functions/_shared/booking-payment.ts": "3f5e4ae9804de12f8814d5f3f1a086b640cb592987e06d63e1e031b27fd638d6",
+    "supabase/functions/send-push/index.ts": "bc4c8a196795467d8d65173a5a965c1118a035c05a7768ceb64b2448ff68bcb4",
+    "supabase/migrations/20260930170000_booking_payment_notices.sql": "1aa6427450373e3eb3631a6fc66fc506c9326f345d8a5053af3a19e45aece3d1"
+  },
+  "tests": [
+    "app-typescript",
+    "edge-deno-check",
+    "pglite-payment-ledger-and-notices"
+  ],
+  "server": {
+    "migration": "20260930170000",
+    "deployedFunctions": [
+      "cash-stripe",
+      "send-push"
+    ],
+    "privateRpcPermissionsVerified": true
+  },
+  "web": {
+    "deploymentId": "dpl_9rvE1T8h277G66mWWxhkpy6rXwmh",
+    "url": "https://salonpro.dev",
+    "htmlMatchesExport": true,
+    "ioniconsHttpStatus": 200
+  },
+  "limitations": [
+    "Tester subscription expired: public endpoint correctly disabled",
+    "No physical iOS/Android payment or push delivery test",
+    "Stripe network simulated in automated ledger tests",
+    "No real charges or test messages to customers"
+  ],
+  "nativeBuildCreated": false,
+  "ota": {
+    "group": "ed79c383-48a9-410b-b519-991542764459",
+    "updates": [
+      {
+        "id": "01a0f2cd-e73d-7dff-ac0c-59df50f64f29",
+        "platform": "android",
+        "runtimeVersion": "1.0.18-meta1"
+      },
+      {
+        "id": "01a0f2cd-e73d-795e-bea6-2e7ae52e5191",
+        "platform": "ios",
+        "runtimeVersion": "1.0.18-meta1"
+      }
+    ],
+    "manifestDeliveryVerified": true
+  }
+}

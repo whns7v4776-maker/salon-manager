@@ -41,6 +41,7 @@ enabled = true
 site_url = "http://localhost:8081"
 additional_redirect_urls = [
   "exp://127.0.0.1:8081",
+  "salonpro://auth/callback",
   "salonmanager://auth/callback"
 ]
 jwt_expiry = 3600
@@ -52,3 +53,33 @@ policy = "oneshot"
 
 [functions.send-push]
 verify_jwt = false
+
+[functions.send-email-otp]
+verify_jwt = false
+static_files = ["./functions/send-email-otp/salon-pro-email-otp-logo.png"]
+
+[functions.revenuecat-webhook]
+verify_jwt = false
+
+[functions.instagram-webhook]
+verify_jwt = false
+
+[functions.instagram-assistant-worker]
+verify_jwt = false
+
+[functions.salon-logo-plaque]
+verify_jwt = false
+
+[functions.cash-stripe]
+verify_jwt = false
+
+[functions.send-gift-card]
+verify_jwt = false
+static_files = ["./functions/send-gift-card/salon-pro-email-otp-logo.png"]
+
+[functions.monthly-report]
+verify_jwt = false
+static_files = ["./functions/monthly-report/salon-pro-email-otp-logo.png"]
+
+[functions.cash-passkey]
+verify_jwt = true

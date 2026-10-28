@@ -1,0 +1,19 @@
+const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),ts=require('typescript'),crypto=require('node:crypto');
+const source=fs.readFileSync('components/salon-discovery/client-location-settings.tsx','utf8');
+const code=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.React,esModuleInterop:true}}).outputText;
+const flush=async()=>{for(let i=0;i<30;i++)await Promise.resolve();};
+function fixture(platform='ios',options={}){let cursor=0,pending=[],consent=options.enabled?{salonCode:'fixture',instanceId:'install'}:null;const slots=[],calls=[],alerts=[];
+ const React={createElement:(type,props,...children)=>({type,props:{...props,children}}),useState(initial){const index=cursor++;if(!slots[index])slots[index]={value:initial};return [slots[index].value,v=>{slots[index].value=typeof v==='function'?v(slots[index].value):v;}];},useEffect(effect,deps){const index=cursor++;if(!slots[index]||deps.some((v,i)=>v!==slots[index].deps[i])){slots[index]={deps};pending.push(effect);}}};
+ const modules={react:React,'react-native':{Platform:{OS:platform},Alert:{alert:(...args)=>alerts.push(args)},AppState:{addEventListener:()=>({remove(){}})},Linking:{openSettings:async()=>calls.push('settings')},StyleSheet:{create:v=>v},Pressable:'Pressable',Text:'Text',View:'View'},'@expo/vector-icons':{Ionicons:'Ionicons'},'expo-modules-core':{requireOptionalNativeModule:()=>options.moduleMissing?null:{}},
+ 'expo-location':{getForegroundPermissionsAsync:async()=>({granted:!options.denied,canAskAgain:true}),hasServicesEnabledAsync:async()=>true,getBackgroundPermissionsAsync(){throw Error('Background permission is irrelevant to the half-hour reminder');}},
+ '../../src/lib/client-gps-reminders':{getClientGpsConsent:async()=>consent,enableClientGpsReminders:async code=>{calls.push(['enable',code]);consent={salonCode:code,instanceId:'install'};},disableClientGpsReminders:async()=>{calls.push(['disable']);consent=null;}}};
+ const exports={};vm.runInNewContext(code,{exports,Promise,require:n=>{assert(modules[n],n);return modules[n];}});
+ function render(){cursor=0;pending=[];const tree=exports.ClientLocationSettings({salonCode:'fixture'});pending.forEach(fn=>fn());return tree;}
+ return {render,calls,alerts};}
+const text=node=>node==null?'':typeof node==='string'?node:Array.isArray(node)?node.map(text).join(' '):text(node.props?.children);
+const nodes=node=>node&&typeof node==='object'?[node,...(node.props?.children??[]).flatMap(nodes)]:[];
+(async()=>{let passed=0;for(const p of ['ios','android']){
+ const existing=fixture(p,{enabled:true,denied:true});existing.render();await flush();const tree=existing.render();assert(text(tree).includes('Attivo · Disattiva'));assert(text(tree).includes('Promemoria a 30 minuti'));passed++;
+ const missing=fixture(p,{moduleMissing:true});missing.render();await flush();const initial=missing.render();const button=nodes(initial).find(n=>n.type==='Pressable'&&text(n).includes('Attiva promemoria a 30 minuti'));assert(button&&!button.props.disabled);button.props.onPress();assert(missing.alerts[0][1].includes('anche con app chiusa e senza GPS'));missing.alerts[0][2].find(b=>b.text==='Continua').onPress();await flush();assert(missing.calls.some(c=>c[0]==='enable'&&c[1]==='fixture'));assert(text(missing.render()).includes('Attivo · Disattiva'));passed++;
+ }const web=fixture('web');assert.equal(web.render(),null);await flush();assert.equal(web.calls.length,0);passed++;
+ fs.writeFileSync('work/gps-reminders-20261011/settings-ui-verification.json',JSON.stringify({allPassed:true,passed,sourceHash:crypto.createHash('sha256').update(source).digest('hex'),realDeviceVerified:false},null,2));console.log(passed+' native settings UI tests passed');})().catch(e=>{console.error(e);process.exitCode=1});

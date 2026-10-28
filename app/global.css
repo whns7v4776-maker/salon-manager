@@ -1,0 +1,739 @@
+/* Prenota slot: compact composition cards. These markers exist only on web. */
+:root [data-testid='quick-slot-fits'] {
+  background: #f4f7fc !important;
+  border-color: #dce5f1 !important;
+  padding-block: 10px !important;
+}
+:root [data-testid='quick-slot-fits-heading'] { margin-bottom: 6px !important; }
+/* One reading order: recommendation, time, operator. No detached badge rows. */
+:root :is([data-testid='quick-slot-fit-card'], [data-testid='quick-slot-fit-cross-card']) {
+  --fit-ink: #203b5d;
+  --fit-muted: #62768e;
+  --fit-avatar: #d5e1f1;
+  width: 188px !important;
+  min-height: 138px !important;
+  padding: 12px !important;
+  gap: 0 !important;
+  border: 1px solid #cad8eb !important;
+  border-radius: 15px !important;
+  background: linear-gradient(150deg, #edf3fc, #e1eaf7) !important;
+  box-shadow: 0 2px 5px rgb(29 52 84 / 5%) !important;
+  transition: translate 150ms ease, box-shadow 150ms ease, border-color 150ms ease;
+}
+:root [data-testid='quick-slot-fit-cross-card'] {
+  --fit-ink: #715029;
+  --fit-muted: #876d4e;
+  --fit-avatar: #efdfc3;
+  background: linear-gradient(150deg, #fbf4e8, #f3e8d5) !important;
+  border-color: #e1cfb1 !important;
+}
+:root :is([data-testid='quick-slot-fit-card'], [data-testid='quick-slot-fit-cross-card']):has([data-slot-fit-content][data-selected='true']) {
+  --fit-ink: #ffffff;
+  --fit-muted: #d0dff1;
+  --fit-avatar: rgb(255 255 255 / 14%);
+  background: linear-gradient(140deg, #345777, #1c3555) !important;
+  border-color: #254565 !important;
+  box-shadow: 0 4px 10px rgb(29 53 85 / 18%) !important;
+}
+.slot-fit-content {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  flex: 1;
+  min-width: 0;
+  gap: 6px;
+  color: var(--fit-ink);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+.slot-fit-heading { display: flex; align-items: center; justify-content: space-between; gap: 6px; min-height: 18px; }
+.slot-fit-rank {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border: 1px solid #daceef;
+  border-radius: 6px;
+  background: #ebe5fa;
+  color: #65458c;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+  white-space: nowrap;
+}
+.slot-fit-rank[data-rank='Migliore'] { background: #d9f3e6; border-color: #acdcc4; color: #176746; }
+.slot-fit-rank[data-rank='Ottimo'] { background: #dcecff; border-color: #b9d3f3; color: #245c94; }
+.slot-fit-rank[data-rank='Altro mestiere'] { background: #fff0d2; border-color: #e8cd94; color: #8a5b17; }
+.slot-fit-check { display: inline-flex; align-items: center; gap: 3px; font-size: 10px; line-height: 16px; font-weight: 600; color: #fff; }
+.slot-fit-time { display: flex; align-items: baseline; gap: 6px; white-space: nowrap; font-size: 21px; font-weight: 650; line-height: 27px; font-variant-numeric: tabular-nums; letter-spacing: -.45px; }
+.slot-fit-time-dash { font-size: 15px; font-weight: 400; color: var(--fit-muted); }
+/* Operator footer has its own surface without changing the card geometry. */
+.slot-fit-footer { display: flex; flex-direction: column; gap: 3px; padding: 4px 7px; margin-inline: -3px; border: 1px solid rgba(255,255,255,.9); border-radius: 10px; background: linear-gradient(120deg, rgba(255,255,255,.88), rgba(249,252,255,.62)); box-shadow: 0 2px 4px rgba(30,57,91,.07); }
+.slot-fit-footer .slot-fit-person { padding-top: 0; border-top: 0; justify-content: center; }
+.slot-fit-footer .slot-fit-person-copy { flex: 0 1 auto; }
+.slot-fit-footer .slot-fit-team-badge { align-self: center; }
+.slot-fit-footer .slot-fit-avatar { background: #385C83; color: #fff; border-color: #fff; box-shadow: 0 1px 3px rgba(30,57,91,.15); }
+.slot-fit-footer .slot-fit-team-badge { background: #E2ECF8; color: #355A80; border-left: 2px solid #789FC7; border-radius: 4px; }
+.slot-fit-content[data-selected='true'] .slot-fit-footer { background: linear-gradient(120deg, rgba(255,255,255,.16), rgba(255,255,255,.08)); border-color: rgba(255,255,255,.22); }
+.slot-fit-content[data-selected='true'] .slot-fit-avatar { background: #DCE9F8; color: #274866; border-color: #8099B4; }
+.slot-fit-content[data-selected='true'] .slot-fit-team-badge { background: rgba(255,255,255,.15); color: #E5F0FF; border-left-color: #ADCBEF; }
+.slot-fit-person { display: flex; align-items: center; gap: 8px; min-width: 0; padding-top: 7px; border-top: 1px solid color-mix(in srgb, var(--fit-muted) 20%, transparent); }
+.slot-fit-avatars { display: inline-flex; flex-shrink: 0; padding-right: 2px; }
+.slot-fit-avatars .slot-fit-avatar + .slot-fit-avatar { margin-left: -7px; }
+.slot-fit-team-badge { align-self: flex-start; padding: 2px 7px; border-radius: 5px; background: color-mix(in srgb, var(--fit-muted) 12%, transparent); color: var(--fit-ink); font-size: 9px; font-weight: 600; line-height: 12px; }
+.slot-fit-avatar { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 27px; height: 27px; border-radius: 50%; border: 2px solid color-mix(in srgb, var(--fit-avatar) 65%, white); background: var(--fit-avatar); font-size: 11px; font-weight: 700; }
+.slot-fit-person-copy { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.slot-fit-name { font-size: 12px; line-height: 17px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.slot-fit-detail { font-size: 10px; line-height: 14px; font-weight: 400; color: var(--fit-muted); }
+
+/* Composition phases: identity | assignment and pause | management. */
+:root [data-testid='quick-slot-phases'] { container: quick-slot-phases / inline-size; gap: 8px !important; }
+:root [data-testid='quick-slot-phase'] {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) 188px;
+  min-height: 82px;
+  padding-right: 34px !important;
+  border: 1px solid #d3dfed;
+  border-radius: 14px !important;
+  background: #edf3fa;
+  box-shadow: 0 2px 5px rgb(29 52 84 / 4%) !important;
+}
+:root [data-testid='quick-slot-phase']:has([data-testid='quick-slot-phase-overlap']) {
+  background: #fff6e9 !important;
+  border-color: #dbb680 !important;
+}
+:root [data-testid='quick-slot-phase-body'] {
+  grid-column: 1;
+  grid-row: 1;
+  min-width: 0 !important;
+  padding: 10px 12px !important;
+  align-items: center !important;
+  background: transparent !important;
+  gap: 10px !important;
+}
+:root [data-testid='quick-slot-phase-order'] {
+  flex-shrink: 0 !important;
+  width: 28px !important;
+  height: 28px !important;
+  border-radius: 9px !important;
+  background: #294b70 !important;
+}
+:root [data-testid='quick-slot-phase-order'] > * { color: #fff !important; }
+:root [data-testid='quick-slot-phase-header'] {
+  display: grid !important;
+  grid-template-columns: minmax(170px, 1fr) 294px;
+  align-items: center !important;
+  gap: 14px !important;
+}
+:root [data-testid='quick-slot-phase-summary'] { width: auto !important; min-width: 0 !important; }
+:root [data-testid='quick-slot-phase-title'] { font-size: 14px !important; line-height: 19px !important; }
+:root [data-testid='quick-slot-phase-meta'] { margin-top: 5px !important; }
+:root [data-testid='quick-slot-phase-assignment'] {
+  padding-left: 14px !important;
+  border-left: 1px solid #d2deed !important;
+}
+:root [data-testid='quick-slot-phase-assignment-controls'] { gap: 7px !important; }
+:root [data-testid='quick-slot-phase-operator-wrap'] { flex: 1 !important; width: auto !important; min-width: 0 !important; }
+:root [data-testid='quick-slot-phase-operator'] {
+  min-height: 36px !important;
+  border-radius: 9px !important;
+  padding: 4px 7px !important;
+}
+:root [data-testid='quick-slot-phase-operator-label'] {
+  font-size: 9px !important;
+  line-height: 11px !important;
+  font-weight: 500 !important;
+  letter-spacing: 0 !important;
+  text-transform: none !important;
+}
+:root [data-testid='quick-slot-phase-operator-name'] { font-size: 12px !important; line-height: 16px !important; font-weight: 600 !important; }
+:root [data-testid='quick-slot-phase-add-pause'] { min-height: 36px !important; }
+:root [data-testid='quick-slot-phase-actions'] {
+  grid-column: 2;
+  grid-row: 1;
+  align-self: center !important;
+  align-items: stretch !important;
+  flex-direction: column !important;
+  border-left: 1px solid #d2deed !important;
+  border-radius: 0 !important;
+  margin: 0 12px 0 0 !important;
+  padding: 0 0 0 12px !important;
+  gap: 5px !important;
+}
+:root [data-testid='quick-slot-phase-action-controls'] > * {
+  flex: 1 !important;
+  min-height: 36px !important;
+  padding: 6px 7px !important;
+  border-radius: 9px !important;
+  gap: 5px !important;
+}
+:root [data-testid='quick-slot-phase-action-controls'] > * > :last-child { font-size: 11px !important; line-height: 16px !important; }
+:root [data-testid='quick-slot-phase'] > :not([data-testid='quick-slot-phase-body']):not([data-testid='quick-slot-phase-actions']):not([data-testid='salon-composition-grab']) { grid-column: 1 / -1; }
+:root [data-testid='quick-slot-phase-pause'] { padding-right: 12px !important; }
+:root [data-testid='quick-slot-phase'] > [data-testid='salon-composition-grab'] {
+  background: #e6edf6 !important;
+  border-left-color: #d3dfed !important;
+  width: 34px !important;
+}
+@container quick-slot-phases (max-width: 820px) {
+  :root [data-testid='quick-slot-phase'] { grid-template-columns: minmax(0, 1fr); }
+  :root [data-testid='quick-slot-phase-actions'] {
+    grid-column: 1;
+    grid-row: auto;
+    border-left: 0 !important;
+    border-top: 1px solid #d2deed !important;
+    margin: 0 12px 10px 50px !important;
+    padding: 8px 0 0 !important;
+  }
+  :root [data-testid='quick-slot-phase-action-controls'] { width: auto !important; align-self: flex-end !important; }
+  :root [data-testid='quick-slot-phase-action-controls'] > * { flex: initial !important; }
+}
+@container quick-slot-phases (max-width: 610px) {
+  :root [data-testid='quick-slot-phase-body'] { align-items: flex-start !important; }
+  :root [data-testid='quick-slot-phase-header'] { grid-template-columns: minmax(0, 1fr); gap: 9px !important; }
+  :root [data-testid='quick-slot-phase-assignment'] { border-left: 0 !important; border-top: 1px solid #d2deed !important; padding: 9px 0 0 !important; }
+}
+@media (hover: hover) and (pointer: fine) {
+  :root :is([data-testid='quick-slot-fit-card'], [data-testid='quick-slot-fit-cross-card']):hover {
+    translate: none;
+    filter: brightness(1.045);
+    box-shadow: inset 0 0 0 1px rgb(170 159 140 / 24%) !important;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  :root :is([data-testid='quick-slot-fit-card'], [data-testid='quick-slot-fit-cross-card']) { transition: none; }
+}
+
+/*
+ * Feedback uniforme per tutti gli elementi interattivi del sito.
+ * React Native Web rende i touchable con tag diversi a seconda del browser,
+ * quindi copriamo sia gli elementi HTML nativi sia i ruoli accessibili.
+ */
+button:not(:disabled),
+a[href],
+area[href],
+summary,
+label[for],
+select:not(:disabled),
+input[type='button']:not(:disabled),
+input[type='submit']:not(:disabled),
+input[type='reset']:not(:disabled),
+input[type='checkbox']:not(:disabled),
+input[type='radio']:not(:disabled),
+[role='button']:not([aria-disabled='true']),
+[role='link']:not([aria-disabled='true']),
+[role='menuitem']:not([aria-disabled='true']),
+[role='option']:not([aria-disabled='true']),
+[role='switch']:not([aria-disabled='true']),
+[role='tab']:not([aria-disabled='true']),
+[role='checkbox']:not([aria-disabled='true']),
+[role='radio']:not([aria-disabled='true']),
+[tabindex='0']:not([role]):not(input):not(textarea):not(select):not([contenteditable]):not([draggable='true']):not([data-salon-cursor]):not([aria-disabled='true']),
+[data-premium-text-action='true']:not([aria-disabled='true']),
+[data-web-clickable='true']:not([aria-disabled='true']) {
+  cursor: pointer !important;
+}
+
+/*
+ * Conferma visiva immediata per i controlli DOM e per i touchable web che
+ * richiedono un tap rapido. Usiamo la proprieta CSS individuale `scale`:
+ * si compone con eventuali `transform` inline di React Native Web e quindi
+ * non sposta card selezionate, animazioni o gesture dell'Agenda.
+ */
+button:not(:disabled),
+:root [data-salon-press-feedback='true']:not([aria-disabled='true']) {
+  transform-origin: center;
+  transition:
+    scale 72ms cubic-bezier(0.2, 0, 0, 1),
+    opacity 72ms ease-out,
+    filter 72ms ease-out;
+  transition-delay: 0ms;
+  touch-action: manipulation;
+}
+
+button:not(:disabled):active,
+:root [data-salon-press-feedback='true']:not([aria-disabled='true']):active {
+  scale: 0.985;
+  filter: brightness(0.97);
+}
+
+/* Le superfici tecniche non devono mai simulare un tap durante una gesture. */
+:root [data-salon-cursor='grab'],
+:root [data-salon-cursor='resize-y'],
+:root [data-testid='salon-composition-grab'] {
+  scale: 1 !important;
+  filter: none !important;
+}
+
+button:disabled,
+select:disabled,
+input:disabled,
+[role='button'][aria-disabled='true'],
+[role='link'][aria-disabled='true'],
+[role='menuitem'][aria-disabled='true'],
+[role='option'][aria-disabled='true'],
+[role='switch'][aria-disabled='true'],
+[role='tab'][aria-disabled='true'],
+[role='checkbox'][aria-disabled='true'],
+[role='radio'][aria-disabled='true'],
+[tabindex='0'][aria-disabled='true'],
+[data-premium-text-action='true'][aria-disabled='true'],
+[data-web-clickable='true'][aria-disabled='true'] {
+  cursor: not-allowed !important;
+}
+
+/* Text and icons must keep the cursor of their enabled action even when
+   their own React Native Web style says auto/default. All selectors stay at
+   zero specificity so explicit Agenda drag/resize locks below take priority.
+   Editors, sliders and scrollbars keep their own cursor and descendants. */
+:where(button:not(:disabled), a[href], summary, label[for],
+  [role='button']:not([aria-disabled='true']), [role='link']:not([aria-disabled='true']),
+  [role='tab']:not([aria-disabled='true']), [role='menuitem']:not([aria-disabled='true']),
+  [role='option']:not([aria-disabled='true']), [role='switch']:not([aria-disabled='true']),
+  [role='checkbox']:not([aria-disabled='true']), [role='radio']:not([aria-disabled='true']),
+  [tabindex='0']:not([role]):not(input):not(textarea):not(select):not([contenteditable]):not([draggable='true']):not([data-salon-cursor]):not([aria-disabled='true']),
+  [data-web-clickable='true']:not([aria-disabled='true']),
+  [data-premium-text-action='true']:not([aria-disabled='true']))
+:where(*):where(:not(input, textarea, select, [contenteditable]:not([contenteditable='false']),
+  [role='textbox'], [role='slider'], [role='scrollbar'], [data-salon-cursor],
+  [draggable='true'], [data-testid='salon-composition-grab'], .composition-drag-handle)):where(:not(:is(input, textarea, select, [contenteditable]:not([contenteditable='false']),
+  [role='textbox'], [role='slider'], [role='scrollbar'], [data-salon-cursor],
+  [draggable='true'], [data-testid='salon-composition-grab'], .composition-drag-handle) *)) {
+  cursor: inherit !important;
+}
+
+/*
+ * Le card Agenda sono contemporaneamente accessibili come controlli e
+ * trascinabili. La regola globale `pointer` qui sopra non deve trasformare la
+ * presa in un semplice dito quando React Native Web completa l'idratazione o
+ * quando il cursore passa sopra un badge interno alla card.
+ */
+:root [data-salon-cursor='grab'],
+:root [data-salon-cursor='grab'] * {
+  cursor: grab !important;
+}
+
+:root [data-salon-cursor='grab']:active,
+:root [data-salon-cursor='grab']:active * {
+  cursor: grabbing !important;
+}
+
+/* La maniglia inferiore mantiene la propria semantica anche dentro la card. */
+:root [data-salon-cursor='resize-y'],
+:root [data-salon-cursor='resize-y'] * {
+  cursor: ns-resize !important;
+}
+
+/* La presa resize vince anche sul cursore grab della card durante il click. */
+:root [data-salon-cursor='grab'] [data-salon-cursor='resize-y'],
+:root [data-salon-cursor='grab'] [data-salon-cursor='resize-y'] *,
+:root [data-salon-cursor='grab']:active [data-salon-cursor='resize-y'],
+:root [data-salon-cursor='grab']:active [data-salon-cursor='resize-y'] * {
+  cursor: ns-resize !important;
+}
+
+:root [data-salon-cursor='pointer'],
+:root [data-salon-cursor='pointer'] * {
+  cursor: pointer !important;
+}
+
+/* Anche una card live ha il corpo in sola lettura (`pointer`), ma la sua
+ * linguetta resta l'unica zona operativa e deve vincere sul cursore padre. */
+:root [data-salon-cursor='pointer'] [data-salon-cursor='resize-y'],
+:root [data-salon-cursor='pointer'] [data-salon-cursor='resize-y'] * {
+  cursor: ns-resize !important;
+}
+
+/*
+ * Il pager web conserva le scene gia visitate in una lunga riga orizzontale.
+ * Home, Agenda, Richieste, Clienti e Servizi sono pagine corpose: lasciarle
+ * tutte nel layout rende progressivamente piu costoso ogni tap della Custom
+ * Bar. Il wrapper esterno del pager mantiene larghezza e posizione, mentre la
+ * sola scena inattiva viene esclusa da layout, paint e hit testing. Questa
+ * regola e deliberatamente confinata al backoffice web.
+ */
+:root [data-salon-web-tab-pager='true'] [aria-hidden='true'] {
+  content-visibility: hidden !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+/*
+ * I testi Agenda tagliati scorrono sul compositor del browser, senza creare
+ * timer o Animated.loop JavaScript. Quando la scena non e visibile, anche
+ * l'animazione CSS viene fermata esplicitamente.
+ */
+@keyframes salon-agenda-marquee-web {
+  0%, 20% {
+    transform: translate3d(0, 0, 0);
+  }
+  to {
+    transform: translate3d(
+      var(--salon-agenda-marquee-distance),
+      0,
+      0
+    );
+  }
+}
+
+:root [data-salon-agenda-marquee-track='true'] {
+  animation: salon-agenda-marquee-web
+    calc(var(--salon-agenda-marquee-duration, 6000ms) * 1.25) linear infinite;
+  will-change: auto;
+}
+
+:root
+  [data-salon-web-tab-pager='true']
+  [aria-hidden='true']
+  [data-salon-agenda-marquee-track='true'] {
+  animation-play-state: paused !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root [data-salon-agenda-marquee-track='true'] {
+    animation: none !important;
+  }
+}
+
+/*
+ * Safari può cambiare il nodo sotto al mouse mentre una card si trasforma o
+ * cresce. Durante il gesto manteniamo quindi il cursore sull'intera pagina,
+ * poi l'attributo viene rimosso al rilascio/finalize.
+ */
+:root[data-salon-agenda-cursor='grabbing'],
+:root[data-salon-agenda-cursor='grabbing'] * {
+  cursor: grabbing !important;
+}
+
+:root[data-salon-agenda-cursor='resize-y'],
+:root[data-salon-agenda-cursor='resize-y'] * {
+  cursor: ns-resize !important;
+}
+
+/* Mantiene centrati sia il valore chiuso sia le righe del picker numerico web. */
+select[data-testid='salon-native-number-picker'],
+select[data-testid='salon-native-number-picker'] option {
+  text-align: center !important;
+  text-align-last: center !important;
+}
+
+/* Profondità premium solo sui popup web, senza alterare app o gesture native. */
+@media (hover: hover) and (pointer: fine) {
+  :root [data-testid='popup-lift'] {
+    transition:
+      transform 180ms cubic-bezier(0.22, 1, 0.36, 1),
+      box-shadow 180ms ease,
+      border-color 180ms ease !important;
+    will-change: auto;
+  }
+
+  :root [data-testid='popup-lift']:hover {
+    transform: none;
+    filter: brightness(1.045);
+    box-shadow: inset 0 0 0 1px rgba(170,159,140,.24) !important;
+    z-index: 3;
+  }
+}
+
+:root [data-testid='salon-composition-grab'],
+:root [data-testid='salon-composition-grab'] * {
+  cursor: grab !important;
+}
+
+:root [data-testid='salon-composition-grab']:active,
+:root [data-testid='salon-composition-grab']:active * {
+  cursor: grabbing !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  button:not(:disabled),
+  :root [data-salon-press-feedback='true']:not([aria-disabled='true']) {
+    transition-duration: 0.01ms;
+  }
+
+  button:not(:disabled):active,
+  :root [data-salon-press-feedback='true']:not([aria-disabled='true']):active {
+    scale: 1;
+  }
+}
+
+/* The FlatList cell owns stacking; elevating its child alone leaves the
+   selected day behind the following overlapping cells. Web stylesheet only. */
+div:has(> [data-salon-day-card-selected="true"]) {
+  z-index: 120 !important;
+  overflow: visible;
+}
+
+/* Premium hover: visible on ivory, tinted and dark surfaces, without movement. */
+@media (hover:hover) and (pointer:fine){
+:where(button,[role="button"],[role="tab"]):not(:disabled):not([aria-disabled="true"]):hover { box-shadow:inset 0 0 0 1000px rgba(155,144,125,.12),inset 0 12px 22px rgba(255,255,255,.12)!important; }
+}
+
+/* The mouse never adds a rectangular focus/hover frame. Existing radii stay intact. */
+:where(button,[role="button"],[role="tab"]) { border-radius:12px; }
+:where(button,[role="button"],[role="tab"]):focus:not(:focus-visible) { outline:none!important; }
+@media (hover:hover) and (pointer:fine) {
+html body :where(button,[role="button"],[role="tab"]):not(:disabled):not([aria-disabled="true"]):hover {
+ box-shadow:inset 0 0 0 1000px rgba(155,144,125,.12),inset 0 12px 22px rgba(255,255,255,.12)!important;
+ outline:none!important;
+}
+}
+
+@media (hover:hover) and (pointer:fine){
+ html body [data-salon-hover-group="true"]:hover {box-shadow:inset 0 0 0 1000px rgba(155,144,125,.12)!important;}
+ html body [data-salon-hover-group="true"] :is(button,[role="button"],[data-salon-hover-lift]):not(:disabled):not([aria-disabled="true"]):hover {box-shadow:none!important;filter:none!important;outline:none!important;}
+ html body [data-premium-hover-scope="container"]:not(:disabled):not([aria-disabled="true"]):hover {box-shadow:none!important;filter:none!important;outline:none!important;}
+ html body [data-premium-hover-target="true"]:hover {box-shadow:inset 0 0 0 1000px rgba(155,144,125,.14),inset 0 10px 18px rgba(255,255,255,.14)!important;}
+}
+
+[data-premium-page-scroll="true"] {overscroll-behavior-y:auto!important;-webkit-overflow-scrolling:touch;scroll-behavior:auto;}
+
+
+/* Keep scrolling with the browser compositor. `contain` retains the browser's
+   native edge feedback while preventing a dialog from scrolling its backdrop. */
+html, body, #root { overscroll-behavior-y: contain; }
+[data-scrollview],
+[class*="r-overflowY-"],
+[style*="overflow: auto"], [style*="overflow-y: auto"],
+[style*="overflow: scroll"], [style*="overflow-y: scroll"],
+[role="dialog"] *, [aria-modal="true"] * {
+  overscroll-behavior-y: contain !important;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* React Native Web Switch: style the visible track, never its transparent input
+   or the enclosing settings row. Checked controls keep their active colours. */
+html[data-premium-appearance="day"] div:has(> input[role="switch"]:not(:checked)) > div:first-child {
+  background-color: #A9B3AC !important;
+  box-shadow: inset 0 0 0 1px rgba(58,76,63,.18);
+}
+html[data-premium-appearance="day"] div:has(> input[role="switch"]:not(:checked)) > div:nth-child(2) {
+  background-color: #FFFFFF !important;
+  box-shadow: 0 1px 3px rgba(25,42,30,.24);
+}
+
+/* Badge editor follows the pearl/champagne palette, including the off switch. */
+html[data-premium-appearance="day"] [data-customer-badge-settings="true"] div:has(> input[role="switch"]:not(:checked)) > div:first-child {
+  background-color:#AAA7A1!important;
+  box-shadow:inset 0 0 0 1px rgba(78,70,58,.18);
+}
+
+/* Booking settings use the available web width, without changing their controls. */
+@media (min-width:1100px) {
+ [data-requests-rule-columns="true"] {
+  display:grid !important;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  column-gap:24px;
+  align-items:start;
+ }
+ [data-requests-rule-columns="true"] > [data-requests-rule-group] {
+  width:auto !important;
+  min-width:0;
+  margin-top:26px !important;
+ }
+ [data-requests-rule-group] > [dir="auto"] {
+  text-align:left !important;
+ }
+}
+
+/* Card content may reflow; amounts stay intact and type only shrinks modestly. */
+/* The pager moves scenes with transforms. Unlike hidden, clip cannot be
+   horizontally scrolled by browser focus, which also displaced the tab bar. */
+div:has(> [data-premium-tab-overlay]) {
+  overflow:clip!important;
+}
+[data-premium-service-card] { container-type:inline-size; min-width:0; }
+[data-premium-service-card] [dir="auto"] { word-break:normal; }
+[data-premium-card-amount] {
+  font-size:clamp(19px,8cqi,22px)!important;
+  white-space:nowrap;
+  overflow-wrap:normal;
+  word-break:normal;
+  font-variant-numeric:tabular-nums;
+}
+[data-premium-service-list-amount] {
+  font-size:clamp(14px,1.6vw,16px)!important;
+  white-space:nowrap;
+  overflow-wrap:normal;
+  word-break:normal;
+  flex-shrink:0;
+}
+[data-premium-directory-count] {
+  font-size:clamp(24px,2.8vw,27px)!important;
+  white-space:nowrap;
+  overflow-wrap:normal;
+  word-break:normal;
+}
+
+[data-customer-welcome-card] { container-type:inline-size; container-name:welcome-card; }
+@container welcome-card (max-width:480px) {
+  [data-customer-welcome-header] { padding-left:18px!important; padding-right:18px!important; }
+  [data-customer-welcome-actions] {
+    width:100%!important;
+    flex-wrap:nowrap!important;
+    align-items:center!important;
+    justify-content:space-between!important;
+    gap:8px!important;
+  }
+  [data-customer-welcome-status] { order:2; flex-shrink:0; margin-right:0!important; }
+  [data-customer-welcome-actions] > [role="button"] { order:1; flex-shrink:0; }
+}
+@container welcome-card (max-width:300px) {
+  [data-customer-welcome-actions] { gap:6px!important; }
+  [data-customer-welcome-actions] > [role="button"] { padding-left:10px!important; padding-right:10px!important; }
+}
+[data-premium-sheet], [data-services-editor], [data-cash-dialog] {
+  min-width:0;
+}
+[data-premium-sheet] [role="button"], [data-services-editor] [role="button"] {
+  max-width:100%;
+}
+@container (max-width:280px) {
+  [data-premium-service-card-heading] { row-gap:10px; }
+  [data-premium-service-card-heading]>div:last-child { align-items:flex-start!important; }
+}
+
+/* Interactive labels stay readable at narrow widths; do not truncate actions. */
+@media (max-width:599px) {
+  :is(button,[role="button"],[role="radio"],[role="tab"],[role="menuitem"]) :is([class*="r-textOverflow"],[style*="-webkit-line-clamp"]) {
+    min-width:0!important;max-width:100%!important;white-space:normal!important;
+    text-overflow:clip!important;overflow:visible!important;overflow-wrap:break-word!important;
+    -webkit-line-clamp:unset!important;
+  }
+  [data-agenda-booking-mode] {gap:7px!important;align-items:stretch!important;}
+  [data-agenda-booking-mode] [role="radio"] {padding:5px!important;gap:3px!important;min-height:46px!important;height:auto!important;}
+  [data-agenda-booking-mode] [role="radio"] [dir="auto"] {font-size:12px!important;line-height:16px!important;white-space:nowrap!important;text-overflow:clip!important;overflow:visible!important;}
+  [data-agenda-booking-mode] [role="radio"] [style*="font-family: ionicons"] {font-size:16px!important;flex-shrink:0!important;}
+}
+@media (max-width:359px) {
+  [data-agenda-booking-mode] [role="radio"] {padding:5px!important;gap:0!important;}
+  [data-agenda-booking-mode] [role="radio"] [style*="font-family: ionicons"] {display:none!important;}
+  [data-agenda-booking-mode] [role="radio"] [dir="auto"] {font-size:12px!important;line-height:16px!important;}
+}
+
+/* Shared content contract for actions, tabs and nested menu choices in both themes.
+   Keep touch/drag geometry intact; grow only plain action rows with direct labels. */
+:is(button,[role="button"],[role="radio"],[role="tab"],[role="menuitem"],[role="menuitemradio"],[role="menuitemcheckbox"],[role="option"],[tabindex="0"]:not(input,textarea),a[href]) :is([class*="r-textOverflow"],[class*="r-WebkitLineClamp"],[style*="-webkit-line-clamp"]) {
+  min-width:0!important;
+  max-width:100%!important;
+  white-space:normal!important;
+  text-overflow:clip!important;
+  overflow:visible!important;
+  overflow-wrap:break-word!important;
+  -webkit-line-clamp:unset!important;
+}
+:is(button,[role="button"],[role="radio"],[role="menuitem"],[role="menuitemradio"],[role="menuitemcheckbox"],[role="option"],[tabindex="0"]:not(input,textarea),a[href]):has(> :is([class*="r-textOverflow"],[class*="r-WebkitLineClamp"],[style*="-webkit-line-clamp"]))[style*="min-height:"]:not([style*="position: absolute"]) {
+  height:auto!important;
+  max-height:none!important;
+  align-items:center;
+}
+:is([role="menuitem"],[role="menuitemradio"],[role="menuitemcheckbox"],[role="option"],[tabindex="0"]:not(input,textarea),a[href]) {
+  min-width:0;
+  max-width:100%;
+}
+.slot-fit-name {white-space:normal;text-overflow:clip;overflow-wrap:break-word;}
+
+/* Hover follows the actual glass indicator geometry and the active route. */
+@media (hover:hover) and (pointer:fine) {
+  html body [data-premium-bottom-bar] [role="tab"]:hover {
+    box-shadow:none!important;filter:none!important;background-color:transparent!important;
+  }
+  [data-premium-bottom-bar] [role="tab"]::before {
+    content:"";position:absolute;pointer-events:none;z-index:-1;
+    left:50%;top:50%;transform:translate(-50%,-50%);
+    width:var(--salon-tab-hover-width);height:var(--salon-tab-hover-height);
+    border-radius:var(--salon-tab-hover-radius);box-sizing:border-box;
+    border:1px solid rgba(142,116,76,.22);
+    background:linear-gradient(150deg,rgba(255,255,255,.24),rgba(155,144,125,.08));
+    opacity:0;transition:opacity 120ms ease;
+  }
+  [data-premium-bottom-bar][data-premium-bar-theme="dark"] [role="tab"]::before {
+    border-color:rgba(234,225,207,.16);
+    background:linear-gradient(150deg,rgba(255,255,255,.10),rgba(216,194,155,.045));
+  }
+  [data-premium-bottom-bar] [role="tab"]:not([aria-selected="true"]):hover::before {opacity:1;}
+  [data-premium-bottom-bar] [role="tab"][aria-selected="true"]::before {opacity:0;}
+}
+
+/* A collapsed search gives its former width back to the operator rail. */
+@media(max-width:599px) {
+  [data-agenda-search-host] {flex:0 0 42px!important;min-width:42px!important;width:42px!important;}
+  [data-agenda-search-row]:has([data-premium-search-open="true"]) {flex-wrap:wrap!important;}
+  [data-agenda-search-host]:has([data-premium-search-open="true"]) {order:3;flex:1 0 100%!important;width:100%!important;}
+  html body [data-agenda-search-row] [data-agenda-search-host] [data-premium-search-toolbar][data-premium-search-open="true"] > :has(input),
+  html body [data-agenda-search-row] [data-agenda-search-host] [data-premium-search-toolbar][data-premium-search-open="true"] > input {grid-row:1!important;grid-column:1!important;}
+}
+
+/* Replace browser blue focus/selection with the shared warm neutral accent. */
+html body :is(input,textarea,select,button,[tabindex]):focus-visible {
+  outline:1px solid rgba(155,137,105,.70)!important;
+  outline-offset:2px;
+}
+html body :is(input[type="checkbox"],input[type="radio"],input[type="range"]) {accent-color:#A28D69;}
+::selection {background:rgba(194,166,117,.32);color:inherit;}
+
+/* App-wide focus palette includes fields rendered in portal and nested dialogs. */
+:root {--premium-focus:#393D38;--premium-focus-ring:rgba(57,61,56,.55);--premium-selection:rgba(57,61,56,.15);}
+:root[data-premium-appearance="night"] {--premium-focus:#D8C29B;--premium-focus-ring:rgba(216,194,155,.72);--premium-selection:rgba(216,194,155,.28);}
+html body :is(input,textarea,[role="searchbox"]):is(:focus,:focus-visible) {
+  outline:1px solid var(--premium-focus-ring)!important;outline-offset:-1px!important;
+  border-color:var(--premium-focus)!important;box-shadow:0 0 0 1px var(--premium-focus-ring)!important;
+}
+html body :is(select,button,[tabindex]):focus-visible {outline-color:var(--premium-focus-ring)!important;}
+::selection {background:var(--premium-selection);color:inherit;}
+
+:root {--premium-menu-fill:#FAF8F3;--premium-menu-ink:#30342F;}
+:root[data-premium-appearance="night"] {--premium-menu-fill:#202527;--premium-menu-ink:#F1EEE7;}
+html body select option {background:var(--premium-menu-fill);color:var(--premium-menu-ink);}
+html body select option:checked {background:var(--premium-selection);color:var(--premium-menu-ink);}
+@media(max-width:599px) {
+  [data-agenda-search-host]:has([data-premium-search-open="false"]) [data-premium-search-results] {display:none!important;}
+}
+
+/* Welcome actions retain the approved hierarchy at every card width. */
+html body [data-customer-welcome-header] {padding:16px!important;display:grid!important;grid-template-columns:42px minmax(0,1fr)!important;align-items:start!important;gap:14px!important;}
+html body [data-customer-welcome-header] > div:nth-child(2) {grid-column:2;min-width:0!important;}
+html body [data-customer-welcome-actions] {grid-column:2;width:100%!important;display:flex!important;flex-direction:row!important;flex-wrap:nowrap!important;align-items:center!important;justify-content:space-between!important;gap:10px!important;}
+html body [data-customer-welcome-actions] > [role="button"] {order:1;align-self:flex-start!important;flex-shrink:0!important;}
+html body [data-customer-welcome-status] {order:2;margin-left:auto!important;margin-right:0!important;flex-shrink:0!important;align-self:center!important;}
+
+/* Support links use a text-only glow instead of a full-row hover frame. */
+html body [data-support-contact-links] :is([tabindex],button,a) {align-self:flex-start!important;width:fit-content;max-width:100%;}
+@media(hover:hover) and (pointer:fine) {
+ html body [data-support-contact-links] :is([tabindex],button,a):hover {background:transparent!important;box-shadow:none!important;outline:none!important;filter:none!important;}
+ html body [data-support-contact-links] :is([tabindex],button,a) [dir="auto"] {transition:color 150ms ease,text-shadow 150ms ease;}
+ html body [data-support-contact-links] :is([tabindex],button,a):hover [dir="auto"] {color:var(--premium-focus)!important;text-shadow:0 0 14px var(--premium-focus-ring);}
+}
+
+
+@media(min-width:1000px){html body [data-customer-welcome-header] {padding:18px!important;}}
+html body [data-customer-directory-heading] {width:100%;}
+
+html body [data-customer-directory-title] {flex:0 1 auto!important;width:auto!important;max-width:100%;}
+
+/* Communication actions retain one complete label on compact screens. */
+@media(max-width:600px){
+ html body [data-communications-footer]{display:grid!important;grid-template-columns:auto minmax(0,1fr) auto!important;gap:7px!important;padding:12px!important;align-items:stretch!important;}
+ html body [data-communications-footer] > * {min-width:0!important;width:auto!important;padding:10px 8px!important;gap:5px!important;flex-wrap:nowrap!important;min-height:44px!important;}
+ html body [data-communications-footer] [data-communication-action-label]{white-space:nowrap!important;font-size:14px!important;line-height:18px!important;}
+}
+@media(max-width:359px){html body [data-communications-footer] [data-communication-action-icon]{display:none!important;}}
+
+@media(max-width:359px){
+ html body [data-communications-footer]{grid-template-columns:auto minmax(0,1fr) auto!important;}
+ html body [data-communications-footer] [data-communication-action-label]{font-size:14px!important;}
+}
+
+@media(max-width:319px){html body [data-communications-footer] [data-communication-action-label]{font-size:13px!important;}}
+
+/* Preserve the approved action order; give a long confirmation label available space. */
+@media(max-width:359px){
+ html body [data-agenda-booking-actions] > :first-child{flex:0 0 auto!important;min-width:0!important;width:auto!important;padding-left:10px!important;padding-right:10px!important;}
+}
+
+/* One hit target and one hover per command. The glass tab pseudo-element is
+   the large feedback; the smaller tab box never paints a second ring. */
+@media(hover:hover) and (pointer:fine){
+ html body [data-premium-bottom-bar="true"] [role="tab"][data-salon-press-feedback="true"]:hover{outline:none!important;box-shadow:none!important;filter:none!important;background:transparent!important;}
+ html body [data-premium-bottom-bar="true"] [role="tab"] :is(div,span,svg):hover{outline:none!important;box-shadow:none!important;filter:none!important;}
+ html body [data-owner-home="profile"]:hover{box-shadow:inset 0 0 0 1000px rgba(155,144,125,.10)!important;}
+ html body [data-owner-home="profile"] :is(button,[role="button"]):hover{box-shadow:none!important;outline:none!important;filter:none!important;}
+}

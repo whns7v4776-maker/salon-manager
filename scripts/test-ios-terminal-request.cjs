@@ -1,0 +1,20 @@
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict'),ts=require('typescript');
+const exportsObject={};
+vm.runInNewContext(ts.transpileModule(fs.readFileSync('src/lib/ios-terminal-request.ts','utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2020,module:ts.ModuleKind.CommonJS}}).outputText,{exports:exportsObject,setTimeout,clearTimeout,AbortController});
+const {callIosTerminal}=exportsObject;
+(async()=>{
+ let aborted;
+ await assert.rejects(callIosTerminal((_body,{signal})=>{aborted=signal;return new Promise(()=>{});},'terminal-status',{},10),/non risponde/);
+ assert.equal(aborted.aborted,true,'Complete invocation timeout covers auth waiting, not only fetch');
+ await assert.rejects(callIosTerminal(async()=>({error:{context:{json:()=>new Promise(()=>{})}}}),'terminal-status',{},10),/non risponde/);
+ let late;
+ const pending=callIosTerminal((_body,{signal})=>{aborted=signal;return new Promise(resolve=>{late=resolve;});},'terminal-intent',{movementId:'same_movement'},10);
+ await assert.rejects(pending,/Verifica il pagamento/);
+ late({data:{status:'paid'}});assert.equal(aborted.aborted,true,'A late response cannot change the rejected result or invite a new incasso');
+ await assert.rejects(callIosTerminal(async()=>({data:{error:'Sede non valida'}}),'terminal-status'),/Sede non valida/);
+ await assert.rejects(callIosTerminal(async()=>({error:{context:{json:async()=>({error:'Accesso scaduto'})}}}),'terminal-status'),/Accesso scaduto/);
+ let calls=0;
+ const result=await callIosTerminal(async(body,{signal})=>{calls++;assert.equal(body.movementId,'same_movement');assert.equal(signal.aborted,false);return {data:{status:'paid'}};},'terminal-check',{movementId:'same_movement'});
+ assert.equal(result.status,'paid');assert.equal(calls,1,'Payment recovery never automatically duplicates a request');
+ console.log('PASS complete auth/fetch/body deadlines, abort propagation, late response isolation, backend errors and single-request payment recovery.');
+})().catch(error=>{console.error(error);process.exitCode=1;});

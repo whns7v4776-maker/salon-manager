@@ -13,7 +13,12 @@
     "**/*.tsx"
   ],
   "exclude": [
+    "work/**",
     "supabase/functions/**",
-    "node_modules_old/**"
+    "node_modules_old/**",
+    "admin-dashboard/**",
+    "artifacts/**",
+    "sites/**",
+    "sportpro-control/**"
   ]
 }

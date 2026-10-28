@@ -1,10 +1,14 @@
+import { useAgendaPopupStyles } from '../agenda-popup-theme';
+import { TABLET_MODAL_ORIENTATIONS } from '../../src/lib/tablet-modal-orientations';
+import {NativeReadableText as Text} from '../owner-native-premium';
+import { webPickerStyles } from './web-picker-styles';
+import { DockedSheetSurface } from './docked-sheet-surface';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
     Modal,
     Platform,
     ScrollView,
     StyleSheet,
-    Text,
     View,
     type NativeScrollEvent,
     type NativeSyntheticEvent,
@@ -14,7 +18,7 @@ import { HapticTouchable } from './haptic-touchable';
 
 const ITEM_HEIGHT = 44;
 const IS_ANDROID = Platform.OS === 'android';
-const ANDROID_SHEET_EXTRA_LIFT = 25;
+const IS_WEB = Platform.OS === 'web';
 const VISIBLE_ROWS = 5;
 const PICKER_HEIGHT = ITEM_HEIGHT * VISIBLE_ROWS;
 const PICKER_PADDING = ITEM_HEIGHT * Math.floor(VISIBLE_ROWS / 2);
@@ -53,6 +57,7 @@ const WheelColumn = ({
   onChange: (nextIndex: number) => void;
   formatter?: (value: number) => string;
 }) => {
+  const styles=useAgendaPopupStyles(baseStyles);
   const scrollRef = useRef<ScrollView | null>(null);
   const lastNotifiedIndexRef = useRef(selectedIndex);
   const lastScrollSampleRef = useRef<{ offsetY: number; timestamp: number } | null>(null);
@@ -205,13 +210,17 @@ export function WheelDatePickerModal({
   initialValue,
   onClose,
   onConfirm,
+  embedded = false,
 }: {
+  embedded?: boolean;
   visible: boolean;
   title: string;
   initialValue?: string;
   onClose: () => void;
   onConfirm: (value: string) => void;
 }) {
+  const styles=useAgendaPopupStyles(baseStyles);
+  const pickerStyles=useAgendaPopupStyles(webPickerStyles);
   const initialDate = useMemo(() => parseIsoDateValue(initialValue), [initialValue]);
   const [selectedYear, setSelectedYear] = useState(initialDate.year);
   const [selectedMonth, setSelectedMonth] = useState(initialDate.month);
@@ -252,12 +261,12 @@ export function WheelDatePickerModal({
     onConfirm(`${selectedYear}-${pad2(selectedMonth)}-${pad2(selectedDay)}`);
   };
 
-  return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <View style={styles.backdrop}>
+  if (!visible) return null;
+  const content = (
+      <View style={[styles.backdrop, IS_WEB && pickerStyles.backdrop]}>
         <HapticTouchable style={styles.dismissArea} activeOpacity={1} onPress={onClose} />
-        <View style={styles.sheet}>
-          <Text style={styles.title}>{title}</Text>
+        <DockedSheetSurface style={[styles.sheet, IS_WEB && pickerStyles.sheet]}>
+          <Text style={[styles.title, IS_WEB && pickerStyles.title, IS_WEB && { flex: 0 }]}>{title}</Text>
 
           <View style={styles.wheelWrap}>
             <View style={[styles.wheelFadeMask, styles.wheelFadeMaskTop]} pointerEvents="none" />
@@ -286,39 +295,51 @@ export function WheelDatePickerModal({
             />
           </View>
 
-          <View style={styles.actions}>
-            <HapticTouchable style={styles.lightButton} onPress={onClose} activeOpacity={0.9}>
-              <Text style={styles.lightButtonText}>Annulla</Text>
+          <View style={[styles.actions, IS_WEB && pickerStyles.actions]}>
+            <HapticTouchable style={[styles.lightButton, IS_WEB && pickerStyles.cancel]} onPress={onClose} activeOpacity={0.9}>
+              <Text style={[styles.lightButtonText, IS_WEB && pickerStyles.cancelText]}>Annulla</Text>
             </HapticTouchable>
-            <HapticTouchable style={styles.darkButton} onPress={confirmSelection} activeOpacity={0.9}>
-              <Text style={styles.darkButtonText}>Conferma</Text>
+            <HapticTouchable style={[styles.darkButton, IS_WEB && pickerStyles.confirm]} onPress={confirmSelection} activeOpacity={0.9}>
+              <Text style={[styles.darkButtonText, IS_WEB && pickerStyles.confirmText]}>Conferma</Text>
             </HapticTouchable>
           </View>
-        </View>
+        </DockedSheetSurface>
       </View>
-    </Modal>
   );
+  return embedded ? <View style={[StyleSheet.absoluteFillObject, { zIndex: 1000 }]}>{content}</View> : <Modal supportedOrientations={TABLET_MODAL_ORIENTATIONS} visible={visible} transparent animationType="fade" onRequestClose={onClose}>{content}</Modal>;
 }
 
-const styles = StyleSheet.create({
+const baseStyles = StyleSheet.create({
   backdrop: {
     flex: 1,
-    backgroundColor: 'rgba(15, 23, 42, 0.28)',
+    backgroundColor: IS_WEB ? 'rgba(15, 23, 42, 0.46)' : 'rgba(15, 23, 42, 0.28)',
     justifyContent: 'flex-end',
-  },
+    alignItems: IS_WEB ? 'center' : undefined,
+    paddingHorizontal: IS_WEB ? 20 : 0,
+    paddingVertical: IS_WEB ? 20 : 0, paddingBottom: 0 },
   dismissArea: {
-    flex: 1,
+    ...StyleSheet.absoluteFillObject,
   },
   sheet: {
-    backgroundColor: '#f8fafc',
+    backgroundColor: IS_WEB ? '#ffffff' : '#f8fafc',
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
-    marginBottom: IS_ANDROID ? ANDROID_SHEET_EXTRA_LIFT : 0,
+    borderBottomLeftRadius: IS_WEB ? 28 : 0,
+    borderBottomRightRadius: IS_WEB ? 28 : 0,
+    marginBottom: 0,
     paddingHorizontal: 18,
     paddingTop: 16,
     paddingBottom: 28,
     borderWidth: 1,
     borderColor: '#dbe4ec',
+    width: '100%',
+    maxWidth: IS_WEB ? 540 : undefined,
+    maxHeight: IS_WEB ? '94%' : undefined,
+    alignSelf: 'center',
+    shadowColor: IS_WEB ? '#020617' : undefined,
+    shadowOpacity: IS_WEB ? 0.22 : 0,
+    shadowRadius: IS_WEB ? 34 : 0,
+    shadowOffset: IS_WEB ? { width: 0, height: 18 } : { width: 0, height: 0 },
   },
   title: {
     fontSize: 16,

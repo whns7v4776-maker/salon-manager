@@ -1,0 +1,11 @@
+const fs=require('node:fs'),vm=require('node:vm'),ts=require('typescript'),assert=require('node:assert/strict');
+const ctx={exports:{}};vm.createContext(ctx);
+vm.runInContext(ts.transpileModule(fs.readFileSync('src/lib/push/owner-web-event-key.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText,ctx);
+const key=ctx.exports.buildOwnerWebEventKey;
+const request={id:'a',appointmentGroupId:'group-1',stato:'In attesa'};
+assert.equal(key(request,'fallback'),key({...request,id:'phase-b',stato:'Accettata'},'changed projection'));
+assert.equal(key({id:'a',stato:'In attesa'},'old'),key({id:'a',stato:'Accettata'},'new'));
+assert.notEqual(key(request,''),key({...request,stato:'Annullata',cancellationSource:'customer'},''));
+assert.notEqual(key(request,''),key({...request,appointmentGroupId:'group-2'},''));
+assert.notEqual(key(request,''),key({...request,operatorChangeRespondedAt:'2026-09-19T10:00:00Z',operatorChangeStatus:'accepted'},''));
+console.log('PASS: phase/status updates collapse; distinct bookings, cancellation and operator responses remain distinct');

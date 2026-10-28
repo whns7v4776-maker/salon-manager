@@ -1,0 +1,46 @@
+{
+  "webDeployment": "dpl_EVqfswnPVgqY5iBodbtxmcbq8vwj",
+  "webUrl": "https://salonpro.dev",
+  "migration": "20260930183000_appointment_service_revisions",
+  "functions": [
+    "cash-stripe",
+    "send-push"
+  ],
+  "updates": [
+    {
+      "id": "01a0f37e-f970-731c-bd21-f8ba8a2ef5eb",
+      "createdAt": "2026-09-30T18:06:20.016Z",
+      "group": "0c0b3140-b0c6-47fa-96f0-574b0b6f895d",
+      "branch": "production",
+      "message": "Modifica servizio appuntamenti, saldi conservati e popup dal basso",
+      "runtimeVersion": "1.0.18-meta1",
+      "platform": "android",
+      "manifestPermalink": "https://u.expo.dev/update/01a0f37e-f970-731c-bd21-f8ba8a2ef5eb",
+      "isRollBackToEmbedded": false,
+      "gitCommitHash": "1b4a5f1b34bb51dc01c521dd63ae1c608227b72d"
+    },
+    {
+      "id": "01a0f37e-f970-7f45-afd6-97198f5510cb",
+      "createdAt": "2026-09-30T18:06:20.016Z",
+      "group": "0c0b3140-b0c6-47fa-96f0-574b0b6f895d",
+      "branch": "production",
+      "message": "Modifica servizio appuntamenti, saldi conservati e popup dal basso",
+      "runtimeVersion": "1.0.18-meta1",
+      "platform": "ios",
+      "manifestPermalink": "https://u.expo.dev/update/01a0f37e-f970-7f45-afd6-97198f5510cb",
+      "isRollBackToEmbedded": false,
+      "gitCommitHash": "1b4a5f1b34bb51dc01c521dd63ae1c608227b72d"
+    }
+  ],
+  "manifestChecks": [
+    {
+      "platform": "android",
+      "publishedIdServed": true
+    },
+    {
+      "platform": "ios",
+      "publishedIdServed": true
+    }
+  ],
+  "nativeBuildCreated": false
+}

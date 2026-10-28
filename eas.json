@@ -6,17 +6,84 @@
   "build": {
     "development": {
       "developmentClient": true,
-      "distribution": "internal"
+      "distribution": "internal",
+      "env": {
+        "NODE_ENV": "development",
+        "APP_VARIANT": "development",
+        "RCT_USE_PREBUILT_RNCORE": "0"
+      }
     },
     "preview": {
-      "distribution": "internal"
+      "distribution": "internal",
+      "env": {
+        "NODE_ENV": "production",
+        "APP_VARIANT": "development",
+        "RCT_USE_PREBUILT_RNCORE": "0"
+      }
     },
     "production": {
-      "autoIncrement": true
+      "environment": "production",
+      "autoIncrement": true,
+      "channel": "production",
+      "env": {
+        "META_APP_EVENTS_ENABLED": "true",
+        "NODE_ENV": "production",
+        "RCT_USE_PREBUILT_RNCORE": "0"
+      }
+    },
+    "store-fixed-version": {
+      "autoIncrement": false,
+      "env": {
+        "META_APP_EVENTS_ENABLED": "true",
+        "NODE_ENV": "production",
+        "RCT_USE_PREBUILT_RNCORE": "0"
+      }
+    },
+    "production-retry": {
+      "extends": "production",
+      "autoIncrement": false
+    },
+    "production-terminal": {
+      "extends": "production",
+      "env": {
+        "STRIPE_TERMINAL_BUILD": "true"
+      },
+      "android": {
+        "gradleCommand": ":app:bundleRelease :app:assembleRelease",
+        "applicationArchivePath": "android/app/build/outputs/bundle/release/*.aab",
+        "buildArtifactPaths": [
+          "android/app/build/outputs/apk/release/*.apk",
+          "android/app/build/outputs/mapping/release/mapping.txt"
+        ]
+      }
     }
   },
   "submit": {
+    "terminal-test": {
+      "android": {
+        "track": "internal",
+        "releaseStatus": "completed"
+      }
+    },
+    "store-review": {
+      "android": {
+        "track": "production",
+        "releaseStatus": "draft"
+      },
+      "ios": {
+        "ascAppId": "6760840153"
+      }
+    },
     "production": {
+      "android": {
+        "track": "production",
+        "releaseStatus": "completed"
+      },
+      "ios": {
+        "ascAppId": "6760840153"
+      }
+    },
+    "store-fixed-version": {
       "ios": {
         "ascAppId": "6760840153"
       }

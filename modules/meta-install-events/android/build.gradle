@@ -1,0 +1,16 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+group = 'com.salonpro'
+version = '1.0.0'
+android {
+  namespace 'com.salonpro.metaevents'
+  defaultConfig { versionCode 1; versionName '1.0.0' }
+}
+dependencies {
+  // Keep the explicit install API aligned with the SDK source reviewed for this bridge.
+  implementation('com.facebook.android:facebook-android-sdk:18.0.3') {
+    version { strictly '18.0.3' }
+  }
+}

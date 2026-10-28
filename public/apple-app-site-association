@@ -1,0 +1,13 @@
+{
+  "applinks": {
+    "apps": [],
+    "details": [
+      {
+        "appID": "KZB5LP9K6T.com.marzix91.salonmanager",
+        "paths": [
+          "/join/*"
+        ]
+      }
+    ]
+  }
+}

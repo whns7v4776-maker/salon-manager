@@ -1,0 +1,6 @@
+{
+  "name": "salonpro-meta-install-events",
+  "version": "1.0.0",
+  "description": "Explicit consent-gated Meta install activation",
+  "private": true
+}

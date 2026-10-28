@@ -1,0 +1,30 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const ts = require('typescript');
+require.extensions['.ts'] = (module, filename) => module._compile(ts.transpileModule(fs.readFileSync(filename, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText, filename);
+const { normalizeAvailabilitySettings, isOperatorAvailableOnDate, OPEN_ENDED_CALENDAR_EXCEPTION_END_DATE: endDate } = require('../src/lib/booking.ts');
+const op = { id: 'operator-a', nome: 'Alex', availability: { enabledWeekdays: [0,1,2,3,4,5,6], dateRanges: [{ id: 'forever', startDate: '2026-09-18', endDate }] } };
+assert.equal(isOperatorAvailableOnDate(op, '2026-09-17'), false);
+assert.equal(isOperatorAvailableOnDate(op, '2040-09-18'), true);
+// Exercise the actual shared normalizer, including persistence round trips.
+const exception = { id: 'block', kind: 'vacation', scope: 'operators', operatorIds: [op.id], startDate: '2026-09-18', endDate, allDay: true };
+const normalized = normalizeAvailabilitySettings({ calendarExceptions: [exception] });
+assert.equal(normalized.calendarExceptions.length, 1);
+assert.equal(normalizeAvailabilitySettings(JSON.parse(JSON.stringify(normalized))).calendarExceptions[0].endDate, endDate);
+assert.equal(isOperatorAvailableOnDate(op, '2040-09-18', normalized), false);
+assert.equal(isOperatorAvailableOnDate({ ...op, id: 'operator-b', nome: 'Marco' }, '2040-09-18', normalized), true);
+const timed = normalizeAvailabilitySettings({ calendarExceptions: [{ ...exception, allDay: false, startTime: '12:00', endTime: '13:00' }] });
+assert.equal(timed.calendarExceptions.length, 1);
+assert.equal(timed.calendarExceptions[0].allDay, false);
+const invalid = normalizeAvailabilitySettings({ calendarExceptions: [{ ...exception, scope: 'salon' }] });
+assert.equal(invalid.calendarExceptions.length, 0);
+console.log('Operator open-ended periods: shared normalization, reload, scope and timed blocks passed.');
+
+const { isSameOperatorIdentity } = require('../src/lib/home-operator-identity.ts');
+assert.equal(isSameOperatorIdentity({ operatoreId: 'operator-b', operatoreNome: 'Alex' }, op), false);
+assert.equal(isSameOperatorIdentity({ operatoreNome: ' Alex ' }, op), true);
+const phased = { operatoreId: op.id, phaseConfig: { version: 1, mode: 'phased', initialDurationMinutes: 20, processingDurationMinutes: 30, finalDurationMinutes: 20, finalServiceName: 'Piega', finalPhaseEnabled: true }, phaseOperatorAssignments: { version: 1, initial: { id: op.id, name: op.nome }, final: { id: 'operator-b', name: 'Marco' } } };
+assert.equal(isSameOperatorIdentity(phased, op), true);
+assert.equal(isSameOperatorIdentity(phased, { id: 'operator-b', nome: 'Marco' }), true);
+assert.equal(isSameOperatorIdentity({ ...phased, phaseConfig: { ...phased.phaseConfig, finalPhaseEnabled: false } }, { id: 'operator-b', nome: 'Marco' }), false);
+console.log('Operator identity: IDs, legacy names and phase assignments passed.');

@@ -1,0 +1,14 @@
+import assert from 'node:assert/strict';
+import {giftEmail} from '../supabase/functions/send-gift-card/template.ts';
+const input={salon:'Salone & Figli',customer:'Giulia',amount:'100,00 €',sender:'Marco',message:'<img src=x onerror=alert(1)>',code:'ABCD1234',expiry:'01/10/2027',url:'https://salonpro.dev/join/demo'};
+const html=giftEmail(input);
+assert(html.includes('cid:salonpro-app-logo'));
+assert(html.indexOf('alt="SalonPro"')<html.indexOf('Salone &amp; Figli'));
+assert(!html.includes('<img src=x'));
+assert(html.includes('&lt;img src=x onerror=alert(1)&gt;'));
+assert(html.includes('Valore iniziale del regalo'));
+assert(html.includes('Valido fino al 01/10/2027'));
+assert(html.includes('https://salonpro.dev/join/demo'));
+assert(giftEmail({...input,expiry:null}).includes('Senza scadenza'));
+assert(!giftEmail({...input,sender:'',message:''}).includes('undefined'));
+console.log('Gift email: branding, escaping, amount semantics, expiry and link checks passed.');

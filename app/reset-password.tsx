@@ -1,20 +1,17 @@
+import { DockedSheetSurface } from '../components/ui/docked-sheet-surface';
 import * as ExpoLinking from 'expo-linking';
 import { router } from 'expo-router';
 import React from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Alert, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { HapticNativePressable as Pressable } from '../components/ui/haptic-native-controls';
 import { AppWordmark } from '../components/app-wordmark';
+import {
+  PasswordMatchRequirement,
+  PasswordRequirements,
+} from '../components/password-requirements';
+import { PasswordTextInput } from '../components/ui/password-text-input';
 import { useAppContext } from '../src/context/AppContext';
+import { validateStrongPassword } from '../src/lib/password-policy';
 import { isValidEmail } from '../src/lib/validators';
 
 const resolveCurrentUrl = async () => {
@@ -25,8 +22,14 @@ const resolveCurrentUrl = async () => {
   return ExpoLinking.getInitialURL();
 };
 
-const OWNER_RESET_SAFE_ROUTE = '/proprietario?reset=1';
-const OWNER_RESET_SUCCESS_ROUTE = '/proprietario?reset=done';
+const OWNER_RESET_SAFE_ROUTE = '/?side=owner&ownerReset=1';
+const OWNER_RESET_SUCCESS_ROUTE = '/?side=owner&ownerReset=done';
+type ResetPasswordStatus = 'loading' | 'ready' | 'linkError' | 'success';
+type ResetFeedbackDialog = {
+  tone: 'success' | 'error';
+  title: string;
+  message: string;
+};
 
 export default function ResetPasswordScreen() {
   const {
@@ -38,7 +41,7 @@ export default function ResetPasswordScreen() {
   const [password, setPassword] = React.useState('');
   const [confirmPassword, setConfirmPassword] = React.useState('');
   const [resetEmail, setResetEmail] = React.useState('');
-  const [status, setStatus] = React.useState<'loading' | 'ready' | 'error' | 'success'>(
+  const [status, setStatus] = React.useState<ResetPasswordStatus>(
     ownerPasswordRecoveryActive ? 'ready' : 'loading'
   );
   const [message, setMessage] = React.useState(
@@ -49,13 +52,29 @@ export default function ResetPasswordScreen() {
   const [isSaving, setIsSaving] = React.useState(false);
   const [isRequestingNewLink, setIsRequestingNewLink] = React.useState(false);
   const [requestMessage, setRequestMessage] = React.useState('');
+  const [requestMessageType, setRequestMessageType] = React.useState<'success' | 'error' | null>(
+    null
+  );
+  const [feedbackDialog, setFeedbackDialog] = React.useState<ResetFeedbackDialog | null>(null);
+  const resetCompletedRef = React.useRef(false);
 
-  const handleGoToOwnerLogin = React.useCallback(() => {
+  const handleCloseAfterReset = React.useCallback(() => {
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      window.location.replace(OWNER_RESET_SUCCESS_ROUTE);
+      return;
+    }
+
     router.replace(OWNER_RESET_SUCCESS_ROUTE);
   }, []);
 
   React.useEffect(() => {
     let cancelled = false;
+
+    if (resetCompletedRef.current) {
+      return () => {
+        cancelled = true;
+      };
+    }
 
     if (ownerPasswordRecoveryActive) {
       setStatus('ready');
@@ -76,7 +95,7 @@ export default function ResetPasswordScreen() {
       }
 
       if (!result.ok) {
-        setStatus('error');
+        setStatus('linkError');
         setMessage(result.error ?? 'Il link di recupero non e valido o e scaduto.');
         return;
       }
@@ -90,62 +109,100 @@ export default function ResetPasswordScreen() {
     };
   }, [activateOwnerPasswordRecoveryFromUrl, ownerPasswordRecoveryActive]);
 
-  const canSubmit =
-    password.trim().length >= 6 &&
-    confirmPassword.trim().length >= 6 &&
-    password === confirmPassword &&
-    !isSaving;
+  const passwordPolicy = validateStrongPassword(password.trim());
+  const canSubmit = passwordPolicy.valid && password === confirmPassword && !isSaving;
+  const canAttemptSubmit =
+    password.trim().length > 0 && confirmPassword.trim().length > 0 && !isSaving;
 
   const handleSubmit = async () => {
     if (!canSubmit) {
-      setStatus('error');
-      setMessage(
-        password !== confirmPassword
-          ? 'Le due password non coincidono.'
-          : 'La nuova password deve avere almeno 6 caratteri.'
-      );
+      const validationMessage =
+        !passwordPolicy.valid
+          ? passwordPolicy.message
+          : 'Le due password non coincidono.';
+      setStatus('ready');
+      setMessage(validationMessage);
+      setFeedbackDialog({
+        tone: 'error',
+        title: 'Controlla la nuova password',
+        message: validationMessage,
+      });
       return;
     }
 
     setIsSaving(true);
-    const result = await completeOwnerPasswordRecovery(password);
+    resetCompletedRef.current = true;
+    const result = await completeOwnerPasswordRecovery(password).catch(() => ({
+      ok: false as const,
+      error: 'Aggiornamento password non riuscito. Controlla la connessione e riprova.',
+    }));
     setIsSaving(false);
 
     if (!result.ok) {
-      setStatus('error');
-      setMessage(result.error ?? 'Aggiornamento password non riuscito.');
+      const errorMessage = result.error ?? 'Aggiornamento password non riuscito.';
+      resetCompletedRef.current = false;
+      setStatus('ready');
+      setMessage(errorMessage);
+      setFeedbackDialog({
+        tone: 'error',
+        title: 'Password non aggiornata',
+        message: errorMessage,
+      });
+      return;
+    }
+
+    setPassword('');
+    setConfirmPassword('');
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      window.history.replaceState({}, '', '/reset-password');
+      setStatus('success');
+      setMessage('Password resettata correttamente. Puoi chiudere questa pagina.');
+      setFeedbackDialog({
+        tone: 'success',
+        title: 'Password aggiornata',
+        message:
+          'La nuova password è stata salvata e verificata correttamente. Ora puoi usarla per accedere al salone.',
+      });
       return;
     }
 
     setStatus('success');
-    setMessage('Password resettata con successo. Vai in Accedi e riprova il login con la nuova password.');
-    setPassword('');
-    setConfirmPassword('');
-    Alert.alert(
-      'Password resettata con successo',
-      'Vai in Accedi e riprova il login con la nuova password.',
-      [{ text: 'OK', onPress: handleGoToOwnerLogin }]
-    );
+    setMessage('Password resettata correttamente.');
+    setFeedbackDialog({
+      tone: 'success',
+      title: 'Password aggiornata',
+      message:
+        'La nuova password è stata salvata e verificata correttamente. Ora puoi usarla per accedere al salone.',
+    });
   };
 
   const handleRequestNewLink = async () => {
     const normalizedEmail = resetEmail.trim().toLowerCase();
     if (!isValidEmail(normalizedEmail)) {
       setRequestMessage('Inserisci una mail valida per ricevere un nuovo link.');
+      setRequestMessageType('error');
+      Alert.alert('Email non valida', 'Inserisci una mail valida per ricevere il link di reset.');
       return;
     }
 
     setIsRequestingNewLink(true);
     setRequestMessage('');
+    setRequestMessageType(null);
     const result = await requestOwnerPasswordReset(normalizedEmail);
     setIsRequestingNewLink(false);
 
     if (!result.ok) {
-      setRequestMessage(result.error ?? 'Invio nuovo link non riuscito.');
+      const errorMessage = result.error ?? 'Invio nuovo link non riuscito.';
+      setRequestMessage(errorMessage);
+      setRequestMessageType('error');
+      Alert.alert('Link non inviato', errorMessage);
       return;
     }
 
-    setRequestMessage('Nuovo link inviato. Apri l’ultima mail e riprova da lì.');
+    const successMessage = 'Link inviato con successo. Apri l’ultima mail e riprova da lì.';
+    setRequestMessage(successMessage);
+    setRequestMessageType('success');
+    Alert.alert('Link inviato', successMessage);
   };
 
   return (
@@ -194,31 +251,48 @@ export default function ResetPasswordScreen() {
 
           {status === 'ready' ? (
             <View>
-              <TextInput
+              <PasswordTextInput
                 value={password}
                 onChangeText={setPassword}
+                compactHorizontalPadding={Platform.OS === 'android'}
                 placeholder="Nuova password"
                 placeholderTextColor="#9a9a9a"
-                secureTextEntry
                 autoCapitalize="none"
+                autoCorrect={false}
+                autoComplete="new-password"
+                textContentType="newPassword"
                 style={styles.input}
               />
-              <TextInput
+              <PasswordRequirements
+                password={password.trim()}
+                compact={Platform.OS === 'android'}
+                alignLeft
+              />
+              <PasswordTextInput
                 value={confirmPassword}
                 onChangeText={setConfirmPassword}
+                compactHorizontalPadding={Platform.OS === 'android'}
                 placeholder="Conferma nuova password"
                 placeholderTextColor="#9a9a9a"
-                secureTextEntry
                 autoCapitalize="none"
+                autoCorrect={false}
+                autoComplete="new-password"
+                textContentType="newPassword"
                 style={styles.input}
+              />
+              <PasswordMatchRequirement
+                password={password}
+                confirmPassword={confirmPassword}
+                compact={Platform.OS === 'android'}
+                alignLeft
               />
               <Pressable
                 accessibilityRole="button"
-                disabled={!canSubmit}
+                disabled={!canAttemptSubmit}
                 onPress={handleSubmit}
                 style={({ pressed }) => [
                   styles.primaryButton,
-                  (!canSubmit || pressed) && styles.primaryButtonPressed,
+                  (!canAttemptSubmit || pressed) && styles.primaryButtonPressed,
                 ]}
               >
                 {isSaving ? (
@@ -230,7 +304,7 @@ export default function ResetPasswordScreen() {
             </View>
           ) : null}
 
-          {status === 'error' ? (
+          {status === 'linkError' ? (
             <View style={styles.errorPanel}>
               <Text style={styles.errorPanelTitle}>Richiedi un nuovo link</Text>
               <Text style={styles.errorPanelText}>
@@ -238,7 +312,13 @@ export default function ResetPasswordScreen() {
               </Text>
               <TextInput
                 value={resetEmail}
-                onChangeText={setResetEmail}
+                onChangeText={(value) => {
+                  setResetEmail(value);
+                  if (requestMessage) {
+                    setRequestMessage('');
+                    setRequestMessageType(null);
+                  }
+                }}
                 placeholder="Email account proprietario"
                 placeholderTextColor="#9a9a9a"
                 autoCapitalize="none"
@@ -246,16 +326,25 @@ export default function ResetPasswordScreen() {
                 style={styles.input}
               />
               {requestMessage ? (
-                <Text
+                <View
                   style={[
-                    styles.requestMessage,
-                    requestMessage.includes('Nuovo link inviato')
-                      ? styles.requestMessageSuccess
-                      : styles.requestMessageError,
+                    styles.requestMessageBox,
+                    requestMessageType === 'success'
+                      ? styles.requestMessageBoxSuccess
+                      : styles.requestMessageBoxError,
                   ]}
                 >
-                  {requestMessage}
-                </Text>
+                  <Text
+                    style={[
+                      styles.requestMessage,
+                      requestMessageType === 'success'
+                        ? styles.requestMessageSuccess
+                        : styles.requestMessageError,
+                    ]}
+                  >
+                    {requestMessage}
+                  </Text>
+                </View>
               ) : null}
               <Pressable
                 accessibilityRole="button"
@@ -289,22 +378,85 @@ export default function ResetPasswordScreen() {
             <View style={styles.successPanel}>
               <Text style={styles.successPanelTitle}>Password resettata con successo</Text>
               <Text style={styles.successPanelText}>
-                Vai in Accedi e riprova il login con la nuova password. Questo link non va più riusato dopo il reset riuscito.
+                La nuova password è stata salvata. Puoi chiudere questa pagina: questo link non va più riusato dopo il reset riuscito.
               </Text>
               <Pressable
                 accessibilityRole="button"
-                onPress={handleGoToOwnerLogin}
+                onPress={handleCloseAfterReset}
                 style={({ pressed }) => [
                   styles.primaryButton,
                   pressed && styles.primaryButtonPressed,
                 ]}
               >
-                <Text style={styles.primaryButtonText}>Vai in accedi</Text>
+                <Text style={styles.primaryButtonText}>
+                  {Platform.OS === 'web' ? 'Chiudi pagina' : 'Torna all’accesso'}
+                </Text>
               </Pressable>
             </View>
           ) : null}
         </View>
       </ScrollView>
+      <Modal
+        animationType="fade"
+        transparent
+        visible={feedbackDialog !== null}
+        onRequestClose={() => {
+          if (feedbackDialog?.tone === 'success') {
+            handleCloseAfterReset();
+            return;
+          }
+          setFeedbackDialog(null);
+        }}
+      >
+        <View style={styles.feedbackModalBackdrop}>
+          <DockedSheetSurface
+            accessibilityRole="alert"
+            style={[
+              styles.feedbackModalCard,
+              feedbackDialog?.tone === 'success'
+                ? styles.feedbackModalCardSuccess
+                : styles.feedbackModalCardError,
+            ]}
+          >
+            <View
+              style={[
+                styles.feedbackModalIcon,
+                feedbackDialog?.tone === 'success'
+                  ? styles.feedbackModalIconSuccess
+                  : styles.feedbackModalIconError,
+              ]}
+            >
+              <Text style={styles.feedbackModalIconText}>
+                {feedbackDialog?.tone === 'success' ? '✓' : '!'}
+              </Text>
+            </View>
+            <Text style={styles.feedbackModalTitle}>{feedbackDialog?.title ?? ''}</Text>
+            <Text style={styles.feedbackModalText}>{feedbackDialog?.message ?? ''}</Text>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => {
+                if (feedbackDialog?.tone === 'success') {
+                  setFeedbackDialog(null);
+                  handleCloseAfterReset();
+                  return;
+                }
+                setFeedbackDialog(null);
+              }}
+              style={({ pressed }) => [
+                styles.feedbackModalButton,
+                feedbackDialog?.tone === 'success'
+                  ? styles.feedbackModalButtonSuccess
+                  : styles.feedbackModalButtonError,
+                pressed && styles.primaryButtonPressed,
+              ]}
+            >
+              <Text style={styles.feedbackModalButtonText}>
+                {feedbackDialog?.tone === 'success' ? 'OK' : 'Riprova'}
+              </Text>
+            </Pressable>
+          </DockedSheetSurface>
+        </View>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -312,61 +464,54 @@ export default function ResetPasswordScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#e6edf3',
+    backgroundColor: '#F4F7FB',
   },
   content: {
-    padding: 20,
-    paddingTop: 44,
-    paddingBottom: 40,
+    width: '100%',
+    maxWidth: 560,
+    alignSelf: 'center',
+    paddingHorizontal: 20,
+    paddingTop: Platform.OS === 'ios' ? 58 : 42,
+    paddingBottom: 42,
   },
   heroCard: {
-    backgroundColor: '#fbfdff',
-    borderRadius: 32,
-    padding: 24,
-    marginBottom: 16,
-    borderWidth: 1.5,
-    borderColor: '#94acc8',
-    borderTopWidth: 2,
-    borderTopColor: '#eef6ff',
-    shadowColor: '#0f172a',
-    shadowOpacity: 0.2,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 8,
+    paddingHorizontal: 4,
+    paddingBottom: 18,
+    marginBottom: 4,
   },
   appEyebrow: {
-    fontSize: 12,
-    fontWeight: '700',
-    letterSpacing: 2.4,
-    color: '#9a6b32',
-    marginBottom: 10,
+    fontSize: 11,
+    fontWeight: '900',
+    letterSpacing: 1.4,
+    color: '#8A6A18',
+    marginBottom: 8,
+    textAlign: 'center',
   },
   appWordmarkWrap: {
     width: '100%',
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: -8,
-    marginBottom: 6,
+    marginBottom: 10,
   },
   appSubtitle: {
-    fontSize: 16,
-    lineHeight: 24,
-    color: '#64748b',
+    fontSize: 14,
+    lineHeight: 21,
+    fontWeight: '700',
+    color: '#667085',
+    textAlign: 'center',
   },
   card: {
-    backgroundColor: '#ffffff',
-    borderRadius: 28,
-    padding: 20,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 24,
+    padding: 18,
     marginBottom: 14,
-    borderWidth: 1.5,
-    borderColor: '#94acc8',
-    borderTopWidth: 2,
-    borderTopColor: '#eef6ff',
-    shadowColor: '#0f172a',
-    shadowOpacity: 0.2,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(148, 163, 184, 0.22)',
+    shadowColor: '#0F172A',
+    shadowOpacity: Platform.OS === 'ios' ? 0.08 : 0.10,
+    shadowRadius: Platform.OS === 'ios' ? 18 : 14,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 4,
   },
   headerRow: {
     flexDirection: 'row',
@@ -377,27 +522,29 @@ const styles = StyleSheet.create({
   },
   cardTitle: {
     flex: 1,
-    fontSize: 24,
-    fontWeight: '800',
-    color: '#111111',
+    fontSize: 22,
+    lineHeight: 27,
+    fontWeight: '900',
+    color: '#0F172A',
   },
   statusBadge: {
-    backgroundColor: '#f8fbfe',
+    backgroundColor: '#F8FAFC',
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: '#d8e4f3',
+    borderColor: '#E2E8F0',
     paddingHorizontal: 12,
     paddingVertical: 6,
   },
   statusBadgeText: {
     fontSize: 11,
-    fontWeight: '800',
-    color: '#64748b',
+    fontWeight: '900',
+    color: '#475569',
   },
   helperText: {
     fontSize: 14,
     lineHeight: 21,
-    color: '#6d6257',
+    fontWeight: '700',
+    color: '#667085',
     marginBottom: 18,
   },
   loadingWrap: {
@@ -405,90 +552,197 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   input: {
-    backgroundColor: '#f8fbfe',
-    borderRadius: 16,
+    backgroundColor: '#F8FAFC',
+    borderRadius: 18,
     paddingHorizontal: 14,
     paddingVertical: 14,
     fontSize: 15,
+    fontWeight: '700',
     marginBottom: 10,
-    color: '#0f172a',
+    color: '#0F172A',
     borderWidth: 1,
-    borderColor: '#d8e4f3',
+    borderColor: '#E2E8F0',
   },
   primaryButton: {
-    backgroundColor: '#0f766e',
-    borderRadius: 18,
+    backgroundColor: '#161616',
+    borderRadius: 20,
     paddingVertical: 15,
     alignItems: 'center',
     marginTop: 6,
+    minHeight: 54,
+    justifyContent: 'center',
   },
   primaryButtonPressed: {
     opacity: 0.72,
+    transform: [{ scale: 0.985 }],
   },
   primaryButtonText: {
     color: '#ffffff',
-    fontSize: 15,
-    fontWeight: '800',
+    fontSize: 15.5,
+    fontWeight: '900',
   },
   secondaryButton: {
-    backgroundColor: '#161616',
-    borderRadius: 18,
+    backgroundColor: '#EEF2F7',
+    borderRadius: 20,
     paddingVertical: 15,
     alignItems: 'center',
     marginTop: 10,
+    minHeight: 54,
+    justifyContent: 'center',
   },
   secondaryButtonPressed: {
     opacity: 0.72,
+    transform: [{ scale: 0.985 }],
   },
   secondaryButtonText: {
-    color: '#ffffff',
+    color: '#334155',
     fontSize: 15,
-    fontWeight: '800',
+    fontWeight: '900',
   },
   errorPanel: {
-    backgroundColor: '#f8fbfe',
+    backgroundColor: '#F8FAFC',
     borderRadius: 20,
     padding: 14,
     borderWidth: 1,
-    borderColor: '#d8e4f3',
+    borderColor: '#E2E8F0',
   },
   errorPanelTitle: {
     fontSize: 16,
-    fontWeight: '800',
-    color: '#111111',
+    fontWeight: '900',
+    color: '#0F172A',
     marginBottom: 8,
   },
   errorPanelText: {
     fontSize: 13,
     lineHeight: 20,
-    color: '#64748b',
+    fontWeight: '700',
+    color: '#667085',
     marginBottom: 12,
   },
+  requestMessageBox: {
+    borderRadius: 16,
+    borderWidth: 1,
+    paddingHorizontal: 13,
+    paddingVertical: 11,
+    marginBottom: 8,
+  },
+  requestMessageBoxSuccess: {
+    backgroundColor: '#ECFDF3',
+    borderColor: '#A6F4C5',
+  },
+  requestMessageBoxError: {
+    backgroundColor: '#FEF2F2',
+    borderColor: '#FECACA',
+  },
   requestMessage: {
-    fontSize: 12,
+    fontSize: 12.5,
     lineHeight: 18,
-    fontWeight: '700',
-    marginBottom: 4,
+    fontWeight: '900',
+    textAlign: 'center',
   },
   requestMessageSuccess: {
-    color: '#0f766e',
+    color: '#027A48',
   },
   requestMessageError: {
-    color: '#b91c1c',
+    color: '#B42318',
   },
   successPanel: {
     marginTop: 6,
   },
   successPanelTitle: {
     fontSize: 22,
-    fontWeight: '800',
-    color: '#111111',
+    fontWeight: '900',
+    color: '#0F172A',
     marginBottom: 10,
   },
   successPanelText: {
     fontSize: 15,
     lineHeight: 23,
+    fontWeight: '700',
     color: '#475569',
     marginBottom: 10,
+  },
+  feedbackModalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.56)',
+    paddingHorizontal: 22,
+    alignItems: 'center',
+    justifyContent: 'flex-end', paddingBottom: 0 },
+  feedbackModalCard: {
+    width: '100%',
+    maxWidth: 430,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 28,
+    paddingHorizontal: 24,
+    paddingTop: 26,
+    paddingBottom: 22,
+    alignItems: 'center',
+    borderWidth: 1,
+    shadowColor: '#0F172A',
+    shadowOpacity: 0.18,
+    shadowRadius: 28,
+    shadowOffset: { width: 0, height: 16 },
+    elevation: 12,
+  },
+  feedbackModalCardSuccess: {
+    borderColor: '#A6F4C5',
+  },
+  feedbackModalCardError: {
+    borderColor: '#FECACA',
+  },
+  feedbackModalIcon: {
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+  feedbackModalIconSuccess: {
+    backgroundColor: '#059669',
+  },
+  feedbackModalIconError: {
+    backgroundColor: '#DC2626',
+  },
+  feedbackModalIconText: {
+    color: '#FFFFFF',
+    fontSize: 30,
+    lineHeight: 34,
+    fontWeight: '900',
+  },
+  feedbackModalTitle: {
+    color: '#0F172A',
+    fontSize: 23,
+    lineHeight: 29,
+    fontWeight: '900',
+    textAlign: 'center',
+    marginBottom: 10,
+  },
+  feedbackModalText: {
+    color: '#475569',
+    fontSize: 15,
+    lineHeight: 22,
+    fontWeight: '700',
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  feedbackModalButton: {
+    width: '100%',
+    minHeight: 52,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 18,
+  },
+  feedbackModalButtonSuccess: {
+    backgroundColor: '#047857',
+  },
+  feedbackModalButtonError: {
+    backgroundColor: '#B91C1C',
+  },
+  feedbackModalButtonText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '900',
   },
 });

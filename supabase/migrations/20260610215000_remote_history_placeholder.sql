@@ -1,0 +1,2 @@
+-- Remote migration already applied outside this checkout.
+-- Placeholder keeps local migration history aligned for subsequent pushes.

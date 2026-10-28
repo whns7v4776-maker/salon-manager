@@ -1,0 +1,5 @@
+import assert from 'node:assert/strict';
+import {unzipSync,strFromU8} from 'fflate';
+import {createFiscalZip,fiscalYear} from '../src/lib/fiscal-zip';
+async function main(){const rows=[{id:'one',created_at:'2026-12-31T23:30:00Z',status:'ready',void_status:'ready'},{id:'two',created_at:'2025-01-01T00:00:00Z',status:'ready'},{id:'declined',created_at:'2026-01-01T00:00:00Z',status:'failed'}];assert.equal(fiscalYear(rows[0]),'2027');const result=await createFiscalZip(rows,async r=>{if(r.id==='two')throw Error('missing');return new TextEncoder().encode('%PDF-test')});const files=unzipSync(result.bytes);assert.equal(result.count,2);assert.equal(result.missing,1);assert.ok(files['2027/Ricevute/ricevuta-one.pdf']);assert.ok(files['2027/Annullamenti/annullamento-one.pdf']);assert.match(strFromU8(files['PDF-NON-DISPONIBILI.txt']),/ricevuta-two/);assert.ok(!Object.keys(files).some(k=>k.includes('declined')));console.log('ZIP: years, Rome timezone, originals, cancellations, rejected payments and missing-file manifest passed.');}
+main();

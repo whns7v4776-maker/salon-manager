@@ -1,0 +1,15 @@
+const fs = require('node:fs');
+const assert = require('node:assert/strict');
+const source = fs.readFileSync('app/cliente-screen.tsx', 'utf8');
+const journey = fs.readFileSync('components/client-booking-journey.tsx', 'utf8');
+assert.match(source, /shouldRenderBookingFlowSteps \? <ClientBookingJourney/);
+assert.match(source, /dependencyRequired: dependencyChoiceRequired/);
+assert.match(source, /dependencies: dependencyServiceOptions\.map/);
+assert.match(journey, /props\.dependencyRequired \?/);
+assert.match(journey, /current\.complete/);
+assert.match(source, /onSubmit: \(\) => \{ if \(canSendRequest\) triggerFrontendBookingSubmit\(\); \}/);
+assert.doesNotMatch(journey, /scrollTo|scrollIntoView|styles\.sectionCard|StyleSheet\.create/);
+assert.match(journey, /accessibilityState=\{\{ selected: props\.page === index/);
+assert.match(journey, /props\.onPage\(props\.page - 1\)/);
+assert.match(journey, /props\.onPage\(props\.page \+ 1\)/);
+console.log('PASS: unified booking UI, mandatory pairings, manual back/forward, guarded submit and no legacy step autoscroll');

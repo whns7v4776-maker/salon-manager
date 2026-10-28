@@ -1,7 +1,13 @@
+import { Ionicons } from '@expo/vector-icons';
+import * as Print from 'expo-print';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useEffect, useMemo } from 'react';
-import { Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { Alert, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { IosSimpleTouchable as TouchableOpacity } from "../components/ui/ios-simple-touchable";
 import QRCode from 'react-native-qrcode-svg';
+import { AppWordmark } from '../components/app-wordmark';
+import { resolveBundledAssetUri } from '../src/lib/bundled-asset-uri';
+import { buildSalonQrPrintHtml } from '../src/lib/salon-qr-print';
 
 export default function StampaQrScreen() {
   const router = useRouter();
@@ -9,8 +15,39 @@ export default function StampaQrScreen() {
   const salonCode = Array.isArray(params.salon) ? params.salon[0] ?? '' : params.salon ?? '';
   const salonName = Array.isArray(params.name) ? params.name[0] ?? '' : params.name ?? '';
   const qrLink = Array.isArray(params.link) ? params.link[0] ?? '' : params.link ?? '';
+  const qrCodeRef = useRef<{ toDataURL: (callback: (data: string) => void) => void } | null>(null);
 
   const resolvedName = useMemo(() => salonName.trim() || salonCode.trim() || 'Salon Pro', [salonCode, salonName]);
+  const hasDistinctSalonName = !['salonpro', 'salon pro'].includes(resolvedName.trim().toLowerCase());
+  const wordmarkUri = useMemo(
+    () => resolveBundledAssetUri(require('../assets/images/salon-pro-logo-ui.png')),
+    []
+  );
+
+  const handlePrint = useCallback(() => {
+    if (!qrLink) {
+      Alert.alert('QR non pronto', 'Il collegamento del QR non è disponibile.');
+      return;
+    }
+
+    if (Platform.OS === 'web') {
+      window.print();
+      return;
+    }
+
+    qrCodeRef.current?.toDataURL((qrImageBase64) => {
+      const html = buildSalonQrPrintHtml({
+        qrImageBase64,
+        salonCode,
+        salonName: resolvedName,
+        wordmarkUri,
+      });
+
+      Print.printAsync({ html }).catch(() => {
+        Alert.alert('Stampa non riuscita', 'Non sono riuscito ad aprire la stampa. Riprova tra qualche secondo.');
+      });
+    });
+  }, [qrLink, resolvedName, salonCode, wordmarkUri]);
 
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof window === 'undefined' || !qrLink) {
@@ -28,13 +65,19 @@ export default function StampaQrScreen() {
     <ScrollView contentContainerStyle={styles.content} style={styles.container} showsVerticalScrollIndicator={false}>
       <View style={styles.sheet}>
         <Text style={styles.eyebrow}>QR code salone</Text>
-        <Text style={styles.title}>{resolvedName}</Text>
+        <View style={styles.wordmarkWrap}>
+          <AppWordmark maxWidth={360} />
+        </View>
+        {hasDistinctSalonName ? <Text style={styles.salonName}>{resolvedName}</Text> : null}
         <Text style={styles.subtitle}>
           Scansiona questo codice per aprire il frontend web cliente già collegato al salone.
         </Text>
 
         <View style={styles.qrWrap}>
           <QRCode
+            getRef={(ref) => {
+              qrCodeRef.current = ref;
+            }}
             value={qrLink || 'https://configura-public-client-base-url.invalid'}
             size={240}
             color="#111111"
@@ -46,6 +89,10 @@ export default function StampaQrScreen() {
         {qrLink ? <Text style={styles.link}>{qrLink}</Text> : null}
 
         <View style={styles.actions}>
+          <TouchableOpacity style={styles.printButton} onPress={handlePrint} activeOpacity={0.9}>
+            <Ionicons name="print-outline" size={20} color="#0f172a" />
+            <Text style={styles.printButtonText}>Stampa QR code</Text>
+          </TouchableOpacity>
           <TouchableOpacity style={styles.primaryButton} onPress={() => router.back()} activeOpacity={0.9}>
             <Text style={styles.primaryButtonText}>Torna indietro</Text>
           </TouchableOpacity>
@@ -89,12 +136,18 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     textAlign: 'center',
   },
-  title: {
-    fontSize: 32,
-    lineHeight: 38,
+  wordmarkWrap: {
+    width: '100%',
+    alignItems: 'center',
+    marginTop: -14,
+    marginBottom: 2,
+  },
+  salonName: {
+    fontSize: 17,
+    lineHeight: 24,
     fontWeight: '900',
-    color: '#0f172a',
-    marginBottom: 10,
+    color: '#475569',
+    marginBottom: 12,
     textAlign: 'center',
   },
   subtitle: {
@@ -130,6 +183,26 @@ const styles = StyleSheet.create({
   actions: {
     width: '100%',
     alignItems: 'center',
+    gap: 10,
+  },
+  printButton: {
+    minWidth: 220,
+    minHeight: 50,
+    borderWidth: 1,
+    borderColor: '#cbd5e1',
+    borderRadius: 18,
+    paddingHorizontal: 22,
+    paddingVertical: 13,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 9,
+    backgroundColor: '#ffffff',
+  },
+  printButtonText: {
+    color: '#0f172a',
+    fontSize: 15,
+    fontWeight: '800',
   },
   primaryButton: {
     minWidth: 220,

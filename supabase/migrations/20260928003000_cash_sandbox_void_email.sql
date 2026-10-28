@@ -1,0 +1,1 @@
+alter table public.cash_fiscal_sandbox add column void_email_status text not null default 'not_sent' check (void_email_status in ('not_sent','sending','accepted','delivered','uncertain','failed')), add column void_email_id text;

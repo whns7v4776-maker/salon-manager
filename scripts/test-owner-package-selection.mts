@@ -1,0 +1,14 @@
+import assert from 'node:assert/strict';
+import { eligibleOwnerPackages } from '../src/lib/owner-package-selection.ts';
+const base = { id:'p', name:'Pack', uses:3, available:2, reserved:1, consumed:0, starts_on:'2026-10-01', expires_on:'2026-11-01', price_cents:4000, product_discount:0 };
+const single = {...base, entitlements:[{kind:'service' as const,id:'s1',name:'Service',componentIds:[]}]};
+const combo = {...base, id:'combo', entitlements:[{kind:'composition' as const,id:'c1',name:'Combo',componentIds:['s1','s2']}]};
+assert.equal(eligibleOwnerPackages([single],['s1'],['2026-10-03']).length,1);
+assert.equal(eligibleOwnerPackages([single],['s2'],['2026-10-03']).length,0);
+assert.equal(eligibleOwnerPackages([{...single,available:0}],['s1'],['2026-10-03']).length,0);
+assert.equal(eligibleOwnerPackages([single],['s1'],['2026-12-03']).length,0);
+assert.equal(eligibleOwnerPackages([combo],['s2','s1'],['2026-10-03','2026-10-03']).length,1);
+assert.equal(eligibleOwnerPackages([combo],['s1'],['2026-10-03']).length,0);
+assert.equal(eligibleOwnerPackages([combo],['s1','s1'],['2026-10-03','2026-10-03']).length,0);
+assert.equal(eligibleOwnerPackages([combo],['s1','s2'],['2026-10-03','2026-12-03']).length,0);
+console.log('Owner package eligibility: exact services, compositions, uses and dates passed.');

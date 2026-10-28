@@ -99,7 +99,13 @@ if (Platform.OS === 'android' && !TaskManager.isTaskDefined(ANDROID_BACKGROUND_B
         return;
       }
 
-      const didSetBadge = await Notifications.setBadgeCountAsync(unreadCount).catch(() => false);
+      // Expo's Android zero path calls NotificationManager.cancelAll(), which
+      // would remove the push that just woke this task. Positive counts remain
+      // compatible with Expo; zero is handled exclusively by the private
+      // Notifee carrier below.
+      const didSetBadge = unreadCount > 0
+        ? await Notifications.setBadgeCountAsync(unreadCount).catch(() => false)
+        : true;
       await syncAndroidLauncherBadgeCarrier(unreadCount, {
         taskName: executionInfo.taskName,
         eventId: executionInfo.eventId,

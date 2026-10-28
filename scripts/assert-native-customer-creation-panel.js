@@ -1,0 +1,15 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const source = fs.readFileSync('app/(tabs)/clienti.tsx', 'utf8');
+const form = source.slice(source.indexOf('const CustomerCreatorForm ='), source.indexOf('const CustomerEditorForm ='));
+assert.match(form, /if \(Platform.OS === 'web'\) return \([\s\S]*?<OwnerPremiumSheetFrame/);
+assert.match(form, /<CreationSheet premiumWeb[^>]*scrollRef=\{creatorScrollRef\}/);
+assert.match(form, /<Modal visible=\{visible\}.*onRequestClose=\{onClose\}/);
+assert.match(form, /const \[draft, setDraft\][\s\S]*?if \(!visible\) return null/);
+assert.match(form, /\{nativeOverlays\}/);
+assert.match(form, /scrollRef=\{creatorScrollRef\}/);
+assert.match(source, /onPress=\{toggleNewCustomerExpanded\}[^>]*accessibilityLabel="Nuovo cliente"/);
+const close = source.slice(source.indexOf('const closeNewCustomerPanel ='), source.indexOf('const toggleRubricaExpanded ='));
+assert.doesNotMatch(close, /reset\(|salvaCliente|setDraft/);
+assert.match(source, /onSubmit=\{salvaCliente\}/);
+console.log('Native customer popup, retained draft and unchanged submit checks passed.');

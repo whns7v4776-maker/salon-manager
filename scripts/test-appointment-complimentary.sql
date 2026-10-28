@@ -1,0 +1,46 @@
+do $$
+declare w uuid=gen_random_uuid(); u uuid=gen_random_uuid(); aid uuid=gen_random_uuid(); other uuid=gen_random_uuid(); g uuid=gen_random_uuid(); stamp timestamptz; failed boolean; req uuid=gen_random_uuid(); booked uuid=gen_random_uuid();
+begin
+ insert into auth.users(id,email) values(u,u||'@example.invalid');
+ insert into workspaces(id,salon_name,slug,owner_email,subscription_status,subscription_ends_at) values(w,'Complimentary fixture','gift-'||w,u||'@example.invalid','active',now()+interval '1 year');
+ insert into workspace_members(workspace_id,user_id,email) values(w,u,u||'@example.invalid');
+ perform set_config('request.jwt.claim.sub',u::text,true);
+ insert into appointments(id,workspace_id,customer_name,service_name,price,duration_minutes,appointment_date,appointment_time) values(aid,w,'Gift fixture','Cut',19,30,current_date+1,'10:00'),(other,w,'Gift fixture','Other service',25,30,current_date+1,'11:00');
+
+ insert into booking_requests(id,workspace_id,requested_service_name,requested_price,requested_duration_minutes,appointment_date,appointment_time,customer_name,customer_email,customer_phone,status) values(req,w,'Booked cut',30,30,current_date+1,'12:00','Gift fixture','gift@example.invalid','390000000001','accepted');
+ insert into appointments(id,workspace_id,booking_request_id,customer_name,service_name,price,duration_minutes,appointment_date,appointment_time) values(booked,w,req,'Gift fixture','Booked cut',30,30,current_date+1,'12:00');
+ perform revise_appointment_payment(booked,3000);
+ select updated_at into stamp from appointments where id=booked;
+ perform set_owner_appointment_complimentary_v1(booked,stamp,true);
+ if (select requested_price from booking_requests where id=req)<>0 or (appointment_revision_payment_state(booked)->>'balanceCents')::bigint<>0 then raise exception 'TEST: booked gift still payable'; end if;
+ select updated_at into stamp from appointments where id=booked;
+ perform set_owner_appointment_complimentary_v1(booked,stamp,false);
+ if (select requested_price from booking_requests where id=req)<>30 or (appointment_revision_payment_state(booked)->>'balanceCents')::bigint<>3000 then raise exception 'TEST: booked restore wrong balance'; end if;
+ insert into cash_movements(workspace_id,appointment_id,description,amount) values(w,aid,'Unpaid gift service',19);
+ select updated_at into stamp from appointments where id=aid;
+ perform set_owner_appointment_complimentary_v1(aid,stamp,true);
+ if not exists(select 1 from appointments where id=aid and complimentary and price=0 and complimentary_original_price=19 and not cashed_in) then raise exception 'TEST: gift not applied'; end if;
+ failed=false;
+ begin perform prepare_cash_appointment(w,aid); exception when others then failed=true; end;
+ if not failed then raise exception 'TEST: digital gift checkout accepted'; end if;
+ if (select price from appointments where id=other)<>25 then raise exception 'TEST: other service changed'; end if;
+ if exists(select 1 from cash_movements where appointment_id=aid and not booking_voided) then raise exception 'TEST: collectible gift movement'; end if;
+ perform set_owner_appointment_complimentary_v1(aid,stamp,true);
+ if (select count(*) from appointment_complimentary_history where appointment_id=aid)<>1 then raise exception 'TEST: duplicate history'; end if;
+ failed=false;
+ begin insert into cash_movements(workspace_id,appointment_id,description,amount) values(w,aid,'Forbidden gift charge',19); exception when others then failed=true; end;
+ if not failed then raise exception 'TEST: gift cash charge accepted'; end if;
+ select updated_at into stamp from appointments where id=aid;
+ perform set_owner_appointment_complimentary_v1(aid,stamp,false);
+ if not exists(select 1 from appointments where id=aid and not complimentary and price=19) then raise exception 'TEST: original price not restored'; end if;
+ if (prepare_cash_appointment(w,aid)->>'importo')::numeric<>19 then raise exception 'TEST: restored checkout wrong'; end if;
+ select updated_at into stamp from appointments where id=aid;
+ failed=false;
+ begin perform set_owner_appointment_complimentary_v1(aid,stamp-interval '1 second',true); exception when others then failed=true; end;
+ if not failed then raise exception 'TEST: stale revision accepted'; end if;
+ update cash_movements set payment_method='cash' where id=(appointment_revision_payment_state(aid)->>'movementId')::uuid;
+ select updated_at into stamp from appointments where id=aid;
+ failed=false;
+ begin perform set_owner_appointment_complimentary_v1(aid,stamp,true); exception when others then failed=true; end;
+ if not failed then raise exception 'TEST: paid service converted'; end if;
+end $$;

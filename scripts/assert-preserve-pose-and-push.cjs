@@ -1,0 +1,27 @@
+const fs = require('fs');
+const vm = require('vm');
+const ts = require('typescript');
+const assert = require('node:assert/strict');
+const source = fs.readFileSync('app/(tabs)/agenda.tsx', 'utf8');
+const code = source.slice(source.indexOf('const resolveWeekDraftPoseReductions ='), source.indexOf('const isAppointmentInFuture ='));
+const context = { Map, Date, normalizeServicePhaseConfig: value => value || null,
+  getAppointmentDateTime: (date, time) => new Date(`${date}T${time}:00`) };
+vm.createContext(context);
+vm.runInContext(ts.transpile(code + '\n globalThis.build = buildWeekDraftPreservingPose;'), context);
+const phase = { initialDurationMinutes: 30, processingDurationMinutes: 20, finalPhaseEnabled: false, finalDurationMinutes: 0 };
+const a = { id: 'a', servizio: 'Colore', ora: '09:40', data: '2026-09-07', appointmentGroupId: 'g', appointmentGroupOrder: 0, phaseConfig: phase, durataMinuti: 50 };
+const b = { id: 'b', servizio: 'Piega', ora: '10:30', data: a.data, appointmentGroupId: 'g', appointmentGroupOrder: 1, durataMinuti: 30 };
+const draft = { originalAppointments: [a,b], appointments: [{...a, ora:'09:50'},b] };
+const before = JSON.stringify(draft);
+const next = context.build(draft, a.data);
+assert.equal(next.appointments[0].phaseConfig.processingDurationMinutes,20);
+assert.equal(next.appointments[1].ora,'10:40');
+assert.equal(JSON.stringify(draft),before);
+const c = {...b,id:'c',appointmentGroupOrder:2,ora:'11:10'};
+const cascade = context.build({...draft, originalAppointments:[a,b,c], appointments:[draft.appointments[0],b,c]},a.data);
+assert.equal(cascade.appointments[2].ora,'11:20');
+assert.equal(cascade.appointments[2].durataMinuti,30);
+const push = fs.readFileSync('supabase/functions/send-push/index.ts','utf8');
+assert.ok(push.includes("const phases = items.flatMap"));
+assert.ok(push.includes("eventType === 'appointment_reorganized_by_salon'"));
+console.log('PASS: preserved pose, shifted following services, unchanged input/durations, full push-body guard');

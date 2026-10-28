@@ -1,0 +1,14 @@
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict'),ts=require('typescript');
+const context={exports:{}};vm.createContext(context);
+vm.runInContext(ts.transpile(fs.readFileSync('src/lib/agenda-blocking-appointments.ts','utf8'),{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}),context);
+const filter=context.exports.excludePersistedAgendaRequestMirrors;
+const real={id:'a',bookingRequestId:'r',data:'2026-09-14',ora:'09:00'};
+const mirror={id:'request-r',syntheticRequestId:'r',syntheticRequestStatus:'Accettata',data:'2026-09-15',ora:'15:00'};
+assert.deepEqual(filter([real,mirror]).map(x=>x.id),['a']);
+assert.deepEqual(filter([{...real,ora:'16:00'},mirror]).map(x=>x.id),['a']);
+const second={...real,id:'b',bookingRequestId:'other'};
+assert.equal(filter([real,second,mirror]).length,2);
+assert.equal(filter([real,{...mirror,syntheticRequestStatus:'In attesa'}]).length,2);
+assert.equal(filter([real,{...mirror,syntheticRequestId:'different'}]).length,2);
+assert.equal(filter([real,{...mirror,syntheticRequestId:'owner-booking-a'}]).length,1);
+console.log('PASS: past/future and cross-day moves keep one authoritative row; distinct appointments and pending requests preserved');

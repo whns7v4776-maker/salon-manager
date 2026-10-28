@@ -1,43 +1,18 @@
 import { Ionicons } from '@expo/vector-icons';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import { useRouter } from 'expo-router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Linking, Platform, StyleSheet, Text, View } from 'react-native';
+import { useRouter, useFocusEffect } from 'expo-router';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Alert, AppState, BackHandler, Linking, Platform, StyleSheet, Text, View } from 'react-native';
 import { WebImmediateTouchableOpacity as TouchableOpacity } from '../components/ui/web-immediate-touchable-opacity';
-import { normalizeSalonCode } from '../src/lib/platform';
-
-const extractSalonCodeFromScan = (value: string) => {
-  const raw = value.trim();
-  if (!raw) return '';
-
-  const directCode = normalizeSalonCode(raw);
-  if (/^[A-Z0-9]{4,}$/.test(directCode)) {
-    return directCode;
-  }
-
-  try {
-    const url = new URL(raw);
-    const salonParam = normalizeSalonCode(url.searchParams.get('salon') ?? '');
-    if (salonParam) return salonParam;
-
-    const joinMatch = url.pathname.match(/\/join\/([^/?#]+)/i);
-    if (joinMatch?.[1]) {
-      return normalizeSalonCode(joinMatch[1]);
-    }
-  } catch {
-    const joinMatch = raw.match(/\/join\/([^/?#]+)/i);
-    if (joinMatch?.[1]) {
-      return normalizeSalonCode(joinMatch[1]);
-    }
-  }
-
-  return '';
-};
+import { extractSalonCodeFromScan } from '../src/lib/salon-qr-code';
+import { resolveManualSalonCode } from '../src/lib/salon-short-code';
 
 export default function ClienteScannerScreen() {
   const router = useRouter();
-  const [permission, requestPermission] = useCameraPermissions();
+  const [permission, requestPermission, refreshPermission] = useCameraPermissions();
   const [isLocked, setIsLocked] = useState(false);
+  const scanLockedRef = useRef(false);
+  const [cameraActive, setCameraActive] = useState(true);
 
   const hasPermission = permission?.granted ?? false;
   const canUseCamera = Platform.OS !== 'web';
@@ -52,19 +27,54 @@ export default function ClienteScannerScreen() {
     void requestPermission();
   }, [canUseCamera, permission, requestPermission]);
 
+  useFocusEffect(useCallback(() => {
+    scanLockedRef.current = false;
+    setIsLocked(false);
+    setCameraActive(true);
+    void refreshPermission().catch(() => undefined);
+    const subscription = AppState.addEventListener('change', state => {
+      setCameraActive(state === 'active');
+      if (state === 'active') void refreshPermission().catch(() => undefined);
+    });
+    return () => { subscription.remove(); setCameraActive(false); };
+  }, [refreshPermission]));
+
+  const handleReturnHome = useCallback(() => {
+    router.replace({
+      pathname: '/',
+      params: { ownerLoggedOut: '1', side: 'client' },
+    });
+  }, [router]);
+
+  useEffect(() => {
+    if (Platform.OS !== 'android') {
+      return;
+    }
+
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      handleReturnHome();
+      return true;
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [handleReturnHome]);
+
   const handleOpenSalon = useCallback(
     (code: string) => {
       router.replace({
         pathname: '/',
-        params: { salon: code },
+        params: { salon: code, ownerLoggedOut: '1', side: 'client' },
       });
     },
     [router]
   );
 
   const handleScanned = useCallback(
-    ({ data }: { data: string }) => {
-      if (isLocked) return;
+    async ({ data }: { data: string }) => {
+      if (scanLockedRef.current) return;
+      scanLockedRef.current = true;
       const code = extractSalonCodeFromScan(data);
       if (!code) {
         setIsLocked(true);
@@ -74,7 +84,7 @@ export default function ClienteScannerScreen() {
           [
             {
               text: 'Riprova',
-              onPress: () => setIsLocked(false),
+              onPress: () => { scanLockedRef.current = false; setIsLocked(false); },
             },
           ]
         );
@@ -82,9 +92,16 @@ export default function ClienteScannerScreen() {
       }
 
       setIsLocked(true);
-      handleOpenSalon(code);
+      try {
+        const resolvedCode = await resolveManualSalonCode(code);
+        handleOpenSalon(resolvedCode);
+      } catch {
+        scanLockedRef.current = false;
+        setIsLocked(false);
+        Alert.alert('Salone non verificato', 'Controlla la connessione e riprova a inquadrare il QR oppure inserisci il codice salone.');
+      }
     },
-    [handleOpenSalon, isLocked]
+    [handleOpenSalon]
   );
 
   const helperText = useMemo(() => {
@@ -108,7 +125,7 @@ export default function ClienteScannerScreen() {
       <View style={styles.card}>
         <TouchableOpacity
           style={styles.backButton}
-          onPress={() => router.replace('/')}
+          onPress={handleReturnHome}
           activeOpacity={0.9}
         >
           <Ionicons name="chevron-back" size={22} color="#0F172A" />
@@ -124,7 +141,7 @@ export default function ClienteScannerScreen() {
         {!canUseCamera ? (
           <TouchableOpacity
             style={styles.primaryButton}
-            onPress={() => router.replace('/')}
+            onPress={handleReturnHome}
             activeOpacity={0.9}
           >
             <Text style={styles.primaryButtonText}>Continua senza fotocamera</Text>
@@ -147,11 +164,11 @@ export default function ClienteScannerScreen() {
           </TouchableOpacity>
         ) : (
           <View style={styles.cameraShell}>
-            <CameraView
+            {cameraActive ? <CameraView
               style={styles.camera}
               barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
-              onBarcodeScanned={handleScanned}
-            />
+              onBarcodeScanned={isLocked ? undefined : handleScanned}
+            /> : null}
             <View pointerEvents="none" style={styles.scannerFrame}>
               <View style={styles.scannerFrameInner} />
             </View>
@@ -160,7 +177,7 @@ export default function ClienteScannerScreen() {
 
         <TouchableOpacity
           style={styles.secondaryButton}
-          onPress={() => router.replace('/')}
+          onPress={() => router.replace({ pathname: '/', params: { ownerLoggedOut: '1', side: 'client', associateSalon: '1' } })}
           activeOpacity={0.9}
         >
           <Text style={styles.secondaryButtonText}>Continua con codice salone</Text>

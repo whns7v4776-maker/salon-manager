@@ -4,9 +4,24 @@ export type SalonNameDisplayStyle = 'corsivo' | 'stampatello' | 'minuscolo';
 export type SalonNameFontVariant =
   | 'neon'
   | 'condensed'
+  | 'minimal'
   | 'poster'
+  | 'future'
   | 'editorial'
-  | 'script';
+  | 'classic'
+  | 'luxury'
+  | 'script'
+  | 'vogue'
+  | 'atelier'
+  | 'manrope' | 'montserrat' | 'cinzel' | 'cormorant'
+  | 'parisienne' | 'italiana' | 'righteous' | 'audiowide';
+
+export const salonNameFontVariants: readonly SalonNameFontVariant[] = [
+  'neon', 'condensed', 'minimal', 'poster', 'future', 'editorial',
+  'classic', 'luxury', 'script', 'vogue', 'atelier',
+  'manrope', 'montserrat', 'cinzel', 'cormorant',
+  'parisienne', 'italiana', 'righteous', 'audiowide',
+];
 
 export type SalonWorkspace = {
   id: string;
@@ -15,7 +30,9 @@ export type SalonWorkspace = {
   salonName: string;
   salonNameDisplayStyle: SalonNameDisplayStyle;
   salonNameFontVariant: SalonNameFontVariant;
+  salonBrandingUpdatedAt?: string;
   businessPhone: string;
+  additionalPhones?: string[];
   activityCategory: string;
   salonAddress: string;
   streetType: string;
@@ -25,12 +42,16 @@ export type SalonWorkspace = {
   postalCode: string;
   subscriptionPlan: SubscriptionPlan;
   subscriptionStatus: SubscriptionStatus;
+  isInternalTester: boolean;
   createdAt: string;
   updatedAt: string;
   cashSectionDisabled?: boolean;
   autoAcceptBookingRequests?: boolean;
   autoAcceptBookingRequestsUpdatedAt?: string;
   customerReminderHoursBefore?: number;
+  clientWelcomeEnabled?: boolean;
+  clientWelcomeTitle?: string;
+  clientWelcomeMessage?: string;
   trialEndsAt?: string;
   subscriptionEndsAt?: string;
   lastBackupAt?: string;
@@ -177,14 +198,19 @@ export const createDefaultWorkspace = (email: string): SalonWorkspace => {
     streetNumber: '',
     city: '',
     postalCode: '',
-    subscriptionPlan: 'starter',
-    subscriptionStatus: 'active',
+    subscriptionPlan: 'demo',
+    subscriptionStatus: 'demo',
+    isInternalTester: false,
     createdAt: now,
     updatedAt: now,
     cashSectionDisabled: false,
     autoAcceptBookingRequests: false,
-    autoAcceptBookingRequestsUpdatedAt: now,
+    autoAcceptBookingRequestsUpdatedAt: undefined,
     customerReminderHoursBefore: 24,
+    clientWelcomeEnabled: true,
+    clientWelcomeTitle: 'Benvenuto da {salone}!',
+    clientWelcomeMessage:
+      'Ciao {nome}, siamo felici di averti con noi. Da qui puoi consultare i servizi e prenotare i tuoi appuntamenti.',
     trialEndsAt: undefined,
     subscriptionEndsAt: undefined,
     lastBackupAt: undefined,
@@ -200,6 +226,7 @@ export const normalizeWorkspace = (
   return {
     ...fallback,
     ...workspace,
+    additionalPhones: Array.isArray(workspace?.additionalPhones) ? workspace.additionalPhones.filter((value): value is string => typeof value === 'string').map((value) => value.trim()) : [],
     ownerEmail: normalizeWorkspaceEmail(workspace?.ownerEmail ?? email),
     salonCode: normalizeSalonCode(
       workspace?.salonCode ?? buildSalonCode(workspace?.salonName ?? fallback.salonName, email)
@@ -210,16 +237,9 @@ export const normalizeWorkspace = (
         : workspace?.salonNameDisplayStyle === 'minuscolo'
           ? 'minuscolo'
           : 'corsivo',
-    salonNameFontVariant:
-      workspace?.salonNameFontVariant === 'condensed'
-        ? 'condensed'
-        : workspace?.salonNameFontVariant === 'poster'
-          ? 'poster'
-          : workspace?.salonNameFontVariant === 'editorial'
-            ? 'editorial'
-            : workspace?.salonNameFontVariant === 'script'
-              ? 'script'
-              : 'neon',
+    salonNameFontVariant: workspace?.salonNameFontVariant &&
+      salonNameFontVariants.includes(workspace.salonNameFontVariant)
+        ? workspace.salonNameFontVariant : 'neon',
     activityCategory: workspace?.activityCategory?.trim() ?? fallback.activityCategory,
     cashSectionDisabled: workspace?.cashSectionDisabled ?? fallback.cashSectionDisabled,
     autoAcceptBookingRequests:
@@ -228,8 +248,13 @@ export const normalizeWorkspace = (
       typeof workspace?.autoAcceptBookingRequestsUpdatedAt === 'string' &&
       workspace.autoAcceptBookingRequestsUpdatedAt.trim()
         ? workspace.autoAcceptBookingRequestsUpdatedAt.trim()
-        : fallback.autoAcceptBookingRequestsUpdatedAt,
+        : undefined,
     customerReminderHoursBefore: normalizeReminderHours(workspace?.customerReminderHoursBefore),
+    clientWelcomeEnabled: workspace?.clientWelcomeEnabled !== false,
+    clientWelcomeTitle:
+      workspace?.clientWelcomeTitle?.trim() || fallback.clientWelcomeTitle,
+    clientWelcomeMessage:
+      workspace?.clientWelcomeMessage?.trim() || fallback.clientWelcomeMessage,
     salonAddress: formatSalonAddress({
       streetType: workspace?.streetType ?? fallback.streetType,
       streetName: workspace?.streetName ?? fallback.streetName,
@@ -242,5 +267,91 @@ export const normalizeWorkspace = (
   };
 };
 
-export const isWorkspaceAccessible = (workspace: SalonWorkspace) =>
-  workspace.subscriptionStatus === 'active' || workspace.subscriptionStatus === 'demo';
+const parseSubscriptionDateMs = (value?: string | null) => {
+  const normalized = String(value ?? '').trim();
+  if (!normalized) return null;
+
+  const parsed = Date.parse(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+export type WorkspaceAccessReason =
+  | 'internal_tester'
+  | 'active_subscription'
+  | 'subscription_required'
+  | 'missing_expiration'
+  | 'expired'
+  | 'inactive';
+
+export type WorkspaceAccessDecision = {
+  allowed: boolean;
+  reason: WorkspaceAccessReason;
+  endsAtMs: number | null;
+};
+
+export const hasWorkspaceSubscriptionExpired = (
+  workspace: Pick<SalonWorkspace, 'subscriptionStatus' | 'subscriptionEndsAt'>,
+  nowMs = Date.now()
+) => {
+  if (workspace.subscriptionStatus !== 'active') {
+    return false;
+  }
+
+  const endsAtMs = parseSubscriptionDateMs(workspace.subscriptionEndsAt);
+  return endsAtMs !== null && endsAtMs <= nowMs;
+};
+
+export const getWorkspaceAccessDecision = (
+  workspace: SalonWorkspace,
+  nowMs = Date.now()
+): WorkspaceAccessDecision => {
+  if (workspace.isInternalTester) {
+    return {
+      allowed: true,
+      reason: 'internal_tester',
+      endsAtMs: parseSubscriptionDateMs(workspace.subscriptionEndsAt),
+    };
+  }
+
+  if (workspace.subscriptionStatus === 'demo') {
+    return {
+      allowed: false,
+      reason: 'subscription_required',
+      endsAtMs: parseSubscriptionDateMs(workspace.subscriptionEndsAt),
+    };
+  }
+
+  if (workspace.subscriptionStatus !== 'active') {
+    return {
+      allowed: false,
+      reason: workspace.subscriptionStatus === 'expired' ? 'expired' : 'inactive',
+      endsAtMs: parseSubscriptionDateMs(workspace.subscriptionEndsAt),
+    };
+  }
+
+  const endsAtMs = parseSubscriptionDateMs(workspace.subscriptionEndsAt);
+  if (endsAtMs === null) {
+    return {
+      allowed: false,
+      reason: 'missing_expiration',
+      endsAtMs: null,
+    };
+  }
+
+  if (endsAtMs <= nowMs) {
+    return {
+      allowed: false,
+      reason: 'expired',
+      endsAtMs,
+    };
+  }
+
+  return {
+    allowed: true,
+    reason: 'active_subscription',
+    endsAtMs,
+  };
+};
+
+export const isWorkspaceAccessible = (workspace: SalonWorkspace, nowMs = Date.now()) =>
+  getWorkspaceAccessDecision(workspace, nowMs).allowed;

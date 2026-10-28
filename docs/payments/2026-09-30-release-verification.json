@@ -1,0 +1,63 @@
+{
+  "web_deployment": "dpl_5pTqn3hcr5f7obPimeXokjWrD4uF",
+  "domain": "https://salonpro.dev",
+  "runtime": "1.0.18-meta1",
+  "native_build_created": false,
+  "tester_only": true,
+  "source_sha256": {
+    "app/(tabs)/clienti.tsx": "fd54324754d9801b5bfa554d2892d26269cae508e8233392c93a0a47048035be",
+    "components/customer-sheet-frame.tsx": "13f52bd3688d09b0d5ef38fcd2a46dcbc496a77a127771ef9ec304ea6a29e732",
+    "components/booking-payment-policy-editor.tsx": "899e889f63c770347d1ca20a6deecd979ebdd664f7f4a4a8d1b168eaaab9cc5d",
+    "supabase/functions/cash-stripe/index.ts": "b34b86eeaa3fda092a5d4a5c8b731934412796dc317d3e9951efeff8e370d43f",
+    "supabase/functions/_shared/booking-payment.ts": "ccc26fa1edd18d57d3777c73e6e369c5f4af144092ea3464eb62ed625eee0cb5"
+  },
+  "checks_passed": [
+    "typescript",
+    "customer-popup-input-isolation",
+    "client-identity",
+    "native-client-expand-latency",
+    "booking-payment-ledger",
+    "cash-sync",
+    "cash-summary",
+    "cash-pagination",
+    "deno-check",
+    "production-html-and-icon-font",
+    "native-fingerprints-match-prior-verified-OTA"
+  ],
+  "legacy_checks_not_passing": [
+    "stable-owner-ui: prior Agenda density gesture expectation",
+    "native-tab-jump: literal lazy:false expectation vs IS_WEB and Android progressive preload"
+  ],
+  "not_verified": [
+    "Stripe test charge plus live webhook end-to-end",
+    "physical-device keyboard and first launch",
+    "authenticated production web customer interaction"
+  ],
+  "ota_updates": [
+    {
+      "id": "01a0f279-e046-71c6-9c30-907ee6957bd3",
+      "createdAt": "2026-09-30T13:21:08.678Z",
+      "group": "181f74f4-acb6-471d-a31f-0236c7fccf24",
+      "branch": "production",
+      "message": "Clienti: pannelli compatti, azioni trasparenti e pagamenti personalizzati Cassa Stripe",
+      "runtimeVersion": "1.0.18-meta1",
+      "platform": "android",
+      "manifestPermalink": "https://u.expo.dev/update/01a0f279-e046-71c6-9c30-907ee6957bd3",
+      "isRollBackToEmbedded": false,
+      "gitCommitHash": "1b4a5f1b34bb51dc01c521dd63ae1c608227b72d"
+    },
+    {
+      "id": "01a0f279-e046-7297-a902-e0559c349360",
+      "createdAt": "2026-09-30T13:21:08.678Z",
+      "group": "181f74f4-acb6-471d-a31f-0236c7fccf24",
+      "branch": "production",
+      "message": "Clienti: pannelli compatti, azioni trasparenti e pagamenti personalizzati Cassa Stripe",
+      "runtimeVersion": "1.0.18-meta1",
+      "platform": "ios",
+      "manifestPermalink": "https://u.expo.dev/update/01a0f279-e046-7297-a902-e0559c349360",
+      "isRollBackToEmbedded": false,
+      "gitCommitHash": "1b4a5f1b34bb51dc01c521dd63ae1c608227b72d"
+    }
+  ],
+  "ota_delivery_verified": true
+}

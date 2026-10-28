@@ -29,6 +29,10 @@ create table if not exists public.workspaces (
   owner_profile_id uuid,
   subscription_plan public.subscription_plan not null default 'demo',
   subscription_status public.subscription_status not null default 'demo',
+  cash_section_disabled boolean not null default false,
+  auto_accept_booking_requests boolean not null default false,
+  auto_accept_booking_requests_updated_at timestamptz not null default timezone('utc', now()),
+  customer_reminder_hours_before integer not null default 24 check (customer_reminder_hours_before >= 0 and customer_reminder_hours_before <= 168),
   trial_ends_at timestamptz,
   subscription_ends_at timestamptz,
   notes text,
@@ -63,6 +67,17 @@ create table if not exists public.owner_profiles (
   email_verified boolean not null default false,
   phone_verified boolean not null default false,
   onboarding_completed_at timestamptz,
+  active_mobile_app_instance_id text,
+  active_mobile_platform public.store_platform,
+  active_mobile_claimed_at timestamptz,
+  active_mobile_last_seen_at timestamptz,
+  last_owner_app_access_at timestamptz,
+  last_owner_app_session_started_at timestamptz,
+  last_owner_app_session_duration_seconds integer
+    check (
+      last_owner_app_session_duration_seconds is null
+      or last_owner_app_session_duration_seconds >= 0
+    ),
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now()),
   unique (auth_provider, provider_user_id)
@@ -82,6 +97,7 @@ create table if not exists public.subscriptions (
   plan public.subscription_plan not null,
   status public.subscription_status not null,
   trial_used boolean not null default false,
+  founder_offer_locked boolean not null default false,
   starts_at timestamptz,
   ends_at timestamptz,
   last_validated_at timestamptz,
@@ -93,6 +109,10 @@ create table if not exists public.subscriptions (
 create unique index if not exists subscriptions_original_transaction_idx
   on public.subscriptions (store_platform, original_transaction_id)
   where original_transaction_id is not null;
+
+create index if not exists subscriptions_founder_offer_locked_idx
+  on public.subscriptions (founder_offer_locked)
+  where founder_offer_locked = true;
 
 create table if not exists public.device_fingerprints (
   id uuid primary key default gen_random_uuid(),
@@ -161,12 +181,50 @@ create table if not exists public.services (
   id uuid primary key default gen_random_uuid(),
   workspace_id uuid not null references public.workspaces(id) on delete cascade,
   name text not null,
+  description text,
   price numeric(10,2) not null check (price >= 0),
+  original_price numeric(10,2) check (original_price is null or original_price > price),
+  discount_enabled boolean not null default false,
+  discount_valid_from date,
+  discount_valid_to date,
+  discount_start_time time without time zone,
+  discount_end_time time without time zone,
   duration_minutes integer not null default 60 check (duration_minutes > 0 and duration_minutes <= 480),
+  required_role text,
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now()),
+  check (
+    (discount_valid_from is null and discount_valid_to is null)
+    or (
+      discount_valid_from is not null
+      and discount_valid_to is not null
+      and discount_valid_to >= discount_valid_from
+    )
+  ),
+  check (
+    (discount_start_time is null and discount_end_time is null)
+    or (
+      discount_start_time is not null
+      and discount_end_time is not null
+      and discount_end_time > discount_start_time
+    )
+  ),
   unique (workspace_id, lower(name))
 );
+
+create table if not exists public.operators (
+  id uuid primary key default gen_random_uuid(),
+  workspace_id uuid not null references public.workspaces(id) on delete cascade,
+  name text not null,
+  required_role text,
+  photo_uri text,
+  availability jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default timezone('utc', now()),
+  updated_at timestamptz not null default timezone('utc', now())
+);
+
+create unique index if not exists operators_workspace_name_idx
+  on public.operators (workspace_id, lower(name));
 
 create table if not exists public.customers (
   id uuid primary key default gen_random_uuid(),
@@ -177,6 +235,7 @@ create table if not exists public.customers (
   instagram text,
   note text not null default '',
   source text not null default 'salon' check (source in ('salon', 'frontend')),
+  is_active boolean not null default true,
   viewed_by_salon boolean not null default true,
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now())
@@ -330,7 +389,11 @@ as $$
     from public.workspaces w
     join public.workspace_members wm on wm.workspace_id = w.id
     where wm.user_id = auth.uid()
-      and w.subscription_status in ('demo', 'active')
+      and w.subscription_status = 'active'
+      and (
+        w.subscription_ends_at is null
+        or w.subscription_ends_at > timezone('utc', now())
+      )
   )
 $$;
 
@@ -435,6 +498,7 @@ alter table public.device_fingerprints enable row level security;
 alter table public.trial_checks enable row level security;
 alter table public.trial_usage enable row level security;
 alter table public.services enable row level security;
+alter table public.operators enable row level security;
 alter table public.customers enable row level security;
 alter table public.booking_requests enable row level security;
 alter table public.appointments enable row level security;
@@ -499,6 +563,31 @@ with check (workspace_id = public.current_workspace_id() and public.workspace_ac
 drop policy if exists "workspace data delete" on public.services;
 create policy "workspace data delete"
 on public.services
+for delete
+using (workspace_id = public.current_workspace_id() and public.workspace_access_allowed());
+
+drop policy if exists "workspace data select" on public.operators;
+create policy "workspace data select"
+on public.operators
+for select
+using (workspace_id = public.current_workspace_id() and public.workspace_access_allowed());
+
+drop policy if exists "workspace data insert" on public.operators;
+create policy "workspace data insert"
+on public.operators
+for insert
+with check (workspace_id = public.current_workspace_id() and public.workspace_access_allowed());
+
+drop policy if exists "workspace data update" on public.operators;
+create policy "workspace data update"
+on public.operators
+for update
+using (workspace_id = public.current_workspace_id() and public.workspace_access_allowed())
+with check (workspace_id = public.current_workspace_id() and public.workspace_access_allowed());
+
+drop policy if exists "workspace data delete" on public.operators;
+create policy "workspace data delete"
+on public.operators
 for delete
 using (workspace_id = public.current_workspace_id() and public.workspace_access_allowed());
 

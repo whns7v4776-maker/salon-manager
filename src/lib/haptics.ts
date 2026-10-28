@@ -8,7 +8,16 @@ const vibrateFallback = (pattern: number | number[]) => {
   Vibration.vibrate(pattern);
 };
 
+let lastLightFeedbackAt = -Infinity;
 const runHaptic = async (type: HapticFeedbackType) => {
+  if (Platform.OS === 'web') return;
+  // A shared button and its action can both request selection feedback.
+  // Coalesce that single tap without suppressing success/error notifications.
+  if (type === 'light') {
+    const now = Date.now();
+    if (now - lastLightFeedbackAt < 60) return;
+    lastLightFeedbackAt = now;
+  }
   try {
     switch (type) {
       case 'medium':

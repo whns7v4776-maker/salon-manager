@@ -1,0 +1,14 @@
+const fs = require('fs');
+const assert = require('node:assert/strict');
+const source = fs.readFileSync('src/context/AppContext.tsx','utf8');
+require('@babel/parser').parse(source, {sourceType:'module',plugins:['typescript','jsx']});
+const registration = source.slice(source.indexOf('  const registerOwnerAccount = async'), source.indexOf('  const requestOwnerPasswordReset'));
+const startNew = registration.indexOf('const nextAccount: OwnerAccount');
+const pos = text => { const i=registration.indexOf(text); assert.ok(i>=0,text); return i; };
+assert.ok(pos('await waitForOwnerLogoutCompletion()') < pos('await ensureFreshOwnerAuthSession(normalizedEmail)'));
+assert.ok(pos('ownerExplicitLogoutRef.current = false') < pos('await ensureFreshOwnerAuthSession(normalizedEmail)'));
+assert.ok(registration.lastIndexOf('await switchSalonAccount(authenticatedEmail)') < registration.lastIndexOf('await claimOwnerMobileAppSession()'));
+assert.ok(registration.lastIndexOf('await prepareOnboardingStateForAuthenticatedAccount') < registration.lastIndexOf('await claimOwnerMobileAppSession()'));
+assert.ok(registration.lastIndexOf('await claimOwnerMobileAppSession()') < registration.lastIndexOf('setIsAuthenticated(true)'));
+assert.ok(!registration.includes('Verifica sessione mobile owner non riuscita in registrazione, continuo senza bloccare'));
+console.log('PASS: registration logout ordering, mobile claim after account switch, onboarding retained');

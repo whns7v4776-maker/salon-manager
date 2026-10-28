@@ -1,0 +1,14 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const source = fs.readFileSync(path.join(__dirname, '../app/(tabs)/agenda.tsx'), 'utf8');
+assert(source.includes('(!quickOccasionalComposition || !!agendaCompositionComponentEditingId) &&'));
+assert(source.includes('const persistAsCompositionOnly = isCompositionOnlyComposer;'));
+assert(source.includes('if (persistAsCompositionOnly) {'));
+assert(source.includes('if (agendaServiceSaveToCatalog || isEditingCompositionComponent) {'));
+assert(source.includes('setQuickBookingPendingServices((current) => ['));
+assert(source.includes("quickOccasionalComposition ? '+ Fase occasionale'"));
+assert(source.includes("? 'Aggiungi fase'"));
+assert.equal((source.match(/!quickBookingPackageMode \|\| quickOccasionalComposition \? \(/g) || []).length, 2);
+assert(source.includes('quickBookingPendingServices.some((item) => item.id === service.id)'));
+console.log('Occasional composition source contracts: OK; device verification still required.');

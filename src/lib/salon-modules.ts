@@ -7,7 +7,8 @@ export type SalonModuleKey =
   | 'prenotazioni'
   | 'clienti'
   | 'cassa'
-  | 'servizi';
+  | 'servizi'
+  | 'settings';
 
 type ModuleIconName = ComponentProps<typeof Ionicons>['name'];
 
@@ -28,6 +29,7 @@ type SalonModuleConfig = {
 };
 
 export const SALON_MODULES: Record<SalonModuleKey, SalonModuleConfig> = {
+  settings: { icon: { active: 'settings', inactive: 'settings-outline' }, accent: { background: '#F1F5F9', border: '#CBD5E1', text: '#334155' } },
   index: {
     icon: {
       active: 'home',

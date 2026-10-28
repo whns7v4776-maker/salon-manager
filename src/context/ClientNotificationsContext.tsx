@@ -1,24 +1,57 @@
 import * as Notifications from 'expo-notifications';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, {
   createContext,
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type ReactNode,
 } from 'react';
-import { AppState, Platform } from 'react-native';
+import { usePathname } from 'expo-router';
+import { AppState, Platform, Vibration } from 'react-native';
 import { useUnreadBadges } from './UnreadBadgeContext';
-import { registerPushNotifications } from '../lib/push/push-notifications';
+import {
+  registerPushNotifications,
+  isClientPushRegistrationRuntimeRoute,
+  setClientForegroundPushPresentationMode,
+  setPushRegistrationRuntimeScope,
+} from '../lib/push/push-notifications';
 import { syncApplicationBadgeCountFromPushData } from '../lib/notification-badge-sync';
-import type { BadgeSnapshot, ClientBadgeIdentity } from '../lib/badges/unread-badges';
+import {
+  markClientBookingNotificationAsRead,
+  type BadgeSnapshot,
+  type ClientBadgeIdentity,
+} from '../lib/badges/unread-badges';
+import { fetchClientPortalSnapshot } from '../lib/client-portal';
 
 const CUSTOM_BAR_TTL_MS = 10000;
 const DEDUPE_TTL_MS = 60 * 60 * 1000;
+const FOREGROUND_CUSTOM_BAR_AUTHORITY_ATTEMPTS = 3;
+const FOREGROUND_CUSTOM_BAR_AUTHORITY_RETRY_MS = 220;
+const LAST_CLIENT_PUSH_IDENTITY_KEY = '@salonpro:last-client-push-identity:v1';
+const LEGACY_CLIENT_PROFILE_KEY = 'salon_manager_frontend_cliente_profile';
+const LEGACY_CLIENT_BIOMETRIC_PROFILE_KEY = 'salon_manager_frontend_biometric_profile';
+const LEGACY_LAST_SALON_CODE_KEY = 'salon_manager_frontend_last_salon_code';
 
-type ClientNotificationSection = 'prenotazioni' | 'waitlist';
+type ClientNotificationSection = 'prenotazioni' | 'waitlist' | 'communications';
+
+export type ClientNotificationNavigationTarget = {
+  section: ClientNotificationSection;
+  communicationId?: string | null;
+  requestId?: string | null;
+  appointmentGroupId?: string | null;
+  status?: string | null;
+  cancellationSource?: string | null;
+  appointmentDate?: string | null;
+  appointmentTime?: string | null;
+  serviceName?: string | null;
+  updatedAt?: string | null;
+  eventAt?: string | null;
+};
 
 export type ClientNotificationIdentity = {
   workspaceId: string;
@@ -37,22 +70,41 @@ export type ClientVisibleCustomBarNotification = {
   title: string;
   body: string;
   createdAt: number;
+  communicationId?: string | null;
+  requestId?: string | null;
+  appointmentGroupId?: string | null;
+  status?: string | null;
+  cancellationSource?: string | null;
+  appointmentDate?: string | null;
+  appointmentTime?: string | null;
+  serviceName?: string | null;
+  updatedAt?: string | null;
+  eventAt?: string | null;
 };
 
 type ClientNotificationsContextValue = {
   setClientIdentity: (identity: ClientNotificationIdentity | null) => void;
-  setNotificationTapHandler: (handler: (() => void) | null) => void;
+  setNotificationTapHandler: (
+    handler: ((target: ClientNotificationNavigationTarget) => void) | null
+  ) => void;
   setNotificationForegroundHandler: (handler: (() => void) | null) => void;
-  refreshClientUnreadFromDB: () => Promise<BadgeSnapshot>;
+  refreshClientUnreadFromDB: (options?: {
+    reconcileOptimisticClientBookingUnread?: boolean;
+  }) => Promise<BadgeSnapshot>;
+  optimisticallyDecrementClientBookingUnread: (
+    logicalCount: number,
+    logicalEventKeys: readonly string[]
+  ) => Promise<BadgeSnapshot>;
   syncClientBadgeFromDB: () => Promise<void>;
   enqueueForegroundCustomBar: (notification: ClientVisibleCustomBarNotification) => void;
   dismissCustomBarNotification: (notificationId: string) => void;
-  clearCustomBarNotifications: () => void;
+  clearCustomBarNotifications: (section?: ClientNotificationSection) => void;
   markClientNotificationAsRead: (notificationId?: string) => Promise<void>;
   hasPresented: (eventId?: string | null) => boolean;
   visibleCustomBarNotifications: ClientVisibleCustomBarNotification[];
   bookingUnreadCount: number;
   waitlistUnreadCount: number;
+  communicationUnreadCount: number;
   totalUnread: number;
 };
 
@@ -62,6 +114,19 @@ const normalizeText = (value: unknown) =>
   String(value ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
 
 const normalizePhone = (value?: string | null) => String(value ?? '').replace(/\D+/g, '');
+
+const getNotificationDataText = (
+  data: Record<string, unknown>,
+  ...keys: string[]
+) => {
+  for (const key of keys) {
+    const value = String(data[key] ?? '').trim();
+    if (value) {
+      return value;
+    }
+  }
+  return null;
+};
 
 const getNotificationData = (
   notification: Notifications.Notification | null | undefined
@@ -75,6 +140,12 @@ const isClientNotificationPayload = (data: Record<string, unknown>) => {
   const type = normalizeText(
     data.event_type ?? data.eventType ?? data.notificationType ?? data._pushEventType ?? data.type
   );
+  const isWaitlistEvent =
+    type.includes('waitlist') ||
+    type.includes('slot_waitlist') ||
+    type.includes('slot_available') ||
+    normalizeText(data.source).includes('waitlist') ||
+    normalizeText(data.waitlistEntryId ?? data.waitlist_entry_id).length > 0;
   const status = normalizeText(data.statusCode ?? data.status ?? data.requestStatus);
   const hasClientIdentity =
     normalizeText(data.customerEmail).length > 0 ||
@@ -93,6 +164,10 @@ const isClientNotificationPayload = (data: Record<string, unknown>) => {
     return true;
   }
 
+  if (isWaitlistEvent && target !== 'owner' && audience !== 'auth') {
+    return true;
+  }
+
   return (
     hasClientIdentity &&
     [
@@ -102,10 +177,14 @@ const isClientNotificationPayload = (data: Record<string, unknown>) => {
       'appointment_cancelled_by_salon',
       'appointment_created',
       'appointment_created_by_salon',
+      'appointment_group_created_by_salon',
       'appointment_accepted',
       'appointment_updated',
       'appointment_rescheduled',
       'appointment_rescheduled_by_salon',
+      'slot_waitlist_available',
+      'waitlist_available',
+      'slot_available',
       'auto_accepted',
       'rejected',
       'declined',
@@ -118,6 +197,12 @@ const resolveSection = (data: Record<string, unknown>): ClientNotificationSectio
     data.event_type ?? data.eventType ?? data.notificationType ?? data._pushEventType ?? data.type
   );
   const source = normalizeText(data.source);
+  if (
+    type === 'customer_communication' ||
+    normalizeText(data.communicationId ?? data.communication_id).length > 0
+  ) {
+    return 'communications';
+  }
   return type.includes('waitlist') || type.includes('slot') || source.includes('waitlist')
     ? 'waitlist'
     : 'prenotazioni';
@@ -150,6 +235,8 @@ const buildStableNotificationId = (
       data.notification_id ??
       data.eventId ??
       data.event_id ??
+      data.communicationId ??
+      data.communication_id ??
       data._dedupeKey ??
       data.dedupeKey ??
       ''
@@ -199,6 +286,62 @@ const normalizeNotification = (
   const id = buildStableNotificationId(notification, data);
   const title = String(notification.request.content.title ?? '').trim() || 'Aggiornamento prenotazione';
   const body = String(notification.request.content.body ?? '').trim();
+  const communicationId = String(
+    data.communicationId ?? data.communication_id ?? ''
+  ).trim();
+  const requestId = getNotificationDataText(
+    data,
+    'bookingRequestId',
+    'booking_request_id',
+    'requestId',
+    'request_id'
+  );
+  const appointmentGroupId = getNotificationDataText(
+    data,
+    'appointmentGroupId',
+    'appointment_group_id'
+  );
+  const status = getNotificationDataText(data, 'statusCode', 'status', 'requestStatus');
+  const cancellationSource = getNotificationDataText(
+    data,
+    'cancellationSource',
+    'cancellation_source'
+  );
+  const appointmentDate = getNotificationDataText(
+    data,
+    'appointmentDate',
+    'appointment_date'
+  );
+  const appointmentTime = getNotificationDataText(
+    data,
+    'appointmentTime',
+    'appointment_time'
+  );
+  const serviceName = getNotificationDataText(
+    data,
+    'requestedServiceName',
+    'requested_service_name',
+    'serviceName',
+    'service_name'
+  );
+  const updatedAt = getNotificationDataText(
+    data,
+    'requestUpdatedAt',
+    'request_updated_at',
+    'eventVersion',
+    'event_version',
+    'updatedAt',
+    'updated_at'
+  );
+  const eventAt = getNotificationDataText(
+    data,
+    'eventAt',
+    'event_at',
+    'notificationCreatedAt',
+    'notification_created_at',
+    'createdAt',
+    'created_at'
+  );
   return {
     id,
     eventId: id,
@@ -207,6 +350,60 @@ const normalizeNotification = (
     title,
     body,
     createdAt: Date.now(),
+    communicationId: communicationId || null,
+    requestId,
+    appointmentGroupId,
+    status: status ? normalizeText(status) : null,
+    cancellationSource: cancellationSource ? normalizeText(cancellationSource) : null,
+    appointmentDate,
+    appointmentTime,
+    serviceName,
+    updatedAt,
+    eventAt,
+  };
+};
+
+type AndroidClientMirrorNotification = {
+  id?: string | null;
+  title?: string | null;
+  body?: string | null;
+  data?: Record<string, unknown> | null;
+};
+
+type PendingClientNotificationTap = {
+  notification: Notifications.Notification;
+  clearLastResponseAfterDispatch: boolean;
+};
+
+const buildExpoNotificationFromAndroidClientMirror = (
+  notification: AndroidClientMirrorNotification
+): Notifications.Notification => {
+  const data = notification.data ?? {};
+  const identifier = String(
+    notification.id ??
+      data.notificationId ??
+      data.notification_id ??
+      data.eventId ??
+      data.event_id ??
+      data.dedupeKey ??
+      data._dedupeKey ??
+      'client-foreground-notifee'
+  ).trim();
+
+  return {
+    date: Date.now(),
+    request: {
+      identifier: identifier || 'client-foreground-notifee',
+      content: {
+        title: notification.title ?? null,
+        subtitle: null,
+        body: notification.body ?? null,
+        data,
+        categoryIdentifier: null,
+        sound: null,
+      },
+      trigger: { type: 'unknown' },
+    },
   };
 };
 
@@ -223,25 +420,159 @@ const buildIdentityKey = (identity: ClientNotificationIdentity | null) => {
   ].join('|');
 };
 
+const normalizePushIdentity = (value: unknown): ClientNotificationIdentity | null => {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const candidate = value as Partial<ClientNotificationIdentity>;
+  const workspaceId = String(candidate.workspaceId ?? '').trim();
+  const ownerEmail = String(candidate.ownerEmail ?? '').trim().toLowerCase();
+  const salonCode = String(candidate.salonCode ?? '').trim().toLowerCase() || null;
+  const customerEmail = String(candidate.customerEmail ?? '').trim().toLowerCase() || null;
+  const customerPhone = String(candidate.customerPhone ?? '').trim() || null;
+
+  if (
+    candidate.isRegistered !== true ||
+    !workspaceId ||
+    !ownerEmail ||
+    (!customerEmail && !normalizePhone(customerPhone))
+  ) {
+    return null;
+  }
+
+  return {
+    workspaceId,
+    ownerEmail,
+    salonCode,
+    customerEmail,
+    customerPhone,
+    isRegistered: true,
+  };
+};
+
+const restoreLegacyClientPushIdentity = async (): Promise<ClientNotificationIdentity | null> => {
+  const salonCode = normalizeText(await AsyncStorage.getItem(LEGACY_LAST_SALON_CODE_KEY));
+  if (!salonCode) {
+    return null;
+  }
+
+  const [scopedProfileValue, scopedBiometricValue, profileValue, biometricValue] =
+    await AsyncStorage.multiGet([
+      `${LEGACY_CLIENT_PROFILE_KEY}:${salonCode}`,
+      `${LEGACY_CLIENT_BIOMETRIC_PROFILE_KEY}:${salonCode}`,
+      LEGACY_CLIENT_PROFILE_KEY,
+      LEGACY_CLIENT_BIOMETRIC_PROFILE_KEY,
+    ]);
+  const storedProfile = [
+    scopedProfileValue[1],
+    scopedBiometricValue[1],
+    profileValue[1],
+    biometricValue[1],
+  ]
+    .filter(Boolean)
+    .map((value) => {
+      try {
+        return JSON.parse(String(value)) as { email?: string; telefono?: string };
+      } catch {
+        return null;
+      }
+    })
+    .find((value) => value?.email?.trim() || normalizePhone(value?.telefono));
+
+  if (!storedProfile) {
+    return null;
+  }
+
+  const snapshot = await fetchClientPortalSnapshot(salonCode).catch(() => null);
+  return normalizePushIdentity({
+    workspaceId: snapshot?.workspace?.id,
+    ownerEmail: snapshot?.workspace?.ownerEmail,
+    salonCode: snapshot?.workspace?.salonCode || salonCode,
+    customerEmail: storedProfile.email,
+    customerPhone: storedProfile.telefono,
+    isRegistered: true,
+  });
+};
+
 export function ClientNotificationsProvider({ children }: { children: ReactNode }) {
+  const pathname = usePathname();
+  // /cliente/:id is an owner customer detail. Only the public client runtime
+  // may refresh a saved client identity and claim this device's push token.
+  const isClientPushRuntimeRoute = isClientPushRegistrationRuntimeRoute(pathname);
+  const isClientNotificationRuntimeActive =
+    Platform.OS === 'web' || isClientPushRuntimeRoute;
+  const clientPushRuntimeAllowedRef = useRef(isClientPushRuntimeRoute);
+  clientPushRuntimeAllowedRef.current = isClientPushRuntimeRoute;
   const {
     unreadCountsBySection,
     totalUnread,
     refreshBadges,
+    optimisticallyDecrementClientBookingUnread,
     markSectionAsRead,
     syncAppIconBadge,
     setBadgeIdentityOverride,
   } = useUnreadBadges();
   const [identity, setIdentityState] = useState<ClientNotificationIdentity | null>(null);
+  const [persistedPushIdentity, setPersistedPushIdentity] =
+    useState<ClientNotificationIdentity | null>(null);
+  const [pushIdentityHydrated, setPushIdentityHydrated] = useState(Platform.OS === 'web');
   const [visibleCustomBarNotifications, setVisibleCustomBarNotifications] = useState<
     ClientVisibleCustomBarNotification[]
   >([]);
+  const [isTapHandlerReady, setIsTapHandlerReady] = useState(false);
   const identityRef = useRef<ClientNotificationIdentity | null>(null);
-  const tapHandlerRef = useRef<(() => void) | null>(null);
+  const pushIdentityRef = useRef<ClientNotificationIdentity | null>(null);
+  const lastActivePushIdentityRef = useRef<ClientNotificationIdentity | null>(null);
+  const tapHandlerRef = useRef<
+    ((target: ClientNotificationNavigationTarget) => void) | null
+  >(null);
   const foregroundHandlerRef = useRef<(() => void) | null>(null);
   const presentedRef = useRef<Map<string, number>>(new Map());
+  const handledTapRef = useRef<Map<string, number>>(new Map());
+  const pendingNotificationTapsRef = useRef<Map<string, PendingClientNotificationTap>>(
+    new Map()
+  );
   const timersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
-  const identityKey = buildIdentityKey(identity);
+  const pushIdentity = normalizePushIdentity(identity) ?? persistedPushIdentity;
+  const pushIdentityKey = buildIdentityKey(pushIdentity);
+  identityRef.current = isClientNotificationRuntimeActive ? identity : null;
+  pushIdentityRef.current = pushIdentity;
+  const pushWorkspaceId = pushIdentity?.workspaceId ?? '';
+  const pushOwnerEmail = pushIdentity?.ownerEmail ?? '';
+  const pushCustomerEmail = pushIdentity?.customerEmail ?? null;
+  const pushCustomerPhone = pushIdentity?.customerPhone ?? null;
+
+  useLayoutEffect(() => {
+    if (Platform.OS === 'web') {
+      return;
+    }
+    setPushRegistrationRuntimeScope({
+      recipientKind: isClientPushRuntimeRoute ? 'client' : 'owner',
+      clientIdentity: pushWorkspaceId && pushOwnerEmail
+        ? {
+            workspaceId: pushWorkspaceId,
+            ownerEmail: pushOwnerEmail,
+            customerEmail: pushCustomerEmail,
+            customerPhone: pushCustomerPhone,
+          }
+        : null,
+    });
+  }, [
+    isClientPushRuntimeRoute,
+    pushWorkspaceId,
+    pushOwnerEmail,
+    pushCustomerEmail,
+    pushCustomerPhone,
+  ]);
+  useLayoutEffect(
+    () => () => {
+      if (Platform.OS !== 'web') {
+        setPushRegistrationRuntimeScope({ recipientKind: null });
+      }
+    },
+    []
+  );
 
   const bookingUnreadCount = Math.max(
     0,
@@ -251,11 +582,64 @@ export function ClientNotificationsProvider({ children }: { children: ReactNode 
     0,
     Math.trunc(Number(unreadCountsBySection.waitlist ?? 0) || 0)
   );
+  const communicationUnreadCount = Math.max(
+    0,
+    Math.trunc(Number(unreadCountsBySection.communications ?? 0) || 0)
+  );
   const normalizedTotalUnread = Math.max(0, Math.trunc(Number(totalUnread) || 0));
 
   useEffect(() => {
-    identityRef.current = identity;
-  }, [identity]);
+    setClientForegroundPushPresentationMode(
+      isClientNotificationRuntimeActive && identity?.isRegistered ? 'client_runtime' : 'system'
+    );
+  }, [identity?.isRegistered, isClientNotificationRuntimeActive]);
+
+  useEffect(
+    () => () => {
+      setClientForegroundPushPresentationMode('system');
+    },
+    []
+  );
+
+  useEffect(() => {
+    if (Platform.OS === 'web') {
+      return;
+    }
+
+    let cancelled = false;
+    void AsyncStorage.getItem(LAST_CLIENT_PUSH_IDENTITY_KEY)
+      .then(async (storedValue) => {
+        if (cancelled || lastActivePushIdentityRef.current) {
+          return;
+        }
+        let restoredIdentity: ClientNotificationIdentity | null = null;
+        if (storedValue) {
+          try {
+            restoredIdentity = normalizePushIdentity(JSON.parse(storedValue));
+          } catch {
+            restoredIdentity = null;
+          }
+        }
+        restoredIdentity ??= await restoreLegacyClientPushIdentity();
+        if (restoredIdentity && !cancelled && !lastActivePushIdentityRef.current) {
+          setPersistedPushIdentity(restoredIdentity);
+          await AsyncStorage.setItem(
+            LAST_CLIENT_PUSH_IDENTITY_KEY,
+            JSON.stringify(restoredIdentity)
+          ).catch(() => undefined);
+        }
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (!cancelled) {
+          setPushIdentityHydrated(true);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const logAndroid = useCallback((event: string, payload?: Record<string, unknown>) => {
     if (Platform.OS !== 'android' && Platform.OS !== 'ios') {
@@ -296,9 +680,38 @@ export function ClientNotificationsProvider({ children }: { children: ReactNode 
     [pruneDedupe]
   );
 
-  const refreshClientUnreadFromDB = useCallback(async () => {
-    const snapshot = await refreshBadges();
+  const claimNotificationTap = useCallback((eventId: string) => {
+    const now = Date.now();
+    handledTapRef.current.forEach((timestamp, key) => {
+      if (now - timestamp > DEDUPE_TTL_MS) {
+        handledTapRef.current.delete(key);
+      }
+    });
+    if (handledTapRef.current.has(eventId)) {
+      return false;
+    }
+    handledTapRef.current.set(eventId, now);
+    return true;
+  }, []);
+
+  const refreshClientUnreadFromDB = useCallback(async (options?: {
+    reconcileOptimisticClientBookingUnread?: boolean;
+  }) => {
+    const snapshot = await refreshBadges({
+      reconcileOptimisticClientBookingUnread:
+        options?.reconcileOptimisticClientBookingUnread === true,
+    });
     logAndroid('refresh_db_count', {
+      totalUnread: snapshot.totalUnread,
+      bookingUnread: snapshot.unreadCountsBySection.prenotazioni ?? 0,
+      waitlistUnread: snapshot.unreadCountsBySection.waitlist ?? 0,
+    });
+    return snapshot;
+  }, [logAndroid, refreshBadges]);
+
+  const refreshClientUnreadFromDBAuthoritative = useCallback(async () => {
+    const snapshot = await refreshBadges({ throwOnError: true });
+    logAndroid('refresh_db_count_authoritative', {
       totalUnread: snapshot.totalUnread,
       bookingUnread: snapshot.unreadCountsBySection.prenotazioni ?? 0,
       waitlistUnread: snapshot.unreadCountsBySection.waitlist ?? 0,
@@ -326,6 +739,12 @@ export function ClientNotificationsProvider({ children }: { children: ReactNode 
 
   const enqueueForegroundCustomBar = useCallback(
     (notification: ClientVisibleCustomBarNotification) => {
+      if (Platform.OS === 'android') {
+        Vibration.vibrate([0, 22, 36, 28]);
+      } else if (Platform.OS === 'ios') {
+        Vibration.vibrate(18);
+      }
+
       setVisibleCustomBarNotifications((current) => {
         if (current.some((item) => item.id === notification.id)) {
           return current;
@@ -353,71 +772,83 @@ export function ClientNotificationsProvider({ children }: { children: ReactNode 
 
   const enqueueForegroundCustomBarFromDBUnread = useCallback(
     async (notification: ClientVisibleCustomBarNotification) => {
-      const snapshot = await refreshClientUnreadFromDB();
-      const sectionUnread = Math.max(
-        0,
-        Math.trunc(Number(snapshot.unreadCountsBySection[notification.section] ?? 0) || 0)
-      );
+      let lastError: unknown = null;
 
-      logAndroid('custom_bar_db_gate', {
+      for (let attempt = 1; attempt <= FOREGROUND_CUSTOM_BAR_AUTHORITY_ATTEMPTS; attempt += 1) {
+        if (attempt > 1) {
+          await new Promise<void>((resolve) => {
+            setTimeout(resolve, FOREGROUND_CUSTOM_BAR_AUTHORITY_RETRY_MS * (attempt - 1));
+          });
+        }
+
+        try {
+          const snapshot = await refreshClientUnreadFromDBAuthoritative();
+          const sectionUnread = Math.max(
+            0,
+            Math.trunc(Number(snapshot.unreadCountsBySection[notification.section] ?? 0) || 0)
+          );
+          const shouldEnqueue = sectionUnread > 0;
+
+          logAndroid('custom_bar_db_gate', {
+            notificationId: notification.id,
+            eventId: notification.eventId,
+            section: notification.section,
+            sectionUnread,
+            totalUnread: snapshot.totalUnread,
+            attempt,
+            enqueue: shouldEnqueue,
+          });
+          if (shouldEnqueue) {
+            enqueueForegroundCustomBar(notification);
+            return;
+          }
+          lastError = null;
+        } catch (error) {
+          lastError = error;
+        }
+      }
+
+      logAndroid('custom_bar_db_gate_failed_closed', {
         notificationId: notification.id,
         eventId: notification.eventId,
         section: notification.section,
-        sectionUnread,
-        totalUnread: snapshot.totalUnread,
-        enqueue: sectionUnread > 0,
+        attempts: FOREGROUND_CUSTOM_BAR_AUTHORITY_ATTEMPTS,
+        enqueue: false,
+        reason: lastError ? 'authority_unavailable' : 'section_already_read',
+        message: lastError instanceof Error ? lastError.message : String(lastError ?? ''),
       });
-
-      if (sectionUnread > 0) {
-        enqueueForegroundCustomBar(notification);
-      } else {
-        dismissCustomBarNotification(notification.id);
-      }
     },
     [
-      dismissCustomBarNotification,
       enqueueForegroundCustomBar,
       logAndroid,
-      refreshClientUnreadFromDB,
+      refreshClientUnreadFromDBAuthoritative,
     ]
   );
 
-  const clearCustomBarNotifications = useCallback(() => {
-    timersRef.current.forEach((timer) => clearTimeout(timer));
-    timersRef.current.clear();
-    setVisibleCustomBarNotifications([]);
-    logAndroid('clear_custom_bar');
-  }, [logAndroid]);
-
-  useEffect(() => {
-    if (normalizedTotalUnread > 0 || visibleCustomBarNotifications.length === 0) {
-      return;
-    }
-
-    clearCustomBarNotifications();
-  }, [clearCustomBarNotifications, normalizedTotalUnread, visibleCustomBarNotifications.length]);
-
-  useEffect(() => {
-    if (visibleCustomBarNotifications.length === 0) {
+  const clearCustomBarNotifications = useCallback((section?: ClientNotificationSection) => {
+    if (!section) {
+      timersRef.current.forEach((timer) => clearTimeout(timer));
+      timersRef.current.clear();
+      setVisibleCustomBarNotifications([]);
+      logAndroid('clear_custom_bar', { section: 'all' });
       return;
     }
 
     setVisibleCustomBarNotifications((current) =>
       current.filter((notification) => {
-        const sectionUnread =
-          notification.section === 'waitlist' ? waitlistUnreadCount : bookingUnreadCount;
-        const keep = sectionUnread > 0;
-        if (!keep) {
-          const timer = timersRef.current.get(notification.id);
-          if (timer) {
-            clearTimeout(timer);
-            timersRef.current.delete(notification.id);
-          }
+        if (notification.section !== section) {
+          return true;
         }
-        return keep;
+        const timer = timersRef.current.get(notification.id);
+        if (timer) {
+          clearTimeout(timer);
+          timersRef.current.delete(notification.id);
+        }
+        return false;
       })
     );
-  }, [bookingUnreadCount, visibleCustomBarNotifications.length, waitlistUnreadCount]);
+    logAndroid('clear_custom_bar', { section });
+  }, [logAndroid]);
 
   const markClientNotificationAsRead = useCallback(
     async (notificationId?: string) => {
@@ -426,7 +857,33 @@ export function ClientNotificationsProvider({ children }: { children: ReactNode 
         : null;
       const section = visible?.section ?? 'prenotazioni';
       logAndroid('mark_as_read', { notificationId: notificationId ?? null, section });
-      await markSectionAsRead(section);
+      if (
+        section === 'prenotazioni' &&
+        identity?.isRegistered &&
+        visible?.requestId
+      ) {
+        await markClientBookingNotificationAsRead(
+          {
+            audience: 'client',
+            workspaceId: identity.workspaceId,
+            salonCode: identity.salonCode ?? null,
+            customerEmail: identity.customerEmail?.trim().toLowerCase() || null,
+            customerPhone: identity.customerPhone?.trim() || null,
+          },
+          {
+            requestId: visible.requestId,
+            appointmentGroupId: visible.appointmentGroupId,
+            expectedStatus: visible.status,
+            expectedCancellationSource: visible.cancellationSource,
+            expectedAppointmentDate: visible.appointmentDate,
+            expectedAppointmentTime: visible.appointmentTime,
+            expectedServiceName: visible.serviceName,
+            expectedUpdatedAt: visible.updatedAt ?? visible.eventAt,
+          }
+        );
+      } else if (section !== 'prenotazioni') {
+        await markSectionAsRead(section);
+      }
       if (notificationId) {
         dismissCustomBarNotification(notificationId);
       } else {
@@ -437,6 +894,7 @@ export function ClientNotificationsProvider({ children }: { children: ReactNode 
     [
       clearCustomBarNotifications,
       dismissCustomBarNotification,
+      identity,
       logAndroid,
       markSectionAsRead,
       refreshClientUnreadFromDB,
@@ -447,6 +905,16 @@ export function ClientNotificationsProvider({ children }: { children: ReactNode 
   const setClientIdentity = useCallback(
     (nextIdentity: ClientNotificationIdentity | null) => {
       setIdentityState(nextIdentity);
+      const nextPushIdentity = normalizePushIdentity(nextIdentity);
+      if (nextPushIdentity && Platform.OS !== 'web') {
+        pushIdentityRef.current = nextPushIdentity;
+        lastActivePushIdentityRef.current = nextPushIdentity;
+        setPersistedPushIdentity(nextPushIdentity);
+        void AsyncStorage.setItem(
+          LAST_CLIENT_PUSH_IDENTITY_KEY,
+          JSON.stringify(nextPushIdentity)
+        ).catch(() => undefined);
+      }
       logAndroid('set_identity', {
         hasIdentity: !!nextIdentity,
         workspaceId: nextIdentity?.workspaceId ?? null,
@@ -459,16 +927,24 @@ export function ClientNotificationsProvider({ children }: { children: ReactNode 
     [logAndroid]
   );
 
-  const setNotificationTapHandler = useCallback((handler: (() => void) | null) => {
-    tapHandlerRef.current = handler;
-  }, []);
+  const setNotificationTapHandler = useCallback(
+    (handler: ((target: ClientNotificationNavigationTarget) => void) | null) => {
+      tapHandlerRef.current = handler;
+      setIsTapHandlerReady(handler !== null);
+    },
+    []
+  );
 
   const setNotificationForegroundHandler = useCallback((handler: (() => void) | null) => {
     foregroundHandlerRef.current = handler;
   }, []);
 
   useEffect(() => {
-    if (!identity?.isRegistered || !identity.workspaceId.trim()) {
+    if (
+      !isClientNotificationRuntimeActive ||
+      !identity?.isRegistered ||
+      !identity.workspaceId.trim()
+    ) {
       setBadgeIdentityOverride(null);
       clearCustomBarNotifications();
       return;
@@ -493,11 +969,21 @@ export function ClientNotificationsProvider({ children }: { children: ReactNode 
     return () => {
       setBadgeIdentityOverride(null);
     };
-  }, [clearCustomBarNotifications, identity, logAndroid, setBadgeIdentityOverride]);
+  }, [
+    clearCustomBarNotifications,
+    identity,
+    isClientNotificationRuntimeActive,
+    logAndroid,
+    setBadgeIdentityOverride,
+  ]);
 
   const registerClientToken = useCallback(async () => {
-    const currentIdentity = identityRef.current;
-    if (Platform.OS === 'web' || !currentIdentity?.isRegistered) {
+    const currentIdentity = pushIdentityRef.current;
+    if (
+      Platform.OS === 'web' ||
+      !clientPushRuntimeAllowedRef.current ||
+      !currentIdentity?.isRegistered
+    ) {
       return;
     }
 
@@ -516,6 +1002,10 @@ export function ClientNotificationsProvider({ children }: { children: ReactNode 
       customerEmail: currentIdentity.customerEmail ?? undefined,
       customerPhone: currentIdentity.customerPhone ?? undefined,
       requestPermissionsIfNeeded: false,
+      isRegistrationCurrent: () =>
+        clientPushRuntimeAllowedRef.current &&
+        buildIdentityKey(pushIdentityRef.current) === buildIdentityKey(currentIdentity) &&
+        pushIdentityRef.current?.ownerEmail === currentIdentity.ownerEmail,
     }).catch((error) => {
       logAndroid('token_registration_error', {
         message: error instanceof Error ? error.message : String(error),
@@ -532,33 +1022,98 @@ export function ClientNotificationsProvider({ children }: { children: ReactNode 
   }, [logAndroid]);
 
   useEffect(() => {
-    if ((Platform.OS !== 'android' && Platform.OS !== 'ios') || !identityKey) {
+    if (
+      (Platform.OS !== 'android' && Platform.OS !== 'ios') ||
+      !isClientPushRuntimeRoute ||
+      !pushIdentityHydrated ||
+      !pushIdentityKey
+    ) {
       return;
     }
 
     void registerClientToken();
-    void refreshClientUnreadFromDB();
+    if (identityRef.current) {
+      void refreshClientUnreadFromDB();
+    }
 
     const subscription = AppState.addEventListener('change', (nextState) => {
       if (nextState === 'active') {
         logAndroid('app_active_refresh');
         void registerClientToken();
-        void refreshClientUnreadFromDB();
+        if (identityRef.current) {
+          void refreshClientUnreadFromDB();
+        }
       }
     });
 
     return () => {
       subscription.remove();
     };
-  }, [identityKey, logAndroid, refreshClientUnreadFromDB, registerClientToken]);
+  }, [
+    logAndroid,
+    isClientPushRuntimeRoute,
+    pushIdentityHydrated,
+    pushIdentityKey,
+    refreshClientUnreadFromDB,
+    registerClientToken,
+  ]);
 
   const handleNotificationTap = useCallback(
-    (response: Notifications.NotificationResponse | null | undefined) => {
-      const normalized = normalizeNotification(response?.notification);
+    (
+      notification: Notifications.Notification | null | undefined,
+      options?: { clearLastResponseAfterDispatch?: boolean }
+    ) => {
+      if (!notification) {
+        return;
+      }
+      const normalized = normalizeNotification(notification);
       if (!normalized) {
         return;
       }
-      const notificationData = getNotificationData(response?.notification);
+      const clearLastResponseAfterDispatch =
+        options?.clearLastResponseAfterDispatch === true;
+      const currentIdentity = identityRef.current;
+      const currentTapHandler = tapHandlerRef.current;
+      if (!currentIdentity?.isRegistered || !currentTapHandler) {
+        const previousPending = pendingNotificationTapsRef.current.get(normalized.eventId);
+        pendingNotificationTapsRef.current.set(normalized.eventId, {
+          notification,
+          clearLastResponseAfterDispatch:
+            clearLastResponseAfterDispatch ||
+            previousPending?.clearLastResponseAfterDispatch === true,
+        });
+        while (pendingNotificationTapsRef.current.size > 8) {
+          const oldestEventId = pendingNotificationTapsRef.current.keys().next().value;
+          if (!oldestEventId) {
+            break;
+          }
+          pendingNotificationTapsRef.current.delete(oldestEventId);
+        }
+        logAndroid('tap_or_response_queued_until_runtime_ready', {
+          notificationId: normalized.id,
+          eventId: normalized.eventId,
+          section: normalized.section,
+          hasLiveIdentity: !!currentIdentity?.isRegistered,
+          hasTapHandler: !!currentTapHandler,
+        });
+        return;
+      }
+      if (!claimNotificationTap(normalized.eventId)) {
+        logAndroid('tap_or_response_duplicate', {
+          notificationId: normalized.id,
+          eventId: normalized.eventId,
+          section: normalized.section,
+        });
+        if (clearLastResponseAfterDispatch) {
+          void Notifications.clearLastNotificationResponseAsync().catch((error) => {
+            logAndroid('last_notification_response_clear_error', {
+              message: error instanceof Error ? error.message : String(error),
+            });
+          });
+        }
+        return;
+      }
+      const notificationData = getNotificationData(notification);
 
       markPresented(normalized.eventId);
       logAndroid('tap_or_response', {
@@ -566,29 +1121,148 @@ export function ClientNotificationsProvider({ children }: { children: ReactNode 
         eventId: normalized.eventId,
         section: normalized.section,
       });
+      try {
+        currentTapHandler({
+          section: normalized.section,
+          communicationId: normalized.communicationId ?? null,
+          requestId: normalized.requestId ?? null,
+          appointmentGroupId: normalized.appointmentGroupId ?? null,
+          status: normalized.status ?? null,
+          cancellationSource: normalized.cancellationSource ?? null,
+          appointmentDate: normalized.appointmentDate ?? null,
+          appointmentTime: normalized.appointmentTime ?? null,
+          serviceName: normalized.serviceName ?? null,
+          updatedAt: normalized.updatedAt ?? null,
+          eventAt: normalized.eventAt ?? null,
+        });
+      } catch (error) {
+        handledTapRef.current.delete(normalized.eventId);
+        pendingNotificationTapsRef.current.set(normalized.eventId, {
+          notification,
+          clearLastResponseAfterDispatch,
+        });
+        logAndroid('tap_or_response_dispatch_error', {
+          notificationId: normalized.id,
+          eventId: normalized.eventId,
+          section: normalized.section,
+          message: error instanceof Error ? error.message : String(error),
+        });
+        return;
+      }
+
       void syncApplicationBadgeCountFromPushData(notificationData, {
         recipientRole: 'client',
         notificationId: normalized.id,
         eventId: normalized.eventId,
         appState: AppState.currentState,
       });
-      void refreshClientUnreadFromDB();
-      tapHandlerRef.current?.();
+      if (currentIdentity && normalized.section === 'prenotazioni' && normalized.requestId) {
+        const badgeIdentity: ClientBadgeIdentity = {
+          audience: 'client',
+          workspaceId: currentIdentity.workspaceId,
+          salonCode: currentIdentity.salonCode ?? null,
+          customerEmail: currentIdentity.customerEmail?.trim().toLowerCase() || null,
+          customerPhone: currentIdentity.customerPhone?.trim() || null,
+        };
+        void markClientBookingNotificationAsRead(badgeIdentity, {
+          requestId: normalized.requestId,
+          appointmentGroupId: normalized.appointmentGroupId,
+          expectedStatus: normalized.status,
+          expectedCancellationSource: normalized.cancellationSource,
+          expectedAppointmentDate: normalized.appointmentDate,
+          expectedAppointmentTime: normalized.appointmentTime,
+          expectedServiceName: normalized.serviceName,
+          expectedUpdatedAt: normalized.updatedAt ?? normalized.eventAt,
+        })
+          .then(() => refreshClientUnreadFromDB())
+          .catch(() => refreshClientUnreadFromDB());
+      } else if (currentIdentity) {
+        void refreshClientUnreadFromDB();
+      }
+      if (clearLastResponseAfterDispatch) {
+        void Notifications.clearLastNotificationResponseAsync().catch((error) => {
+          logAndroid('last_notification_response_clear_error', {
+            message: error instanceof Error ? error.message : String(error),
+          });
+        });
+      }
     },
-    [logAndroid, markPresented, refreshClientUnreadFromDB]
+    [claimNotificationTap, logAndroid, markPresented, refreshClientUnreadFromDB]
   );
 
   useEffect(() => {
-    if ((Platform.OS !== 'android' && Platform.OS !== 'ios') || !identityKey) {
+    if (
+      (Platform.OS !== 'android' && Platform.OS !== 'ios') ||
+      !identity?.isRegistered ||
+      !isTapHandlerReady ||
+      pendingNotificationTapsRef.current.size === 0
+    ) {
+      return;
+    }
+
+    const pendingTaps = Array.from(pendingNotificationTapsRef.current.values());
+    pendingNotificationTapsRef.current.clear();
+    pendingTaps.forEach((pendingTap) => {
+      handleNotificationTap(pendingTap.notification, {
+        clearLastResponseAfterDispatch: pendingTap.clearLastResponseAfterDispatch,
+      });
+    });
+  }, [handleNotificationTap, identity?.isRegistered, isTapHandlerReady]);
+
+  useEffect(() => {
+    if (
+      (Platform.OS !== 'android' && Platform.OS !== 'ios') ||
+      !pushIdentityHydrated ||
+      !pushIdentityKey
+    ) {
       return;
     }
 
     const receivedSubscription = Notifications.addNotificationReceivedListener((notification) => {
+      const notificationData = getNotificationData(notification);
+      const isAndroidBadgeOnlyRefresh =
+        Platform.OS === 'android' && notificationData._badgeOnly === true;
+      if (isAndroidBadgeOnlyRefresh) {
+        logAndroid('foreground_badge_only_synced', {
+          notificationId: notificationData.notificationId ?? null,
+          eventId: notificationData.eventId ?? null,
+          unreadCount: notificationData.unreadCount ?? notificationData.unread_count ?? null,
+        });
+        void syncApplicationBadgeCountFromPushData(notificationData, {
+          recipientRole: 'client',
+          notificationId:
+            String(notificationData.notificationId ?? notification.request.identifier ?? '') || null,
+          eventId: String(notificationData.eventId ?? '') || null,
+          appState: AppState.currentState,
+        });
+        return;
+      }
+
+      if (Platform.OS === 'android' && AppState.currentState !== 'active') {
+        // A remote push received while Android is backgrounded or suspended is
+        // already owned by the operating system. Never add a JS banner or a
+        // second local notification for that same logical event.
+        logAndroid('background_received_system_owned', {
+          notificationId: notificationData.notificationId ?? null,
+          eventId: notificationData.eventId ?? null,
+          appState: AppState.currentState,
+        });
+        return;
+      }
+
+      if (!identityRef.current?.isRegistered) {
+        // The persisted identity is intentionally kept only so the device can
+        // still receive this customer's pushes after logout. Without an active
+        // frontend session, the operating system is the sole presenter: do not
+        // mirror the push, refresh/read its sections, or enqueue an in-app bar.
+        logAndroid('foreground_received_system_only_logged_out');
+        return;
+      }
+
       const normalized = normalizeNotification(notification);
       if (!normalized) {
         return;
       }
-      const notificationData = getNotificationData(notification);
 
       const isNew = markPresented(normalized.eventId);
       logAndroid('foreground_received', {
@@ -607,23 +1281,66 @@ export function ClientNotificationsProvider({ children }: { children: ReactNode 
         eventId: normalized.eventId,
         appState: AppState.currentState,
       });
-      if (isNew) {
+      if (isNew && Platform.OS !== 'android') {
         void enqueueForegroundCustomBarFromDBUnread(normalized);
       } else {
-        void refreshClientUnreadFromDB();
+        if (identityRef.current) {
+          void refreshClientUnreadFromDB();
+        }
       }
       foregroundHandlerRef.current?.();
     });
 
     const responseSubscription = Notifications.addNotificationResponseReceivedListener((response) => {
-      handleNotificationTap(response);
+      handleNotificationTap(response.notification, {
+        clearLastResponseAfterDispatch: true,
+      });
     });
+
+    let removeAndroidMirrorPressListener: (() => void) | null = null;
+    let androidMirrorPressListenerCancelled = false;
+    if (Platform.OS === 'android') {
+      void import('@notifee/react-native')
+        .then((notifeeModule) => {
+          if (androidMirrorPressListenerCancelled) {
+            return;
+          }
+          const notifee = notifeeModule.default;
+          const { EventType } = notifeeModule;
+          removeAndroidMirrorPressListener = notifee.onForegroundEvent((event) => {
+            if (event.type !== EventType.PRESS) {
+              return;
+            }
+            const mirrorNotification = event.detail.notification;
+            const mirrorData =
+              (mirrorNotification?.data as Record<string, unknown> | undefined) ?? {};
+            if (normalizeText(mirrorData.source) !== 'client_foreground_notifee') {
+              return;
+            }
+            handleNotificationTap(
+              buildExpoNotificationFromAndroidClientMirror({
+                id: mirrorNotification?.id ?? null,
+                title: mirrorNotification?.title ?? null,
+                body: mirrorNotification?.body ?? null,
+                data: mirrorData,
+              })
+            );
+          });
+        })
+        .catch((error) => {
+          logAndroid('notifee_client_press_listener_error', {
+            message: error instanceof Error ? error.message : String(error),
+          });
+        });
+    }
 
     Notifications.getLastNotificationResponseAsync()
       .then((response) => {
         if (response) {
           logAndroid('last_notification_response_found');
-          handleNotificationTap(response);
+          handleNotificationTap(response.notification, {
+            clearLastResponseAfterDispatch: true,
+          });
         }
       })
       .catch((error) => {
@@ -633,15 +1350,18 @@ export function ClientNotificationsProvider({ children }: { children: ReactNode 
       });
 
     return () => {
+      androidMirrorPressListenerCancelled = true;
+      removeAndroidMirrorPressListener?.();
       receivedSubscription.remove();
       responseSubscription.remove();
     };
   }, [
     enqueueForegroundCustomBarFromDBUnread,
     handleNotificationTap,
-    identityKey,
     logAndroid,
     markPresented,
+    pushIdentityHydrated,
+    pushIdentityKey,
     refreshClientUnreadFromDB,
   ]);
 
@@ -659,6 +1379,7 @@ export function ClientNotificationsProvider({ children }: { children: ReactNode 
       setNotificationTapHandler,
       setNotificationForegroundHandler,
       refreshClientUnreadFromDB,
+      optimisticallyDecrementClientBookingUnread,
       syncClientBadgeFromDB,
       enqueueForegroundCustomBar,
       dismissCustomBarNotification,
@@ -668,16 +1389,19 @@ export function ClientNotificationsProvider({ children }: { children: ReactNode 
       visibleCustomBarNotifications,
       bookingUnreadCount,
       waitlistUnreadCount,
+      communicationUnreadCount,
       totalUnread: normalizedTotalUnread,
     }),
     [
       bookingUnreadCount,
+      communicationUnreadCount,
       clearCustomBarNotifications,
       dismissCustomBarNotification,
       enqueueForegroundCustomBar,
       hasPresented,
       markClientNotificationAsRead,
       normalizedTotalUnread,
+      optimisticallyDecrementClientBookingUnread,
       refreshClientUnreadFromDB,
       setClientIdentity,
       setNotificationForegroundHandler,
