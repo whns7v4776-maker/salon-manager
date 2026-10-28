@@ -41,9 +41,9 @@ export function CustomerCancellationSettings({ salonCode, premiumNative=false }:
       </HapticTouchable>)}</View>
   </>;
   return <View style={styles.card}>
-    <PremiumGuideDock tone={premiumNative?{ink:p.ink,fill:p.field,border:p.border}:undefined} guideOpen={guideOpen} onGuidePress={() => setGuideOpen(value => !value)} guideAccessibilityLabel="Come funziona Annullamento clienti" cutoutColor={premiumNative?(p.night?"#26292B":"#F7F4EF"):"#F3F6FA"} />
+    {!premiumNative ? <PremiumGuideDock tone={premiumNative?{ink:p.ink,fill:p.field,border:p.border}:undefined} guideOpen={guideOpen} onGuidePress={() => setGuideOpen(value => !value)} guideAccessibilityLabel="Come funziona Annullamento clienti" cutoutColor={premiumNative?(p.night?"#26292B":"#F7F4EF"):"#F3F6FA"} /> : null}
 
-    <View style={styles.header}>{premiumNative ? <NativeMedal icon="hourglass-outline" size={40} iconSize={18} /> : <View style={styles.icon}><Ionicons name="time-outline" size={24} color="#334155" /></View>}<Text style={styles.title}>Annullamento clienti</Text></View>
+    <View style={styles.header}>{premiumNative ? <NativeMedal icon="hourglass-outline" size={40} iconSize={18} accent={p.night ? "#D4939C" : "#9A4D5A"} /> : <View style={styles.icon}><Ionicons name="time-outline" size={24} color="#334155" /></View>}<Text style={styles.title}>Annullamento clienti</Text>{premiumNative ? <HapticTouchable accessibilityRole="button" accessibilityLabel="Come funziona Annullamento clienti" hitSlop={8} onPress={() => setGuideOpen(value => !value)} style={{ width: 24, height: 24, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: p.field }}><Ionicons name="information" size={14} color={p.muted} /></HapticTouchable> : null}</View>
     {guideOpen && <SectionHowItWorksPanel onClose={() => setGuideOpen(false)} premiumNative={premiumNative} title="Annullamento clienti" description="Decidi fino a quando i clienti possono annullare un appuntamento confermato." steps={[
       { title: 'Scegli l’anticipo', description: 'Il valore predefinito è 30 minuti. Seleziona un tempo diverso oppure Fino all’inizio.' },
       { title: 'Salva la regola', description: 'Premi Salva regola e attendi la conferma. La regola attiva viene conservata per il salone e condivisa tra app e web.' },
@@ -70,7 +70,7 @@ const baseCancellationStyles = StyleSheet.create({
  card: { marginBottom: NATIVE ? 16 : 22, padding: NATIVE ? 16 : 22, gap: NATIVE ? 12 : 16, borderRadius: 26, borderWidth: 1, borderColor: '#E5EAF1', backgroundColor: '#fff' },
  header: { paddingRight: NATIVE ? 24 : 0, flexDirection: 'row', alignItems: 'center', gap: NATIVE ? 10 : 12, ...(!NATIVE ? { width: '100%', justifyContent: 'flex-start', paddingRight: 52 } : {}) },
  icon: { width: 44, height: 44, borderRadius: 15, backgroundColor: '#F1F5F9', alignItems: 'center', justifyContent: 'center', ...(NATIVE ? { width: 34, height: 34, borderRadius: 12 } : {}) },
- title: { fontSize: NATIVE ? 17 : 16, fontWeight: NATIVE ? '700' : '800', color: '#182033', ...(NATIVE ? { flex: 1 } : { flexGrow: 0, flexShrink: 1, flexBasis: 'auto' as const, width: 'auto' as const, textAlign: 'left' as const }) },
+ title: { fontSize: 16, fontWeight: NATIVE ? '600' : '800', color: '#182033', ...(NATIVE ? { flexShrink: 1 } : { flexGrow: 0, flexShrink: 1, flexBasis: 'auto' as const, width: 'auto' as const, textAlign: 'left' as const }) },
  body: { fontSize: 13, lineHeight: 20, color: '#64748b', ...(NATIVE ? { fontSize: 12, lineHeight: 17, fontWeight: '500' as const } : {}) },
  summary: { backgroundColor: '#F6F8FB', borderRadius: 20, padding: 20, gap: 8, borderWidth: 1, borderColor: '#EDF1F6', ...(NATIVE ? { padding: 12, gap: 6, borderRadius: 14 } : {}) },
  eyebrow: { fontSize: 10, letterSpacing: 1.1, fontWeight: '800', color: '#64748B', ...(NATIVE ? { fontSize: 10, letterSpacing: 0, fontWeight: '600' as const } : {}) },

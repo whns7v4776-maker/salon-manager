@@ -5320,7 +5320,7 @@ export default function PrenotazioniScreen() {
               style={styles.nativeSectionToggle}
             >
               <View style={[styles.nativeSectionHeading,{flexDirection:'row',alignItems:'center',gap:10}]}>
-                <NativeMedal icon={({pending:'notifications-outline',customerConfirmation:'hourglass-outline',accepted:'checkmark-done-outline',cancelled:'person-remove-outline',salonDeclined:'storefront-outline',archive:'archive-outline'} as Record<string,React.ComponentProps<typeof Ionicons>['name']>)[sectionKey]??'albums-outline'} size={34} iconSize={16}/>
+                <NativeMedal icon={({pending:'notifications-outline',customerConfirmation:'hourglass-outline',accepted:'checkmark-done-outline',cancelled:'person-remove-outline',salonDeclined:'storefront-outline',archive:'archive-outline'} as Record<string,React.ComponentProps<typeof Ionicons>['name']>)[sectionKey]??'albums-outline'} size={34} iconSize={16} accent={(premiumRequestsPalette.night?{pending:'#D6B27A',customerConfirmation:'#9AA8D6',accepted:'#8FBF9A',cancelled:'#D4939C',salonDeclined:'#D49A6A',archive:'#A9A39A'}:{pending:'#8A6A2E',customerConfirmation:'#4F5F96',accepted:'#3F7A4D',cancelled:'#9A4D5A',salonDeclined:'#A4673C',archive:'#6B665E'} as Record<string,string>)[sectionKey]}/>
                 <PremiumFitLabel fontSize={13} minFontSize={11} style={[styles.accordionTitle,{lineHeight:18,fontWeight:"500"}]}>{title}</PremiumFitLabel>
               </View>
               {unreadCount > 0 ? <Text style={styles.nativeSectionUnread}>{unreadCount} da leggere</Text> : null}
@@ -5450,7 +5450,7 @@ export default function PrenotazioniScreen() {
                   !responsive.isDesktop && styles.autoAcceptHeaderRowCompact,
                 ]}
               >
-                <NativeMedal icon="flash-outline" size={40} iconSize={18}/>
+                <NativeMedal icon="flash-outline" size={40} iconSize={18} accent={premiumRequestsPalette.night ? "#D49A6A" : "#A4673C"}/>
                 <View style={styles.autoAcceptHeaderTextWrap}>
                   <View style={{flexDirection:"row",alignItems:"center",gap:8}}>
                   <Text
@@ -5632,7 +5632,7 @@ export default function PrenotazioniScreen() {
                   !responsive.isDesktop && styles.autoAcceptHeaderRowCompact,
                 ]}
               >
-                <NativeMedal icon="sparkles-outline" size={40} iconSize={18}/>
+                <NativeMedal icon="sparkles-outline" size={40} iconSize={18} accent={premiumRequestsPalette.night ? "#9AA8D6" : "#4F5F96"}/>
                 <View style={styles.autoAcceptHeaderTextWrap}>
                   <View style={{flexDirection:"row",alignItems:"center",gap:8}}>
                   <Text

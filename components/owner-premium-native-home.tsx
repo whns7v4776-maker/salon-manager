@@ -21,11 +21,12 @@ export const NativeHomeClock=memo(function HomeClock({today}:{today:string}){
  return <Text style={{color:p.muted,fontFamily:sans,fontSize:11,letterSpacing:.6}}>{date.toLocaleUpperCase('it')} · {clock}</Text>;
 });
 /** Small raised disc behind an icon: solid fill, warm rim, top light and a soft drop. */
-export function NativeMedal({icon,size=40,tint,iconSize}:{icon:React.ComponentProps<typeof Ionicons>['name'];size?:number;tint?:string;iconSize?:number}){
+/** `accent` (6-digit hex) gives a section its own muted colour: tinted disc, matching ring and icon. */
+export function NativeMedal({icon,size=40,tint,iconSize,accent}:{icon:React.ComponentProps<typeof Ionicons>['name'];size?:number;tint?:string;iconSize?:number;accent?:string}){
  const {palette:p}=useAccessAppearance();
- return <View style={{width:size,height:size,borderRadius:size/2,backgroundColor:tint??(p.night?'#3A352C':'#F3E7D3'),borderWidth:1,borderColor:p.night?'rgba(216,194,155,.3)':'rgba(150,118,72,.26)',alignItems:'center',justifyContent:'center',shadowColor:p.night?'#000000':'#6E542E',shadowOpacity:p.night?.35:.16,shadowRadius:5,shadowOffset:{width:0,height:3},elevation:2}}>
+ return <View style={{width:size,height:size,borderRadius:size/2,backgroundColor:accent?`${accent}${p.night?'2E':'24'}`:tint??(p.night?'#3A352C':'#F3E7D3'),borderWidth:1,borderColor:accent?`${accent}${p.night?'73':'66'}`:p.night?'rgba(216,194,155,.3)':'rgba(150,118,72,.26)',alignItems:'center',justifyContent:'center',shadowColor:p.night?'#000000':'#6E542E',shadowOpacity:p.night?.35:.16,shadowRadius:5,shadowOffset:{width:0,height:3},elevation:2}}>
   <View pointerEvents="none" style={{position:'absolute',top:1,left:size*.18,right:size*.18,height:size*.42,borderTopLeftRadius:size/2,borderTopRightRadius:size/2,backgroundColor:p.night?'rgba(255,255,255,.07)':'rgba(255,255,255,.55)'}}/>
-  <Ionicons name={icon} size={iconSize??Math.round(size*.48)} color={p.ink}/>
+  <Ionicons name={icon} size={iconSize??Math.round(size*.48)} color={accent??p.ink}/>
  </View>;
 }
 function Glass({children,tint,style}:{children:React.ReactNode;tint?:string;style?:any}){
