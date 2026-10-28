@@ -626,6 +626,10 @@ export const getAgendaNightAppointmentFill = (hex: string) => {
   return mixHexColor(hex, '#D4CEC0', 0.72);
 };
 
+/** Agenda cards: the salon surface with a light wash of the service colour, opaque in both themes. */
+export const getAgendaAppointmentSurface = (hex: string, night: boolean) =>
+  mixHexColor(hex, night ? '#2A2E2F' : '#FBF8F3', night ? 0.8 : 0.84);
+
 /** Inverse badges stay distinct from both pastel and dark status cards. */
 export const getAgendaAppointmentBadgeTone = (cardTextColor: string) => {
   const rgb = parseHexColor(cardTextColor);

@@ -29,7 +29,7 @@ import { OwnerAppointmentCheckout } from '../../components/owner-appointment-che
 import { NativeSheetHandle, NativeDraggableSheet } from '../../components/ui/native-sheet-drag';
 import { AgendaLiveTimeOverlay } from '../../components/agenda-live-time-overlay';
 import { AgendaSlotSatin,AgendaPauseSurface } from '../../components/agenda-approved-surface';
-import { AgendaLiveSignalProvider, AgendaLiveRadar, AgendaLiveGlow } from '../../components/agenda-live-glow';
+import { AgendaLiveSignalProvider, AgendaLiveGlow } from '../../components/agenda-live-glow';
 import { useAppointmentBenefits } from '../../hooks/use-appointment-benefits';
 import { AppointmentBenefitBadges } from '../../components/appointment-benefit-badges';
 import { OwnerBookingPackagePicker } from '../../components/owner-booking-package-picker';
@@ -200,6 +200,7 @@ import { useResponsiveLayout } from '../../src/lib/responsive';
 import {
   blendServiceAccentWithWhite,
   getAgendaNightAppointmentFill,
+  getAgendaAppointmentSurface,
   getAgendaAppointmentBadgeTone,
   getServiceColorIdentityKey,
   getServiceCardTheme,
@@ -34453,10 +34454,10 @@ export default function AgendaScreen() {
 
       const customerColor = getAgendaCustomerIdentityColor(appointment);
       return {
-        bg: availabilityPalette.night?getAgendaNightAppointmentFill(customerColor):blendServiceAccentWithWhite(customerColor,0.82),
-        border: withServiceAccentAlpha(customerColor,availabilityPalette.night?.28:.65),
-        accent: withServiceAccentAlpha(customerColor,.65),
-        text: availabilityPalette.night?'#2C2E2A':availabilityPalette.ink,
+        bg: getAgendaAppointmentSurface(customerColor,availabilityPalette.night),
+        border: withServiceAccentAlpha(customerColor,availabilityPalette.night?.45:.55),
+        accent: customerColor,
+        text: availabilityPalette.night?'#EEEDE5':availabilityPalette.ink,
         shadow: customerColor,
       };
     },
@@ -46467,8 +46468,9 @@ export default function AgendaScreen() {
                     accessibilityRole="button"
                     accessibilityLabel={`Vai all'orario live, ${weekPlannerCurrentTimeIndicator.timeLabel}`}
                     accessibilityHint="Scorre la panoramica fino alla linea dell'ora corrente."
+                    {...(IS_WEB ? ({ title: "Vai all'ora attuale" } as object) : {})}
                   >
-<AgendaLiveRadar night={availabilityPalette.night}/>
+<Ionicons name="time-outline" size={17} color={availabilityPalette.ink}/>
 </HapticTouchable>
                 ) : null}
 
@@ -48347,7 +48349,7 @@ accessibilityHint={
                                             }
                                             disabled={!laneSalonCanQuickBook}
                                           >
-{!isLunchBreakSlot && (isPastFreeSlot || isClosedDay) ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaStateLabel label={isClosedDay?'Chiuso':'Passato'} action={laneSalonCanQuickBook}/></View>:null}
+{!isLunchBreakSlot && (isPastFreeSlot || isClosedDay) && rowIndex === 0 ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaStateLabel label={isClosedDay?'Chiuso':'Passato'} action={laneSalonCanQuickBook}/></View>:null}
                                             {laneDragPreview &&
                                             !laneOccupyingAppointment ? null : laneSalonCanQuickBook &&
                                               !laneQuickBookAvailable &&
@@ -48583,7 +48585,7 @@ null
                                             }
                                           >
                                             {(isPastFreeSlot || isLaneVisuallyDisabled || isClosedDay || isLaneOutsideScheduleSlot || laneCellState === 'outside' || (laneCellState === 'blocked' && !isLunchBreakSlot)) ? <NativeAgendaUnavailable night={availabilityPalette.night} phase={rowIndex + laneIndex}/> : null}
-{!isLunchBreakSlot && (isPastFreeSlot || isClosedDay) ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaStateLabel label={isClosedDay?'Chiuso':'Passato'} action={laneSalonCanQuickBook}/></View>:null}
+{!isLunchBreakSlot && (isPastFreeSlot || isClosedDay) && rowIndex === 0 ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaStateLabel label={isClosedDay?'Chiuso':'Passato'} action={laneSalonCanQuickBook}/></View>:null}
                                             {laneDragPreview &&
                                             !laneOccupyingAppointment ? null : laneSalonCanQuickBook &&
                                               !laneQuickBookAvailable &&
@@ -49130,7 +49132,7 @@ null
                                       cellState !== 'blocked'
                                     }
                                   >
-                                    {!isLunchBreakSlot && (isPastFreeSlot || isClosedDay) ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaStateLabel label={isClosedDay?'Chiuso':'Passato'} action={canSalonQuickBook}/></View>:null}
+                                    {!isLunchBreakSlot && (isPastFreeSlot || isClosedDay) && rowIndex === 0 ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaStateLabel label={isClosedDay?'Chiuso':'Passato'} action={canSalonQuickBook}/></View>:null}
 {isSwapPreviewFreeTarget ? (
                                       <WeekDragTargetHighlight
                                         tone={
@@ -50111,7 +50113,7 @@ null
         ListHeaderComponent={
           <View style={[styles.pageShell, { maxWidth: agendaContentMaxWidth }]}>
             <AgendaPremiumHeader date={formatDateLongLocalized(data,appLanguage)} time={`${String(weekPlannerNow.getHours()).padStart(2,'0')}:${String(weekPlannerNow.getMinutes()).padStart(2,'0')}`} onAvailability={()=>{availabilityReturnRef.current=null;if(!customizeHoursExpandedRef.current)toggleCustomizeHours();}}
-              review={servicesAwaitingCompletion.length?<HapticTouchable accessibilityRole="button" accessibilityLabel="Verifica servizi da completare" onPress={()=>servicesAwaitingCompletion.length>1?setCompletionReviewOpen(true):openWeekAppointmentDetails(servicesAwaitingCompletion[0])} style={{minHeight:40,flexDirection:'row',flexWrap:'wrap',alignItems:'center',gap:8,paddingHorizontal:13,paddingVertical:9,borderRadius:14,backgroundColor:availabilityPalette.night?'rgba(181,132,83,.15)':'rgba(250,225,201,.52)',maxWidth:'100%'}}><Text style={{fontSize:13,color:availabilityPalette.ink}}>{servicesAwaitingCompletion.length} servizi da completare</Text><Text style={{fontSize:13,fontWeight:'600',color:availabilityPalette.ink}}>Verifica ›</Text></HapticTouchable>:null}/>
+              review={servicesAwaitingCompletion.length?<HapticTouchable accessibilityRole="button" accessibilityLabel="Verifica servizi da completare" onPress={()=>servicesAwaitingCompletion.length>1?setCompletionReviewOpen(true):openWeekAppointmentDetails(servicesAwaitingCompletion[0])} style={{minHeight:44,flexDirection:'row',alignItems:'center',gap:10,paddingLeft:6,paddingRight:14,paddingVertical:6,borderRadius:22,borderWidth:1,borderColor:availabilityPalette.night?'#D9BD8733':'#EBD3AE',backgroundColor:availabilityPalette.night?'#3A3226':'#FAEBD3',maxWidth:'100%',shadowColor:'#6E542E',shadowOpacity:availabilityPalette.night?0:.08,shadowRadius:8,shadowOffset:{width:0,height:3}}}><View style={{width:32,height:32,borderRadius:16,alignItems:'center',justifyContent:'center',backgroundColor:availabilityPalette.night?'#4A3E2C':'#F3E2C4',borderWidth:1,borderColor:availabilityPalette.night?'rgba(216,194,155,.32)':'rgba(150,118,72,.3)'}}><Ionicons name="alert-circle-outline" size={18} color={availabilityPalette.night?'#E3BD89':'#7A5424'}/></View><Text style={{fontSize:13,fontWeight:'500',color:availabilityPalette.ink,flexShrink:1}}>{servicesAwaitingCompletion.length===1?'1 servizio da completare':`${servicesAwaitingCompletion.length} servizi da completare`}</Text><Text style={{fontSize:13,fontWeight:'600',color:availabilityPalette.night?'#E3BD89':'#7A5424'}}>Verifica ›</Text></HapticTouchable>:null}/>
             {completionReviewOpen?<OwnerCompletionReview visible={!weekAppointmentDetails} items={servicesAwaitingCompletion} onClose={()=>setCompletionReviewOpen(false)} onComplete={completeOwnerAppointmentForSalon} onDetails={id=>{const item=servicesAwaitingCompletion.find(x=>x.id===id);if(item)openWeekAppointmentDetails(item);}}/>:null}
 
 

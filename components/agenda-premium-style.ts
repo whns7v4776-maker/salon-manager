@@ -225,7 +225,7 @@ export function createAgendaPremiumStyles<T extends Record<string,any>>(base:T,t
  patch('weekPlannerCurrentTimeLine',{height:1.25,backgroundColor:'#ED9B94'});
  for(const key of ['weekPlannerCurrentTimeBadge','weekPlannerLiveTimeButton'])patch(key,{backgroundColor:p.action,borderColor:p.action,shadowColor:p.action});
  patch('weekPlannerCurrentTimeBadge',{borderRadius:6,backgroundColor:'#91413F',borderColor:'#91413F'});
- patch('weekPlannerLiveTimeButton',{borderRadius:100,borderWidth:1,borderColor:'rgba(255,255,255,.20)',backgroundColor:'#262C2C',overflow:'hidden'});
+ patch('weekPlannerLiveTimeButton',{borderRadius:100,borderWidth:1,borderColor:p.night?'rgba(216,194,155,.32)':'rgba(150,118,72,.3)',backgroundColor:p.night?'#3A352C':'#F3E7D3',overflow:'hidden',shadowColor:p.night?'#000000':'#6E542E',shadowOpacity:p.night?.35:.16,shadowRadius:5,shadowOffset:{width:0,height:3},...(web?{boxShadow:p.night?'inset 0 1px 0 rgba(255,255,255,.12),0 3px 8px rgba(0,0,0,.35)':'inset 0 1px 0 #ffffffcc,0 3px 8px rgba(110,84,46,.16)',cursor:'pointer'}:{})});
  patch('weekPlannerCurrentTimeBadgeText',{color:'#FFF3EF',fontWeight:'600'});
  patch('weekPlannerLiveTimeButtonDot',{backgroundColor:p.actionText,borderColor:p.action});
  const draftFill=p.night?'#A9C8B4':'#426A53',draftInk=p.night?'#1D3426':'#FFFFFF';
