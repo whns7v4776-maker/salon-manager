@@ -166,7 +166,7 @@ export function nativeRequestsStyles<T extends Record<string,any>>(base:T,p:Pale
  for(const key of ['autoAcceptLiveRow','autoAcceptBadge'])patch(key,{alignSelf:'flex-start'});
  if(result.archiveMonthList)Object.assign(result.archiveMonthList,{backgroundColor:'transparent',padding:0,gap:8,borderWidth:0});
  if(result.archiveMonthSection)Object.assign(result.archiveMonthSection,{backgroundColor:p.field,borderWidth:1,borderColor:p.border,borderRadius:14,overflow:'hidden'});
- if(result.archiveMonthHeader)Object.assign(result.archiveMonthHeader,{paddingHorizontal:14,paddingVertical:12,minHeight:54,backgroundColor:'transparent'});
+ if(result.archiveMonthHeader)Object.assign(result.archiveMonthHeader,{paddingHorizontal:14,paddingVertical:12,minHeight:54,backgroundColor:'transparent',borderWidth:0});
  if(result.archiveMonthTitle)Object.assign(result.archiveMonthTitle,{fontSize:14,lineHeight:20,fontWeight:'500'});
  if(result.archiveMonthChevronCount)Object.assign(result.archiveMonthChevronCount,{minWidth:28,textAlign:'center',paddingHorizontal:8,paddingVertical:4,borderRadius:8,backgroundColor:p.field,borderWidth:1,borderColor:p.border,color:p.ink,fontSize:12});
  return premiumWebCardStyles(result,p) as T & Record<string,any>;
