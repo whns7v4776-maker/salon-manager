@@ -72,7 +72,15 @@ type UnreadBadgeContextValue = {
   setBadgeIdentityOverride: (identity: BadgeIdentity | null) => void;
 };
 
-const UnreadBadgeContext = createContext<UnreadBadgeContextValue | null>(null);
+// Fast Refresh may re-run this module while the mounted provider keeps the
+// previous context object; reusing one instance keeps dev reloads consistent.
+const unreadBadgeContextHost = globalThis as typeof globalThis & {
+  __salonUnreadBadgeContext?: React.Context<UnreadBadgeContextValue | null>;
+};
+const UnreadBadgeContext =
+  unreadBadgeContextHost.__salonUnreadBadgeContext ??
+  (unreadBadgeContextHost.__salonUnreadBadgeContext =
+    createContext<UnreadBadgeContextValue | null>(null));
 
 const buildIdentityKey = (identity: BadgeIdentity | null) => {
   if (!identity) {
