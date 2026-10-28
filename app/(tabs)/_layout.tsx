@@ -6747,11 +6747,27 @@ function OwnerTabLayout() {
             <ExpoRouterMaterialTopTabs.Screen name="cassa" options={{ title: "Cassa", lazy: IS_ANDROID, lazyPlaceholder: IS_ANDROID ? renderAndroidLazyTabPlaceholder : undefined }} />
             <ExpoRouterMaterialTopTabs.Screen name="settings" options={{ title: "Impostazioni", lazy: IS_ANDROID, lazyPlaceholder: IS_ANDROID ? renderAndroidLazyTabPlaceholder : undefined }} />
           </ExpoRouterMaterialTopTabs>
+          {!IS_WEB ? <NativeStatusBarVeil /> : null}
           <OwnerWebPageSkeleton active={IS_WEB && !showOnboarding && !!salonAccountEmail.trim() && (ownerInitialDataHydrating || !ownerServerSyncReady || !ownerAppointmentsAuthoritative)}/>
         </View>
       </TabSwipeLockProvider>
     </OwnerStartupLoadingProvider>
     </OwnerViewportContext.Provider>
+  );
+}
+
+/** App: frosted strip under the clock so scrolled content never collides with the status bar. */
+function NativeStatusBarVeil() {
+  const insets = useSafeAreaInsets();
+  const { palette } = useAccessAppearance();
+  if (insets.top <= 0) return null;
+  // Covers the clock and island only, so the brand plaque at rest is never clipped.
+  const height = Math.max(20, insets.top - 12);
+  return (
+    <View pointerEvents="none" style={{ position: "absolute", top: 0, left: 0, right: 0, height, zIndex: 50, elevation: 50 }}>
+      {!IS_ANDROID ? <BlurView intensity={24} tint={palette.night ? "dark" : "light"} style={StyleSheet.absoluteFillObject} /> : null}
+      <View style={[StyleSheet.absoluteFillObject, { backgroundColor: palette.night ? (IS_ANDROID ? "rgba(14,15,16,.9)" : "rgba(14,15,16,.55)") : (IS_ANDROID ? "rgba(244,240,234,.92)" : "rgba(244,240,234,.6)") }]} />
+    </View>
   );
 }
 

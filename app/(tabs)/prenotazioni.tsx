@@ -4397,9 +4397,12 @@ export default function PrenotazioniScreen() {
                 </Text>
               </View>
               {item.operatoreNome ? (
-                <Text style={styles.compactRequestMeta} numberOfLines={1}>
-                  {item.operatoreNome}
-                </Text>
+                <View style={{flexDirection:"row",alignItems:"center",gap:5}}>
+                  <Ionicons name="cut-outline" size={13} color={premiumRequestsPalette.muted} />
+                  <Text style={styles.compactRequestMeta} numberOfLines={1}>
+                    {item.operatoreNome}
+                  </Text>
+                </View>
               ) : null}
             </View>
             <View style={styles.compactStatusWrap}>
@@ -4421,7 +4424,7 @@ export default function PrenotazioniScreen() {
           {logicalKindLabel ? (
             <View style={styles.logicalRequestTimelineCard}>
               <View style={styles.logicalRequestTimelineHeading}>
-                <Ionicons name={logicalKindIcon} size={19} color={premiumRequestsPalette.night ? "#D2C5E7" : "#75608F"} />
+                <Ionicons name={logicalKindIcon} size={17} color={premiumRequestsPalette.night ? "#E2CFAA" : "#7A5F38"} />
                 <Text style={styles.logicalRequestTimelineEyebrow}>
                   {logicalKindLabel}
                 </Text>
@@ -4484,6 +4487,7 @@ export default function PrenotazioniScreen() {
             pressScale={0.97}
             pressOpacity={0.98}
           >
+            <Ionicons name="call-outline" size={15} color={premiumRequestsPalette.ink} />
             <Text style={styles.compactActionChipText}>Chiama</Text>
           </HapticTouchable>
           <HapticTouchable
@@ -4492,6 +4496,7 @@ export default function PrenotazioniScreen() {
             pressScale={0.97}
             pressOpacity={0.98}
           >
+            <Ionicons name="logo-whatsapp" size={15} color={premiumRequestsPalette.night ? "#C3D8C6" : "#416A4B"} />
             <Text
               style={[
                 styles.compactActionChipText,
@@ -4511,6 +4516,7 @@ export default function PrenotazioniScreen() {
               pressScale={0.97}
               pressOpacity={0.98}
             >
+              <Ionicons name="logo-instagram" size={15} color={premiumRequestsPalette.ink} />
               <Text
                 style={[
                   styles.compactActionChipText,
@@ -4624,7 +4630,15 @@ export default function PrenotazioniScreen() {
     const visualUnreadSignatures = forceReadOnly
       ? new Set<string>()
       : requestVisualUnreadSnapshotsRef.current[sectionKey];
-    const sortedItems = sortRequestsNewestFirst(items);
+    // The same request can arrive twice from sync; render it once so cards keep a unique identity.
+    const seenRequestIds = new Set<string>();
+    const sortedItems = sortRequestsNewestFirst(items).filter((item) => {
+      const id = String(item.id ?? "");
+      if (!id) return true;
+      if (seenRequestIds.has(id)) return false;
+      seenRequestIds.add(id);
+      return true;
+    });
     const exactUnreadItems = sortedItems.filter((item) =>
       visualUnreadSignatures.has(buildViewedRequestSignature(item)),
     );
@@ -5338,7 +5352,7 @@ export default function PrenotazioniScreen() {
           styles.accordionSection,
           responsive.isDesktop && styles.wideCard,
           IS_WEB && styles.webAccordionSection,
-          {marginBottom:0,paddingHorizontal:10,paddingVertical:6,borderRadius:12,borderWidth:0,backgroundColor:workspaceSection===sectionKey?premiumRequestsPalette.night?"rgba(211,188,145,.18)":"rgba(217,196,157,.42)":"transparent",minHeight:50,shadowOpacity:0,elevation:0},
+          {marginBottom:0,paddingHorizontal:8,paddingVertical:2,borderRadius:14,borderWidth:1,borderColor:workspaceSection===sectionKey&&expanded?(premiumRequestsPalette.night?"rgba(216,194,155,.30)":"rgba(150,118,72,.28)"):"transparent",backgroundColor:workspaceSection===sectionKey&&expanded?premiumRequestsPalette.night?"rgba(211,188,145,.11)":"rgba(217,196,157,.26)":"transparent",minHeight:50,shadowOpacity:0,elevation:0},
         ]}
       >
         {unreadCount > 0 ? (
@@ -5365,7 +5379,7 @@ export default function PrenotazioniScreen() {
               style={styles.nativeSectionToggle}
             >
               <View style={[styles.nativeSectionHeading,{flexDirection:'row',alignItems:'center',gap:10}]}>
-                <Ionicons name={({pending:'time-outline',customerConfirmation:'hourglass-outline',accepted:'calendar-outline',cancelled:'person-outline',salonDeclined:'ban-outline',archive:'archive-outline'} as Record<string,React.ComponentProps<typeof Ionicons>['name']>)[sectionKey]??'albums-outline'} size={20} color={premiumRequestsPalette.ink}/>
+                <View style={{width:34,height:34,borderRadius:17,alignItems:'center',justifyContent:'center',backgroundColor:premiumRequestsPalette.night?'rgba(216,194,155,.10)':'rgba(189,165,127,.14)',borderWidth:1,borderColor:premiumRequestsPalette.night?'rgba(216,194,155,.26)':'rgba(150,118,72,.24)'}}><Ionicons name={({pending:'time-outline',customerConfirmation:'hourglass-outline',accepted:'calendar-outline',cancelled:'person-outline',salonDeclined:'ban-outline',archive:'archive-outline'} as Record<string,React.ComponentProps<typeof Ionicons>['name']>)[sectionKey]??'albums-outline'} size={17} color={premiumRequestsPalette.night?'#E2CFAA':'#7A5F38'}/></View>
                 <PremiumFitLabel fontSize={13} minFontSize={11} style={[styles.accordionTitle,{lineHeight:18,fontWeight:"500"}]}>{title}</PremiumFitLabel>
               </View>
               {unreadCount > 0 ? <Text style={styles.nativeSectionUnread}>{unreadCount} da leggere</Text> : null}
@@ -5509,7 +5523,7 @@ export default function PrenotazioniScreen() {
               >
                 <View style={styles.autoAcceptHeaderTextWrap}>
                   <Text
-                    style={[styles.autoAcceptTitle, !IS_WEB && {paddingHorizontal:30}]}
+                    style={styles.autoAcceptTitle}
                     numberOfLines={IS_WEB?undefined:2}
                     adjustsFontSizeToFit
                     minimumFontScale={0.82}
@@ -5715,7 +5729,7 @@ export default function PrenotazioniScreen() {
               >
                 <View style={styles.autoAcceptHeaderTextWrap}>
                   <Text
-                    style={[styles.autoAcceptTitle, !IS_WEB && {paddingHorizontal:30}]}
+                    style={styles.autoAcceptTitle}
                     numberOfLines={IS_WEB?undefined:2}
                     adjustsFontSizeToFit
                     minimumFontScale={0.82}
@@ -5754,7 +5768,7 @@ export default function PrenotazioniScreen() {
                         : styles.autoAcceptBadgeTextOff,
                     ]}
                   >
-                    {guidedSaving ? "Salvataggio…" : displayedGuidedSlotsEnabled ? "Guidati ON" : "Guidati OFF"}
+                    {guidedSaving ? "Salvataggio…" : displayedGuidedSlotsEnabled ? "Attivi" : "Disattivati"}
                   </Text>
                 </View>
               </View>
@@ -5998,7 +6012,10 @@ disabled={choiceDisabled}
             </View>
           </View>
 
-          <CustomerCancellationSettings premiumNative key={salonWorkspace.salonCode} salonCode={salonWorkspace.salonCode} />
+          {/* Same frame as the rule cards above, so all three share one width. */}
+          <View style={[styles.heroCard, { marginTop: 0 }]}>
+            <CustomerCancellationSettings premiumNative key={salonWorkspace.salonCode} salonCode={salonWorkspace.salonCode} />
+          </View>
 </>);
   return (
     <NativePremiumScope.Provider value={true}><HapticTouchableFastRegion enabled={!IS_WEB}>
@@ -6419,8 +6436,8 @@ disabled={choiceDisabled}
                   <View style={styles.logicalRequestTimelineHeading}>
                     <Ionicons
                       name={selectedLogicalKindIcon}
-                      size={13}
-                      color="#5B21B6"
+                      size={15}
+                      color={premiumRequestsPalette.night ? "#E2CFAA" : "#7A5F38"}
                     />
                     <Text style={styles.logicalRequestTimelineEyebrow}>
                       APPUNTAMENTO COMPLETO · {selectedLogicalKindLabel}
@@ -6490,9 +6507,9 @@ disabled={choiceDisabled}
                   </Text>
                 </View>
                 <View style={styles.requestDetailField}>
-                  <Text style={styles.requestDetailLabel}>Storico</Text>
+                  <Text style={styles.requestDetailLabel}>Origine</Text>
                   <Text style={styles.requestDetailValue}>
-                    {selectedRequest.origine ?? "frontend"}
+                    {selectedRequest.origine === "backoffice" ? "Inserita dal salone" : "Prenotazione online"}
                   </Text>
                 </View>
               </View>
@@ -6515,6 +6532,7 @@ disabled={choiceDisabled}
                   pressScale={0.97}
                   pressOpacity={0.95}
                 >
+                  <Ionicons name="call-outline" size={16} color={premiumRequestsPalette.actionText} />
                   <Text style={styles.requestDetailPrimaryActionText}>
                     Chiama
                   </Text>
@@ -6527,6 +6545,7 @@ disabled={choiceDisabled}
                   pressScale={0.97}
                   pressOpacity={0.95}
                 >
+                  <Ionicons name="logo-whatsapp" size={16} color={premiumRequestsPalette.ink} />
                   <Text style={styles.requestDetailSecondaryActionText}>
                     WhatsApp
                   </Text>

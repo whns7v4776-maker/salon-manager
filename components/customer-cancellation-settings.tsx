@@ -50,7 +50,7 @@ export function CustomerCancellationSettings({ salonCode, premiumNative=false }:
     ]} note="Le richieste in attesa restano annullabili. Il salone può sempre annullare senza questo limite." />}
     <Text style={[styles.body, !NATIVE && styles.descriptionWeb]}>Scegli quanto anticipo devono rispettare i clienti per annullare un appuntamento confermato.</Text>
     {NATIVE ? controls : <View style={styles.controlsWeb}>{controls}</View>}
-    <View style={[styles.note, !NATIVE && { justifyContent: 'center', alignItems: 'center' }]}><Ionicons name="information-circle-outline" size={19} color={premiumNative?p.muted:"#64748B"} /><Text style={[styles.body, { flex: 1 }, !NATIVE && styles.centeredWeb]}>Il valore predefinito è 30 minuti. La regola vale anche per gli appuntamenti già confermati. Le richieste in attesa restano annullabili. Il salone può sempre annullare.</Text></View>
+    <View style={[styles.note, !NATIVE && { justifyContent: 'flex-start', alignItems: 'flex-start' }]}><Ionicons name="information-circle-outline" size={19} color={premiumNative?p.muted:"#64748B"} /><Text style={[styles.body, { flex: 1 }, !NATIVE && styles.centeredWeb]}>Il valore predefinito è 30 minuti. La regola vale anche per gli appuntamenti già confermati. Le richieste in attesa restano annullabili. Il salone può sempre annullare.</Text></View>
     {draft !== null && draft !== policy.minutes && <HapticTouchable accessibilityRole="button" disabled={saving || !policy.ready} onPress={save} style={styles.save}>{saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveText}>Salva regola</Text>}</HapticTouchable>}
     {!!policy.error && <HapticTouchable accessibilityRole="button" onPress={() => { void policy.refresh(); }} style={styles.error}><Ionicons name="refresh-outline" size={18} color="#9A3412" /><Text style={styles.errorText}>Caricamento non riuscito · Riprova</Text></HapticTouchable>}
     {!!message && <Text accessibilityLiveRegion="polite" style={[styles.body, saveSucceeded && styles.successText]}>{message}</Text>}
@@ -60,16 +60,16 @@ const baseCancellationStyles = StyleSheet.create({
  controlsWeb: { gap: 16, alignItems: 'stretch' },
  summaryWeb: { width: '100%', minWidth: 0, alignItems: 'center', justifyContent: 'center' },
  optionsWeb: { width: '100%', minWidth: 0, justifyContent: 'center', alignItems: 'stretch' },
- optionWeb: { flexBasis: 80, flexGrow: 1, flexShrink: 0, minWidth: 80, paddingHorizontal: 8 },
+ optionWeb: { flexBasis: 60, flexGrow: 1, flexShrink: 0, minWidth: 60, paddingHorizontal: 6 },
  summaryHeadingWeb: { gap: 8, alignItems: 'center' },
- centeredWeb: { textAlign: 'center', maxWidth: '100%' },
- descriptionWeb: { textAlign: 'center', alignSelf: 'center', width: '100%', maxWidth: 760, marginTop: -6 },
+ centeredWeb: { textAlign: 'left', maxWidth: '100%' },
+ descriptionWeb: { textAlign: 'left', alignSelf: 'stretch', width: '100%', maxWidth: 760, marginTop: -6 },
  summaryHeadingNative: { alignItems: 'flex-start', gap: 3 },
  successText: { color: '#166534' },
  card: { marginBottom: NATIVE ? 16 : 22, padding: NATIVE ? 16 : 22, gap: NATIVE ? 12 : 16, borderRadius: 26, borderWidth: 1, borderColor: '#E5EAF1', backgroundColor: '#fff' },
- header: { paddingRight: NATIVE ? 24 : 0, flexDirection: 'row', alignItems: 'center', gap: NATIVE ? 10 : 12, ...(!NATIVE ? { width: '100%', justifyContent: 'center' } : {}) },
+ header: { paddingRight: NATIVE ? 24 : 0, flexDirection: 'row', alignItems: 'center', gap: NATIVE ? 10 : 12, ...(!NATIVE ? { width: '100%', justifyContent: 'flex-start', paddingRight: 52 } : {}) },
  icon: { width: 44, height: 44, borderRadius: 15, backgroundColor: '#F1F5F9', alignItems: 'center', justifyContent: 'center', ...(NATIVE ? { width: 34, height: 34, borderRadius: 12 } : {}) },
- title: { fontSize: NATIVE ? 17 : 20, fontWeight: NATIVE ? '700' : '800', color: '#182033', ...(NATIVE ? { flex: 1 } : { flexGrow: 0, flexShrink: 1, flexBasis: 'auto' as const, width: 'auto' as const, textAlign: 'center' as const }) },
+ title: { fontSize: NATIVE ? 17 : 20, fontWeight: NATIVE ? '700' : '800', color: '#182033', ...(NATIVE ? { flex: 1 } : { flexGrow: 0, flexShrink: 1, flexBasis: 'auto' as const, width: 'auto' as const, textAlign: 'left' as const }) },
  body: { fontSize: 13, lineHeight: 20, color: '#64748b', ...(NATIVE ? { fontSize: 12, lineHeight: 17, fontWeight: '500' as const } : {}) },
  summary: { backgroundColor: '#F6F8FB', borderRadius: 20, padding: 20, gap: 8, borderWidth: 1, borderColor: '#EDF1F6', ...(NATIVE ? { padding: 12, gap: 6, borderRadius: 14 } : {}) },
  eyebrow: { fontSize: 10, letterSpacing: 1.1, fontWeight: '800', color: '#64748B', ...(NATIVE ? { fontSize: 10, letterSpacing: 0, fontWeight: '600' as const } : {}) },

@@ -78,20 +78,22 @@ export function nativeRequestsStyles<T extends Record<string,any>>(base:T,p:Pale
  patch('nativeSectionCountText',{fontSize:12,fontWeight:'600',color:p.muted,fontVariant:['tabular-nums']});
  patch('nativeSectionUnread',{fontSize:11,lineHeight:16,color:p.night?'#D7C49D':'#80633C',marginTop:2});
  patch('nativeSectionChevron',{width:36,height:44,alignItems:'center',justifyContent:'center',flexShrink:0});
- patch('compactRequestMeta',{color:p.muted,fontSize:12,lineHeight:18});
- const lavender=p.night?'rgba(157,136,184,.12)':'rgba(232,222,242,.38)';
+ patch('compactRequestMeta',{color:p.muted,fontSize:12,lineHeight:18,fontWeight:'500'});
  const sage=p.night?'rgba(143,171,150,.16)':'rgba(218,234,220,.50)';
- patch('logicalRequestTimelineCard',{backgroundColor:lavender,borderColor:p.border,paddingHorizontal:12,paddingVertical:11,gap:5});
+ patch('logicalRequestTimelineCard',{backgroundColor:p.night?'rgba(255,255,255,.035)':'rgba(255,255,255,.45)',borderColor:p.border,paddingHorizontal:12,paddingVertical:11,gap:5});
  patch('logicalRequestTimelineHeading',{justifyContent:'flex-start',gap:8,paddingBottom:7,marginBottom:2,borderBottomWidth:StyleSheet.hairlineWidth,borderBottomColor:p.line});
  patch('logicalRequestTimelineEyebrow',{color:p.ink,fontSize:11,lineHeight:16,fontWeight:'600',letterSpacing:1,textAlign:'left'});
  patch('logicalRequestTimelineRow',{minHeight:31,gap:8});
  if(Platform.OS==='web'){patch('logicalRequestTimelineRow',{flexWrap:'wrap',alignItems:'center'});patch('logicalRequestTimelineService',{flexBasis:'50%',minWidth:0});patch('logicalRequestTimelineTime',{flexShrink:0,whiteSpace:'nowrap'});patch('logicalRequestTimelinePause',{flexShrink:0,whiteSpace:'nowrap'});}
- patch('logicalRequestTimelineDot',{width:5,height:5,backgroundColor:p.night?'#B5A4CE':'#9985B1'});
+ patch('logicalRequestTimelineDot',{width:5,height:5,backgroundColor:p.night?'#D8C29B':'#8F6D3B'});
  patch('logicalRequestTimelineService',{color:p.ink,fontSize:12,lineHeight:18,fontWeight:'500'});
  patch('logicalRequestTimelineTime',{color:p.ink,fontSize:12,lineHeight:18,fontWeight:'600',fontVariant:['tabular-nums']});
  patch('compactActionChip',{backgroundColor:p.night?'rgba(166,158,143,.13)':'rgba(236,229,217,.48)',borderWidth:StyleSheet.hairlineWidth,borderColor:p.border,minHeight:34,borderRadius:11});
- patch('compactActionChip',{flexGrow:0,flexBasis:'auto',alignSelf:'flex-start',minHeight:Platform.OS==='web'?36:44,paddingHorizontal:14});
- patch('compactActionChipText',{fontSize:12,lineHeight:17});
+ // Contact actions share the row equally, icon + label, like the rest of the back office.
+ patch('compactActionChip',{flex:1,flexGrow:1,flexBasis:0,alignSelf:'stretch',flexDirection:'row',gap:7,minHeight:Platform.OS==='web'?38:44,paddingHorizontal:14,borderRadius:13});
+ patch('compactActionsRow',{flexWrap:'nowrap',gap:8,marginTop:10});
+ for(const key of ['requestDetailPrimaryAction','requestDetailSecondaryAction'])patch(key,{flexDirection:'row',alignItems:'center',justifyContent:'center',gap:8});
+ patch('compactActionChipText',{fontSize:13,lineHeight:18,fontWeight:'600'});
  patch('compactActionChipWhatsapp',{backgroundColor:sage,borderColor:p.border});
  patch('compactActionChipWhatsappText',{color:p.night?'#C3D8C6':'#416A4B'});
  const activeFill=p.night?'rgba(131,169,143,.18)':'rgba(216,234,220,.65)';
@@ -154,7 +156,14 @@ export function nativeRequestsStyles<T extends Record<string,any>>(base:T,p:Pale
   for(const key of ['requestDetailPrimaryAction','requestDetailSecondaryAction'])patch(key,{flex:undefined,flexGrow:0,flexShrink:1,flexBasis:'auto',paddingHorizontal:16,alignSelf:'flex-start'});
   patch('requestDetailActions',{flexWrap:'wrap'});
  }
- if(Platform.OS==='web'){patch('autoAcceptToggle',{alignSelf:'center',width:'auto',minWidth:0,maxWidth:'100%',paddingHorizontal:20,paddingVertical:10});patch('autoAcceptToggleText',{width:'auto',maxWidth:'100%',flexShrink:1});}
+ if(Platform.OS==='web'){patch('autoAcceptToggle',{alignSelf:'flex-start',width:'auto',minWidth:0,maxWidth:'100%',paddingHorizontal:20,paddingVertical:10});patch('autoAcceptToggleText',{width:'auto',maxWidth:'100%',flexShrink:1});}
+ // Rule cards read left-aligned like every other back-office card; the info button keeps the top-right corner.
+ patch('autoAcceptCard',{alignItems:'stretch'});
+ patch('autoAcceptHeaderRow',{alignItems:'flex-start',justifyContent:'flex-start'});
+ patch('autoAcceptHeaderTextWrap',{alignItems:'flex-start',paddingRight:44});
+ patch('autoAcceptTitle',{textAlign:'left',paddingHorizontal:0,marginBottom:4});
+ patch('autoAcceptHint',{textAlign:'left',fontWeight:'400',color:p.muted});
+ for(const key of ['autoAcceptLiveRow','autoAcceptBadge'])patch(key,{alignSelf:'flex-start'});
  if(result.archiveMonthList)Object.assign(result.archiveMonthList,{backgroundColor:'transparent',padding:0,gap:8,borderWidth:0});
  if(result.archiveMonthSection)Object.assign(result.archiveMonthSection,{backgroundColor:p.field,borderWidth:1,borderColor:p.border,borderRadius:14,overflow:'hidden'});
  if(result.archiveMonthHeader)Object.assign(result.archiveMonthHeader,{paddingHorizontal:14,paddingVertical:12,minHeight:54,backgroundColor:'transparent'});

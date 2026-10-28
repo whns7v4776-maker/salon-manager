@@ -28,12 +28,12 @@ export function RequestsPremiumWorkspace({navigation,renderContent,rules,autoAcc
  const surface={borderWidth:1,borderColor:p.border,borderRadius:18,backgroundColor:p.night?'rgba(35,39,40,.73)':'rgba(255,253,249,.65)'};
  const close=()=>{setRulesOpen(false);if(fromSettings){setFromSettings(false);router.navigate('/settings' as any);}};
  return <View style={{gap:14}}>
-  <View style={[surface,{flexDirection:'row',flexWrap:'wrap',alignSelf:'flex-start',padding:4,borderRadius:22}]}>
-   {['Prenotazioni','Regole di prenotazione'].map((label,i)=><Pressable key={label} accessibilityRole="tab" accessibilityState={{selected:i===0&&!rulesOpen||i===1&&rulesOpen}} onPress={()=>setRulesOpen(i===1)} style={{paddingVertical:10,paddingHorizontal:18,borderRadius:18,backgroundColor:(i===0&&!rulesOpen||i===1&&rulesOpen)?p.action:'transparent'}}><Text style={{fontSize:12,fontWeight:'600',color:(i===0&&!rulesOpen||i===1&&rulesOpen)?p.actionText:p.ink}}>{label}</Text></Pressable>)}
+  <View style={[surface,{flexDirection:'row',flexWrap:wide?'wrap':'nowrap',alignSelf:wide?'flex-start':'stretch',padding:4,borderRadius:22}]}>
+   {['Prenotazioni','Regole di prenotazione'].map((label,i)=><Pressable key={label} accessibilityRole="tab" accessibilityState={{selected:i===0&&!rulesOpen||i===1&&rulesOpen}} onPress={()=>setRulesOpen(i===1)} style={{flex:wide?undefined:1,alignItems:'center',paddingVertical:10,paddingHorizontal:wide?18:10,borderRadius:18,backgroundColor:(i===0&&!rulesOpen||i===1&&rulesOpen)?p.action:'transparent'}}><Text style={{fontSize:12,fontWeight:'600',color:(i===0&&!rulesOpen||i===1&&rulesOpen)?p.actionText:p.ink}}>{label}</Text></Pressable>)}
   </View>
   <View style={{flexDirection:wide?'row':'column',gap:14,alignItems:'stretch'}}>
    <View style={[surface,{width:wide?310:'100%',overflow:'visible',padding:6,alignSelf:wide?'flex-start':'stretch'},wide?({position:'sticky',top:16} as any):null]}>{navigation}</View>
-   <View style={[surface,{flex:wide?1:undefined,minWidth:0,minHeight:wide?340:120,padding:16}]}>{renderContent()}</View>
+   <View style={[surface,{flex:wide?1:undefined,minWidth:0,minHeight:wide?340:120,padding:wide?16:8}]}>{renderContent()}</View>
   </View>
   <View style={[surface,{padding:16,gap:14}]}>
    <Pressable {...({dataSet:{premiumHoverScope:"container"}} as any)} accessibilityRole="button" accessibilityLabel="Modifica regole di prenotazione" accessibilityState={{expanded:rulesOpen}} onPress={()=>setRulesOpen(true)} style={{flexDirection:'row',alignItems:'center',gap:12}}>
