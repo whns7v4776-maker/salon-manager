@@ -44,12 +44,12 @@ export function NativeMedal({icon,size=40,tint,iconSize,accent}:{icon:React.Comp
    <Defs>
     <RadialGradient id={`b${id}`} cx="35%" cy="28%" r="80%">
      <Stop offset="0" stopColor={hue} stopOpacity={n?.42:.30}/>
-     <Stop offset=".6" stopColor={hue} stopOpacity={n?.20:.22}/>
+     <Stop offset="0.6" stopColor={hue} stopOpacity={n?.20:.22}/>
      <Stop offset="1" stopColor={hue} stopOpacity={n?.32:.40}/>
     </RadialGradient>
     <LinearGradient id={`r${id}`} x1="0" y1="0" x2="0" y2="1">
      <Stop offset="0" stopColor="#FFFFFF" stopOpacity={n?.42:.95}/>
-     <Stop offset=".45" stopColor={hue} stopOpacity={n?.45:.32}/>
+     <Stop offset="0.45" stopColor={hue} stopOpacity={n?.45:.32}/>
      <Stop offset="1" stopColor={hue} stopOpacity={n?.85:.55}/>
     </LinearGradient>
     <LinearGradient id={`s${id}`} x1="0" y1="0" x2="0" y2="1">
