@@ -1423,6 +1423,13 @@ export default function HomeScreen() {
       })),
     [operatorDailyBoards]
   );
+  const nativeOperatorSummary = useMemo(() => {
+    const next = homeOperatorRows
+      .filter((row) => row.nextTime)
+      .sort((first, second) => (first.nextTime ?? '').localeCompare(second.nextTime ?? ''))[0];
+    if (next) return `${next.name} alle ${next.nextTime}`;
+    return totalOperatorOpenTasks > 0 ? `${totalOperatorOpenTasks} da chiudere` : 'Giornata libera';
+  }, [homeOperatorRows, totalOperatorOpenTasks]);
   const visibleOperatorBoards = useMemo(
     () =>
       selectedOperatorBoardId
@@ -4219,8 +4226,8 @@ admin: (showAdminPanel ? (
       pendingCash={reserveCashAmounts?'Riservato':shouldHoldDashboardSummaryMetrics?'—':dashboardPendingCashLabel}
       legacyCash={reserveCashAmounts?'Riservato':shouldHoldDashboardSummaryMetrics?'—':dashboardLegacyCashLabel}
       available={shouldHoldDashboardSummaryMetrics||premiumOperationalMetrics.occupancy===null?null:100-premiumOperationalMetrics.occupancy}
-      operatorSummary={shouldHoldOperatorInsightMetrics?'—':`${operatori.length} attivi · ${totalOperatorOpenTasks} da fare`}
-      customerSummary={shouldHoldCustomerInsightMetrics?'—':`${customerInsightBoards.reduce((t,c)=>t+c.pastAppointments,0)} passati · ${customerInsightBoards.reduce((t,c)=>t+c.futureAppointments,0)} futuri`}
+      operatorSummary={shouldHoldOperatorInsightMetrics?'—':nativeOperatorSummary}
+      customerSummary={shouldHoldCustomerInsightMetrics?'—':homeUpcomingCustomers[0]?`${homeUpcomingCustomers[0].name} · ${homeUpcomingCustomers[0].when}`:`${numeroClienti} in rubrica`}
       onOperators={openOperatorAgendaModalForAll} onCustomers={openCustomerInsightsModalForAll}
       onAgenda={()=>router.navigate('/(tabs)/agenda')} onRequests={()=>router.navigate('/(tabs)/prenotazioni')}
       onAdmin={()=>setShowAdminPanel(current=>!current)}
