@@ -1247,6 +1247,7 @@ const WEEK_PLANNER_RIGHT_CLIP_GUARD = 4;
 // griglia e del drag leggono questa costante, quindi la corsia recuperata resta
 // perfettamente allineata anche sul web.
 const WEEK_PLANNER_TIME_COL_TOTAL = IS_WEB ? 52 : 48;
+const AGENDA_SINGLE_LANE_MAX_WIDTH = 860;
 
 type AgendaDensityOption = {
   id: AgendaDensityId;
@@ -46355,7 +46356,17 @@ export default function AgendaScreen() {
           ref={weekPlannerOverlayHostRef}
           collapsable={false}
           testID={IS_WEB ? 'agenda-week-planner-overlay-host' : undefined}
-          style={styles.weekPlannerOverlayHost}
+          style={[
+            styles.weekPlannerOverlayHost,
+            // A lone operator column stretched across a wide screen is hard to
+            // read: keep it at a comfortable width. Every lane measure derives
+            // from this host's width, so drag and resize geometry follow.
+            IS_WEB && weekVisibleDates.length === 1 && agendaVisibleOperatorCount <= 1 && {
+              width: '100%',
+              maxWidth: AGENDA_SINGLE_LANE_MAX_WIDTH,
+              alignSelf: 'center',
+            },
+          ]}
           onLayout={(e) => {
             // The web table has a 1px frame on each side. Columns use its
             // inner width, otherwise even a fitting row overflows by 2px.

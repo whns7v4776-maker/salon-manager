@@ -5,7 +5,8 @@ export function agendaVisibleDays(preferred:number,operatorCount:number){
 /** A slot row has the same physical height for 5/10/15 minute schedules. */
 export function agendaSlotRowHeight(web:boolean,scale:number){
  const safeScale=Number.isFinite(scale)&&scale>0?scale:1;
- return Math.max(web?44:40,Math.round((web?60:52)*safeScale));
+ // Web rows may go down to 30px: compact cards switch to their one-line layout.
+ return Math.max(web?30:40,Math.round((web?60:52)*safeScale));
 }
 export function toggleAgendaOperator(current:string[]|null,id:string,availableIds:string[]){
  const valid=[...new Set(current?.filter(key=>availableIds.includes(key))??[])];
