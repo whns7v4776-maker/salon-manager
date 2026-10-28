@@ -1,3 +1,5 @@
+import { NativeMedal } from './owner-premium-native-home';
+import { CASH_LOCKED_PERMISSION_LABELS } from '../src/lib/cash-locked-permissions';
 import {OwnerWebPageTitle} from './owner-web-page-title';
 import { premiumSectionAccent } from "./premium-section-accent";
 import { PremiumSearchToolbar } from './ui/premium-search-toolbar';
@@ -128,20 +130,21 @@ export function CashWebWorkspace({
     refunds: "Rimborsi appuntamenti",
     settings: "Gestione Cassa",
   };
+  // Protection on + locked: day-to-day work stays available, totals/reports/settings are reserved.
+  const reserved = access.locked;
+  const allow = (key: keyof typeof access.permissions) => !reserved || access.permissions[key];
+  const visibleMovements = m.movements.filter((item: any) => (item.metodo || item.legacy) ? allow("movements") : allow("completePending"));
   const status = (item: any) =>
     item.legacy ? "Da verificare" : item.metodo ? "Incassato" : "Da incassare";
-  const statusColors = (item: any) =>
-    item.legacy
-      ? p.night
-        ? { background: "#3D3322", border: "#8D7447", ink: "#EACD91" }
-        : { background: "#EFE2C7", border: "#C6AA72", ink: "#78551E" }
+  // Quiet status: coloured dot + ink text (no tinted pills), same as Richieste.
+  const statusColors = (item: any) => {
+    const dot = item.legacy
+      ? (p.night ? "#E0B46E" : "#8A5F1E")
       : item.metodo
-        ? p.night
-          ? { background: "#19392B", border: "#3C7753", ink: "#98E0AF" }
-          : { background: "#D8EEDC", border: "#8CBA98", ink: "#196635" }
-        : p.night
-          ? { background: "#442428", border: "#8A4B50", ink: "#FFB5B5" }
-          : { background: "#F5DDDB", border: "#D49894", ink: "#A22D2D" };
+        ? (p.night ? "#9CC7A6" : "#3F7A4D")
+        : (p.night ? "#E6A9AF" : "#9A4B53");
+    return { background: "transparent", border: "transparent", ink: p.ink, dot };
+  };
   const statusBadge = (item: any) => {
     const colors = statusColors(item);
     return (
@@ -157,14 +160,13 @@ export function CashWebWorkspace({
         }}
         style={{
           alignSelf: "flex-start",
-          borderWidth: 1,
-          borderColor: colors.border,
-          borderRadius: 8,
-          paddingHorizontal: 9,
-          paddingVertical: 5,
-          backgroundColor: colors.background,
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 6,
+          paddingVertical: 4,
         }}
       >
+        <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: colors.dot }} />
         <Text
           style={{
             color: colors.ink,
@@ -321,7 +323,7 @@ export function CashWebWorkspace({
             Caricamento movimenti…
           </Text>
         ) : (
-          m.movements.map((item: any) => (
+          visibleMovements.map((item: any) => (
             <Pressable
               key={item.id}
               accessibilityRole="button"
@@ -406,7 +408,7 @@ export function CashWebWorkspace({
             </Pressable>
           ))
         )}
-        {!m.loading && !m.movements.length ? (
+        {!m.loading && !visibleMovements.length ? (
           <View style={{ padding: 28, gap: 8 }}>
             <Text style={{ color: p.ink, fontSize: 17 }}>
               Nessun movimento in questo periodo
@@ -526,16 +528,18 @@ export function CashWebWorkspace({
               false,
               "shield-checkmark-outline",
             )}
-            {access.enabled
-              ? button(
-                  "Blocca Cassa",
-                  access.onLock,
-                  false,
-                  false,
-                  "lock-closed-outline",
-                )
-              : null}
-            {button(
+            {reserved
+              ? button("Sblocca Cassa", access.onUnlock, true, false, "lock-open-outline")
+              : access.enabled
+                ? button(
+                    "Blocca Cassa",
+                    access.onLock,
+                    false,
+                    false,
+                    "lock-closed-outline",
+                  )
+                : null}
+            {reserved ? null : button(
               "Gestione Cassa",
               () => setPanel("settings"),
               false,
@@ -618,99 +622,48 @@ export function CashWebWorkspace({
         ) : null}
         {!m.disabled ? (
           <>
-            <View {...{ dataSet: { cashMetrics: "true" } }}>
-              {[
-                {
-                  label: "Incassato",
-                  amount: m.total,
-                  icon: "receipt-outline",
-                  main: true,
-                },
-                { label: "Contanti", amount: m.cash, icon: "cash-outline" },
-                { label: "Carta", amount: m.card, icon: "card-outline" },
-                {
-                  label: "Da incassare",
-                  amount: m.pending,
-                  icon: "time-outline",
-                },
-              ].map((metric) => (
-                <View
-                  key={metric.label}
-                  style={{
-                    flexDirection: "row",
-                    alignItems: "center",
-                    gap: 14,
-                    padding: 20,
-                    borderRadius: 17,
-                    borderWidth: 1,
-                    borderColor: p.border,
-                    backgroundColor: metric.main ? (p.night?"#28362E":"#E2E9DB") : surface,
-                    minHeight: 103,
-                  }}
-                >
-                  <View
-                    {...{ dataSet: { cashMetricIcon: "true" } }}
-                    style={{
-                      width: 43,
-                      height: 43,
-                      borderRadius: 14,
-                      alignItems: "center",
-                      justifyContent: "center",
-                      backgroundColor: metric.main
-                        ? "rgba(255,255,255,.10)"
-                        : metric.label === "Contanti"
-                          ? "rgba(116,140,108,.12)"
-                          : metric.label === "Carta"
-                            ? "rgba(134,116,151,.12)"
-                            : "rgba(188,145,79,.12)",
-                    }}
-                  >
-                    <Ionicons
-                      name={metric.icon as any}
-                      size={23}
-                      color={
-                        metric.main
-                          ? p.ink
-                          : metric.label === "Contanti"
-                            ? p.night
-                              ? "#AFBDA5"
-                              : "#58704E"
-                            : metric.label === "Carta"
-                              ? p.night
-                                ? "#C3B0CE"
-                                : "#776184"
-                              : p.night
-                                ? "#CDB58D"
-                                : "#987746"
-                      }
-                    />
-                  </View>
-                  <View style={{ flex: 1, gap: 6 }}>
-                    <Text
-                      style={{
-                        fontSize: 13,
-                        color: metric.main ? p.ink : p.muted,
-                      }}
-                    >
-                      {metric.label}
-                    </Text>
-                    <Text
-                      {...{ dataSet: { cashMetricValue: "true" } }}
-                      style={{
-                        fontFamily: "Georgia",
-                        fontSize: 28,
-                        lineHeight: 35,
-                        color:p.ink,
-                      }}
-                    >
-                      {m.loading ? "—" : formatCash(metric.amount)}
-                    </Text>
-                  </View>
+            {!allow("totals") ? (
+              <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 14, padding: 18, borderRadius: 19, borderWidth: 1, borderColor: p.night ? p.border : "rgba(122,100,70,.2)", backgroundColor: p.night ? "rgba(38,41,43,.92)" : "rgba(255,253,250,.9)" }}>
+                <NativeMedal icon="lock-closed-outline" size={44} iconSize={20} accent={p.night ? "#D6B27A" : "#8C6A35"} />
+                <View style={{ flex: 1, minWidth: 220, gap: 3 }}>
+                  <Text style={{ fontSize: 16, fontWeight: "600", color: p.ink }}>Totali e report riservati</Text>
+                  <Text style={{ fontSize: 13, lineHeight: 19, color: p.muted }}>Il titolare ha scelto cosa resta disponibile con la Cassa bloccata. Sblocca per vedere tutto.</Text>
                 </View>
-              ))}
+                {button("Sblocca", access.onUnlock, true, false, "lock-open-outline")}
+              </View>
+            ) : (
+            <>
+            {/* Summary like Richieste/Home: hero amount, then three quiet stats with medallions. */}
+            <View style={{ borderWidth: 1, borderColor: p.night ? p.border : "rgba(122,100,70,.2)", borderRadius: 19, backgroundColor: p.night ? "rgba(38,41,43,.92)" : "rgba(255,253,250,.9)", padding: 20, gap: 16, shadowColor: "#000", shadowOpacity: p.night ? 0.3 : 0.07, shadowRadius: 12, shadowOffset: { width: 0, height: 5 } }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 14 }}>
+                <NativeMedal icon="receipt-outline" size={48} iconSize={22} accent={p.night ? "#D6B27A" : "#8C6A35"} />
+                <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+                  <Text style={{ fontSize: 13, color: p.muted }}>Incassato · {m.periodLabel}</Text>
+                  <Text style={{ fontSize: 34, lineHeight: 40, fontWeight: "600", letterSpacing: -1, color: p.ink, fontVariant: ["tabular-nums"] }}>{m.loading ? "—" : formatCash(m.total)}</Text>
+                </View>
+              </View>
+              <View style={{ height: 1, backgroundColor: p.line }} />
+              <View style={{ flexDirection: "row", flexWrap: "wrap", rowGap: 14 }}>
+                {([
+                  { label: "Contanti", amount: m.cash, icon: "cash-outline", accent: ["#86C2BE", "#3E7C7A"] },
+                  { label: "Carta", amount: m.card, icon: "card-outline", accent: ["#BFA6D4", "#7A5C8E"] },
+                  { label: "Da incassare", amount: m.pending, icon: "time-outline", accent: ["#D99A92", "#A35A52"] },
+                ] as const).map((metric, i) => (
+                  <View key={metric.label} style={{ flexGrow: 1, flexBasis: 180, minWidth: 0, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 12, paddingHorizontal: 12, borderLeftWidth: i ? 1 : 0, borderLeftColor: p.line }}>
+                    <NativeMedal icon={metric.icon} size={40} iconSize={18} accent={p.night ? metric.accent[0] : metric.accent[1]} />
+                    <View style={{ minWidth: 0 }}>
+                      <Text style={{ fontSize: 22, lineHeight: 28, fontWeight: "600", color: p.ink, fontVariant: ["tabular-nums"] }}>{m.loading ? "—" : formatCash(metric.amount)}</Text>
+                      <Text style={{ fontSize: 12, color: p.muted }}>{metric.label}</Text>
+                    </View>
+                  </View>
+                ))}
+              </View>
             </View>
+            </>
+            )}
             <View {...{ dataSet: { cashMain: "true" } }}>
               {movementsPanel()}
+              {allow("newPayment") ? (
               <View
                 style={{
                   padding: 22,
@@ -721,8 +674,8 @@ export function CashWebWorkspace({
                   backgroundColor: surface,
                 }}
               >
-                <View style={{ ...premiumSectionAccent(p.night, 0), flexDirection: "row", alignItems: "center", gap: 12, margin: -10, marginBottom: 0 }}>
-                  <Ionicons name="add-circle-outline" size={26} color={p.night ? "#AAC8B0" : "#42664C"} />
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+                  <NativeMedal icon="add-outline" size={42} iconSize={20} accent={p.night ? "#D6B27A" : "#8C6A35"} />
                   {heading("Nuovo incasso")}
                 </View>
                 <Text style={{ fontSize: 13, lineHeight: 20, color: p.muted }}>
@@ -817,7 +770,9 @@ export function CashWebWorkspace({
                   "add-outline",
                 )}
               </View>
+              ) : null}
             </View>
+            {!allow("reports") ? null : (
             <View
               style={{
                 padding: 22,
@@ -873,6 +828,7 @@ export function CashWebWorkspace({
                 </Text>
               ) : null}
             </View>
+            )}
           </>
         ) : (
           <View
@@ -892,6 +848,34 @@ export function CashWebWorkspace({
             {button("Gestione Cassa", () => setPanel("settings"))}
           </View>
         )}
+        {access.enabled && !reserved ? (
+          <View style={{ padding: 20, gap: 14, borderRadius: 19, borderWidth: 1, borderColor: p.night ? p.border : "rgba(122,100,70,.2)", backgroundColor: p.night ? "rgba(38,41,43,.92)" : "rgba(255,253,250,.9)" }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+              <NativeMedal icon="shield-checkmark-outline" size={42} iconSize={19} accent={p.night ? "#D6B27A" : "#8C6A35"} />
+              <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+                {heading("Con la Cassa bloccata si può…")}
+                <Text style={{ fontSize: 13, lineHeight: 19, color: p.muted }}>Scegli cosa resta disponibile ai collaboratori quando blocchi la Cassa su questo dispositivo. Le impostazioni restano sempre riservate.</Text>
+              </View>
+            </View>
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10 }}>
+              {CASH_LOCKED_PERMISSION_LABELS.map((item) => {
+                const on = access.permissions[item.key];
+                return (
+                  <Pressable key={item.key} accessibilityRole="switch" accessibilityState={{ checked: on }} onPress={() => access.setPermission(item.key, !on)}
+                    style={{ flexGrow: 1, flexBasis: 260, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 12, padding: 14, borderRadius: 14, borderWidth: 1, borderColor: on ? (p.night ? "#9C8461" : "#7A6446") : (p.night ? p.border : "rgba(122,100,70,.2)"), backgroundColor: on ? (p.night ? "rgba(156,132,97,.12)" : "rgba(122,100,70,.07)") : "transparent" }}>
+                    <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+                      <Text style={{ fontSize: 14, fontWeight: "600", color: p.ink }}>{item.title}</Text>
+                      <Text style={{ fontSize: 12, lineHeight: 17, color: p.muted }}>{item.hint}</Text>
+                    </View>
+                    <View style={{ width: 44, height: 26, borderRadius: 13, padding: 3, justifyContent: "center", backgroundColor: on ? (p.night ? "#9C8461" : "#7A6446") : (p.night ? "#3A3D3E" : "#D8CFC2") }}>
+                      <View style={{ width: 20, height: 20, borderRadius: 10, backgroundColor: "#FFFDF8", alignSelf: on ? "flex-end" : "flex-start" }} />
+                    </View>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+        ) : null}
         <View {...{ dataSet: { cashTools: "true" } }}>
           {[
             [
@@ -930,7 +914,7 @@ export function CashWebWorkspace({
               "Riepilogo dei rimborsi e degli stati",
               "return-down-back-outline",
             ],
-          ].map(([id, title, copy, icon], index) => (
+          ].filter(([id]) => !reserved || (id === "payments" && allow("payments"))).map(([id, title, copy, icon], index) => (
             <View
               key={id}
               style={{

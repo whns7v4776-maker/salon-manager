@@ -7,11 +7,12 @@ import * as SecureStore from 'expo-secure-store';
 import * as LocalAuthentication from 'expo-local-authentication';
 import {useCashDevicePrivacy,loadNativeCashPrivacy,nativeCashKey} from '../src/lib/cash-device-privacy.native';
 import {verifyCashOwnerPassword} from '../src/lib/cash-owner-verification';
+import {useCashLockedPermissions,type CashLockedPermissions} from '../src/lib/cash-locked-permissions';
 import {useAccessAppearance} from './access-premium';
 import {NativePremiumScope,NativeReadableText as Text,NativeSectionHeader} from './owner-native-premium';
 import {NativeSettingsPopup} from './native-settings-popup';
 
-export type CashAccessControls={enabled:boolean;onConfigure:()=>void;onLock:()=>void};
+export type CashAccessControls={enabled:boolean;locked:boolean;permissions:CashLockedPermissions;setPermission:(key:keyof CashLockedPermissions,value:boolean)=>void;onConfigure:()=>void;onLock:()=>void;onUnlock:()=>void};
 export function CashDeviceGate({scope,email,active,children}:{scope:string;email:string;active:boolean;children:(access:CashAccessControls)=>React.ReactNode}) {
   const {requestOwnerPasswordReset}=useAppContext();
   const [recoveryOpen,setRecoveryOpen]=useState(false),[recoveryMessage,setRecoveryMessage]=useState('');
@@ -24,6 +25,7 @@ export function CashDeviceGate({scope,email,active,children}:{scope:string;email
   };
   const {palette:p}=useAccessAppearance();
   const {enabled,setEnabled}=useCashDevicePrivacy(scope);
+  const {permissions,setPermission}=useCashLockedPermissions(scope);
   const [unlockedScope,setUnlockedScope]=useState<string|null>(null);
   const [intent,setIntent]=useState<'unlock'|'settings'|'enroll'|null>(null);
   const [password,setPassword]=useState(''),[error,setError]=useState(''),[busy,setBusy]=useState(false);
@@ -69,9 +71,10 @@ export function CashDeviceGate({scope,email,active,children}:{scope:string;email
     finally {busyRef.current=false;setBusy(false);setPassword('');}
   };
   const button=(label:string,action:()=>void,disabled=false)=><Pressable accessibilityRole="button" accessibilityLabel={label} onPress={action} disabled={disabled||busy} style={{minHeight:46,padding:13,borderRadius:13,borderWidth:1,borderColor:p.border,backgroundColor:p.action,alignItems:'center',opacity:disabled||busy?.5:1}}><Text style={{color:p.actionText,fontSize:14,fontWeight:'500'}}>{label}</Text></Pressable>;
-  const locked=enabled!==false&&!unlocked;
+  // Only an unknown setting blocks the page; a locked Cassa stays usable in reserved mode.
+  const locked=enabled===null;
   return <NativePremiumScope.Provider value={true}>
-    {locked?<View style={{flex:1,padding:20,paddingTop:54,gap:18}}><NativeSectionHeader title="Cassa"/><Ionicons name="lock-closed-outline" size={34} color={p.ink}/><Text style={{fontSize:21,lineHeight:28,color:p.ink}}>Riservata al titolare</Text><Text style={{fontSize:14,lineHeight:21,color:p.muted}}>Sblocca per consultare incassi e movimenti. Una volta aperta, la Cassa resta disponibile finché premi Blocca Cassa.</Text>{enabled===null?<><ActivityIndicator color={p.ink}/>{button('Riprova verifica accesso',()=>{void loadNativeCashPrivacy(scope).catch(e=>setError(e instanceof Error?e.message:'Verifica non disponibile.'));})}</>:<>{button('Sblocca con password',()=>open('unlock'))}{biometric.available&&biometric.enrolled?button('Sblocca con Face ID o impronta',()=>{open('unlock');void verify(true);}):null}</>}{error?<Text accessibilityRole="alert" style={{color:p.night?'#F1B5B5':'#9C3939'}}>{error}</Text>:null}</View>:children({enabled:enabled===true,onConfigure:()=>open('settings'),onLock:()=>setUnlockedScope(null)})}
+    {locked?<View style={{flex:1,padding:20,paddingTop:54,gap:18}}><NativeSectionHeader title="Cassa"/><Ionicons name="lock-closed-outline" size={34} color={p.ink}/><Text style={{fontSize:21,lineHeight:28,color:p.ink}}>Riservata al titolare</Text><Text style={{fontSize:14,lineHeight:21,color:p.muted}}>Sblocca per consultare incassi e movimenti. Una volta aperta, la Cassa resta disponibile finché premi Blocca Cassa.</Text>{enabled===null?<><ActivityIndicator color={p.ink}/>{button('Riprova verifica accesso',()=>{void loadNativeCashPrivacy(scope).catch(e=>setError(e instanceof Error?e.message:'Verifica non disponibile.'));})}</>:<>{button('Sblocca con password',()=>open('unlock'))}{biometric.available&&biometric.enrolled?button('Sblocca con Face ID o impronta',()=>{open('unlock');void verify(true);}):null}</>}{error?<Text accessibilityRole="alert" style={{color:p.night?'#F1B5B5':'#9C3939'}}>{error}</Text>:null}</View>:children({enabled:enabled===true,locked:enabled===true&&!unlocked,permissions,setPermission:(key,value)=>{if(enabled!==true||unlocked)setPermission(key,value);},onUnlock:()=>open('unlock'),onConfigure:()=>open('settings'),onLock:()=>setUnlockedScope(null)})}
     {active&&intent?<NativeSettingsPopup premiumWeb compact title={intent==='settings'?'Protezione della Cassa':intent==='enroll'?'Configura sblocco biometrico':'Sblocca Cassa'} icon="shield-checkmark-outline" onClose={close}>
       <View style={{gap:16}}><Text style={{fontSize:14,lineHeight:22,color:p.muted}}>{intent==='settings'?enabled?'La protezione è attiva. Conferma la password del titolare per disattivarla.':'La protezione è facoltativa e parte disattivata. Conferma la password del titolare per attivarla su questo dispositivo.':intent==='enroll'?'Conferma la password del titolare. Il telefono proteggerà lo sblocco con Face ID o impronta.':'Inserisci la password dell’account del titolare.'}</Text>
         <Text style={{fontSize:12,lineHeight:18,color:p.muted}}>Password dell’account SalonPro · non viene creata una password separata per la Cassa.</Text>

@@ -5,13 +5,21 @@ import { Text, TextInput, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useAccessAppearance } from "./access-premium";
 import { useCashDevicePrivacy } from "../src/lib/cash-device-privacy";
+import { useCashLockedPermissions, type CashLockedPermissions } from "../src/lib/cash-locked-permissions";
 import { verifyCashOwnerPassword } from "../src/lib/cash-owner-verification";
 import { cashPasskeyStatus, verifyCashPasskey } from "../src/lib/cash-passkey";
 import { CashWebDialog } from "./cash-web-dialog";
 export type CashAccessControls = {
   enabled: boolean;
+  /** Protection on and not yet unlocked: day-to-day work stays open, totals/reports/settings are reserved. */
+  locked: boolean;
+  /** What stays available while locked (owner's choice). */
+  permissions: CashLockedPermissions;
+  /** Only meaningful while unlocked: the owner edits what a locked Cassa allows. */
+  setPermission: (key: keyof CashLockedPermissions, value: boolean) => void;
   onConfigure: () => void;
   onLock: () => void;
+  onUnlock: () => void;
 };
 export function CashDeviceGate({
   scope,
@@ -39,6 +47,7 @@ export function CashDeviceGate({
   };
   const { palette: p } = useAccessAppearance();
   const { enabled, setEnabled } = useCashDevicePrivacy(scope);
+  const { permissions, setPermission } = useCashLockedPermissions(scope);
   const [unlockedScope, setUnlockedScope] = useState<string | null>(null);
   const unlocked = unlockedScope === scope;
   const setUnlocked = useCallback(
@@ -158,7 +167,8 @@ export function CashDeviceGate({
       </Text>
     </Pressable>
   );
-  const locked = enabled === null || (enabled && !unlocked);
+  // Only the initial settings load blocks the page; a locked Cassa stays usable in reserved mode.
+  const locked = enabled === null;
   return (
     <>
       {settingsOnly ? null : locked ? (
@@ -207,6 +217,10 @@ export function CashDeviceGate({
       ) : (
         children({
           enabled: !!enabled,
+          locked: !!enabled && !unlocked,
+          permissions,
+          setPermission: (key, value) => { if (!enabled || unlocked) setPermission(key, value); },
+          onUnlock: () => setIntent("unlock"),
           onConfigure: () => setIntent("settings"),
           onLock: () => {
             generation.current++;
