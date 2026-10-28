@@ -5151,7 +5151,7 @@ export default function ClientiScreen() {
             onTouchStart={handleClientiHeaderTouchStart}
           >
             <View style={[styles.heroCard,Platform.OS!=='web'&&{paddingBottom:0,marginBottom:3}]} >
-              <View style={{gap:14,marginBottom:16}}>
+              <View style={{gap:Platform.OS==='web'?14:12,marginBottom:16,...(Platform.OS!=='web'?{marginTop:-9}:{})}}>
                   <View style={{height:64,flexDirection:'row',alignItems:'center',justifyContent:'space-between',...(Platform.OS === 'web' || responsive.sidebar ? {display:'none' as const}: {})}}>
                     <OwnerBrandMark compact />
                     <HapticTouchable accessibilityRole="button" accessibilityLabel={customerPalette.night?'Attiva tema chiaro':'Attiva tema scuro'} onPress={toggleCustomerTheme} style={{width:36,height:36,borderRadius:18,alignItems:'center',justifyContent:'center',borderWidth:1,borderColor:customerPalette.border,backgroundColor:customerPalette.field}}>
@@ -5160,7 +5160,7 @@ export default function ClientiScreen() {
                   </View>
                   <View style={{gap:7}}>
                     <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',gap:12}}>
-                      {Platform.OS==='web'?<OwnerWebPageTitle>Clienti</OwnerWebPageTitle>:<Text accessibilityRole="header" style={{fontFamily:'Georgia',fontSize:29,lineHeight:36,color:customerPalette.ink}}>Clienti</Text>}
+                      {Platform.OS==='web'?<OwnerWebPageTitle>Clienti</OwnerWebPageTitle>:<Text accessibilityRole="header" style={{fontFamily:'Georgia',fontSize:27,lineHeight:34,letterSpacing:-.6,color:customerPalette.ink}}>Clienti</Text>}
                       <HapticTouchable onPress={toggleNewCustomerExpanded} onTouchStart={markHeaderExpandTouchStart} immediatePress accessibilityRole="button" accessibilityLabel="Nuovo cliente" style={{flexDirection:'row',alignItems:'center',gap:6,minHeight:42,paddingHorizontal:12,borderRadius:13,backgroundColor:customerPalette.action}}>
                         <Ionicons name="add" size={18} color={customerPalette.actionText}/><Text style={{fontSize:12,fontWeight:'600',color:customerPalette.actionText}}>Nuovo cliente</Text>
                       </HapticTouchable>

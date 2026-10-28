@@ -29,7 +29,8 @@ export function NativeSectionHeader({title, subtitle, action, onPress}: {
   const { palette: p, toggle } = useAccessAppearance();
   const focused = useIsFocused();
   const sidebar = useOwnerViewport()?.sidebar;
-  return <View style={{gap: 12, marginBottom: 16}}>
+  // Same rhythm as the native Home: 64pt wordmark row, tight title block.
+  return <View style={{gap: 12, marginTop: -9, marginBottom: 16}}>
     {focused ? <StatusBar barStyle={p.night ? 'light-content' : 'dark-content'}/> : null}
     {!sidebar ? <View style={{flexDirection:'row', alignItems:'center', justifyContent:'space-between', minHeight:64}}>
       <View style={{width:154, flexShrink:1}}><AccessWordmark compact/></View>
@@ -39,7 +40,7 @@ export function NativeSectionHeader({title, subtitle, action, onPress}: {
       </Pressable>
     </View> : null}
     <View style={{flexDirection:'row',flexWrap:'wrap',alignItems:'center',justifyContent:'space-between',gap:10}}>
-      <NativeReadableText accessibilityRole="header" style={{fontFamily:nativeSerif,fontSize:30,lineHeight:38,color:p.ink}}>{title}</NativeReadableText>
+      <NativeReadableText accessibilityRole="header" style={{fontFamily:nativeSerif,fontSize:27,lineHeight:34,letterSpacing:-.6,color:p.ink}}>{title}</NativeReadableText>
       {action && onPress ? <Pressable accessibilityRole="button" accessibilityLabel={action} onPress={onPress}
         style={{minHeight:44,paddingHorizontal:14,paddingVertical:11,borderRadius:13,backgroundColor:p.action,flexDirection:'row',alignItems:'center',gap:7,maxWidth:'100%'}}>
         <Ionicons name="add" size={19} color={p.actionText}/><NativeReadableText style={{fontSize:13,fontWeight:'600',color:p.actionText}}>{action}</NativeReadableText>
