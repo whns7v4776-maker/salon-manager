@@ -73,7 +73,7 @@ export function PremiumWebInteractions({night}:{night:boolean}){
  html body [data-premium-static-action="true"]:active{scale:1!important;translate:none!important;transform:none!important;}
  @media(hover:hover) and (pointer:fine){
   html body [data-premium-text-action="true"]{border-radius:12px;}
-  html body [data-premium-text-action="true"][data-premium-text-action="true"][data-premium-text-action="true"]:hover{box-shadow:inset 0 0 0 1000px ${night?'rgba(216,194,155,.12)':'rgba(155,144,125,.12)'}!important;outline:none!important;filter:none!important;background-color:transparent!important;}
+  html body [data-premium-text-action="true"][data-premium-text-action="true"][data-premium-text-action="true"]:not([aria-selected="true"]):not([aria-checked="true"]):hover{box-shadow:inset 0 0 0 1000px ${night?'rgba(216,194,155,.12)':'rgba(155,144,125,.12)'}!important;outline:none!important;filter:none!important;background-color:transparent!important;}
   html body [data-premium-text-action="true"]:hover [dir="auto"]{background:transparent!important;box-shadow:none!important;text-shadow:none!important;}
 
  }

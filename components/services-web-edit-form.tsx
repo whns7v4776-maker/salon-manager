@@ -1,4 +1,4 @@
-import { premiumSectionAccent } from './premium-section-accent';
+import { NativeMedal } from './owner-premium-native-home';
 import { PremiumSearchToolbar } from './ui/premium-search-toolbar';
 import { NativeDatePickerModal } from './ui/native-date-picker-modal';
 import { NativeTimePickerModal } from './ui/native-time-picker-modal';
@@ -16,7 +16,7 @@ export function ServiceWebField({ label, value, onChange, placeholder, unit, mul
   const { palette: p } = useAccessAppearance();
   return <PremiumSearchToolbar enabled={/cerca/i.test(label)}><View style={{ gap: 8, flex: 1, minWidth: 0 }}>
     <Text style={{ color: p.muted, fontSize: 12, lineHeight: 18 }}>{label}</Text>
-    <View style={{ flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: p.night?p.border:'#B9AE9C', borderRadius: 12, backgroundColor: p.night ? '#2B2B29' : '#EAE4DA', minHeight: 50, overflow: 'hidden' }}>
+    <View style={{ flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: p.night?p.border:'rgba(122,100,70,.26)', borderRadius: 12, backgroundColor: p.night ? '#2B2B29' : '#FFFDF9', minHeight: 50, overflow: 'hidden' }}>
       <TextInput accessibilityLabel={label} value={value} onChangeText={onChange} placeholder={placeholder} placeholderTextColor={p.muted} multiline={multiline} maxLength={maxLength} editable={!readOnly} inputMode={numeric ? 'decimal' : 'text'}
         style={{ flex: 1, minWidth: 0, width: '100%', color: p.ink, fontSize: 14, lineHeight: 22, paddingHorizontal: 15, paddingVertical: 13, ...(multiline ? { minHeight: 132, textAlignVertical: 'top' } : {}), opacity: readOnly ? .65 : 1 }} />
       {unit ? <Text style={{ color: p.muted, fontSize: 12, paddingRight: 15 }}>{unit}</Text> : null}
@@ -24,9 +24,18 @@ export function ServiceWebField({ label, value, onChange, placeholder, unit, mul
   </View></PremiumSearchToolbar>;
 }
 
+const SECTION_LOOK: [RegExp, React.ComponentProps<typeof Ionicons>['name'], string, string][] = [
+  [/servizio$/i, 'cut-outline', '#A9ABD9', '#5B5E9A'],
+  [/prezzo e durata/i, 'pricetag-outline', '#D6B27A', '#8C6A35'],
+  [/prenota/i, 'globe-outline', '#86C2BE', '#3E7C7A'],
+  [/promo/i, 'sparkles-outline', '#D69AB0', '#9A4F67'],
+  [/./, 'ellipse-outline', '#C9AA8C', '#7E6247'],
+];
 export function ServiceWebSection({ title, description, children }: { title: string; description?: string; children: React.ReactNode }) {
   const { palette: p } = useAccessAppearance();
-  return <View style={{ gap: 18, minWidth: 0 }}><View style={{ ...premiumSectionAccent(p.night,title), gap: 5 }}><Text style={{ color: p.ink, fontFamily: 'Georgia', fontSize: 22, lineHeight: 29 }}>{title}</Text>{description ? <Text style={{ color: p.muted, fontSize: 12, lineHeight: 19 }}>{description}</Text> : null}</View>{children}</View>;
+  // Section heading: coloured medallion + serif title, no tinted box (same language as Richieste/Clienti).
+  const look = SECTION_LOOK.find(([match]) => match.test(title)) ?? SECTION_LOOK[SECTION_LOOK.length - 1];
+  return <View style={{ gap: 16, minWidth: 0 }}><View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}><NativeMedal icon={look[1]} size={40} iconSize={18} accent={p.night ? look[2] : look[3]} /><View style={{ flex: 1, minWidth: 0, gap: 3 }}><Text style={{ color: p.ink, fontFamily: 'Georgia', fontSize: 21, lineHeight: 27 }}>{title}</Text>{description ? <Text style={{ color: p.muted, fontSize: 12, lineHeight: 18 }}>{description}</Text> : null}</View></View>{children}</View>;
 }
 
 type EditProps = {
@@ -47,7 +56,7 @@ export function ServicesWebEditForm(props: EditProps) {
     {React.createElement('style', null, '[data-services-edit-form] input{outline:none!important;box-shadow:none!important;}[data-service-edit-columns]{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:40px;align-items:start;}@media(max-width:760px){[data-service-edit-columns]{grid-template-columns:minmax(0,1fr);gap:28px;}}')}
     <View style={{ paddingHorizontal: 28, paddingTop: 25, paddingBottom: 22, gap: 18, borderBottomWidth: 1, borderColor: p.line }}>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16 }}>
-        <View style={{ gap: 6, flex: 1, minWidth: 0 }}><Text style={{ color: p.muted, fontSize: 10, letterSpacing: 1.8 }}>IL TUO LISTINO</Text><Text style={{ color: p.ink, fontFamily: 'Georgia', fontSize: 28, lineHeight: 35 }}>{props.title??'Modifica servizio'}</Text></View>
+        <View style={{ flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 14 }}><NativeMedal icon="cut-outline" size={46} iconSize={21} accent={p.night ? '#D6B27A' : '#8C6A35'} /><Text style={{ flex: 1, color: p.ink, fontFamily: 'Georgia', fontSize: 27, lineHeight: 34 }}>{props.title??'Modifica servizio'}</Text></View>
         <Pressable accessibilityRole="button" accessibilityLabel="Chiudi finestra" onPress={props.onClose} disabled={props.saving} style={{ width: 38, height: 38, borderWidth: 1, borderColor: p.border, borderRadius: 12, alignItems: 'center', justifyContent: 'center' }}><Ionicons name="close" size={19} color={p.ink} /></Pressable>
       </View>
       {props.headerExtra}

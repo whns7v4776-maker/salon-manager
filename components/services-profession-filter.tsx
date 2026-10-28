@@ -18,12 +18,12 @@ export function ServicesSelect({ value, entries, onChange, label, placeholder = 
   const close = () => { setAnchor(null); setHovered(null); };
   const open = () => ref.current?.measureInWindow((x, y, w, h) => { setHovered(null); setAnchor({ x, y, width: w, height: h }); });
   const selectedEntry = entries.find(entry => entry.value === value);
-  const selectedFill = p.night ? 'rgba(216,194,155,.22)' : 'rgba(52,55,53,.12)';
+  const selectedFill = p.night ? 'rgba(216,194,155,.22)' : 'rgba(122,100,70,.12)';
   const hoverFill = p.night ? 'rgba(216,194,155,.11)' : 'rgba(52,55,53,.06)';
   const menuWidth = Math.min(width - 24, Math.max(260, anchor?.width ?? 0));
   return <>
     <Pressable ref={ref} accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ expanded: !!anchor }} aria-expanded={!!anchor} onPress={open}
-      style={{ ...(fullWidth ? { width: '100%' } : { minWidth: 190, maxWidth: 280 }), minHeight: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 24, paddingHorizontal: 16, borderRadius: 12, borderWidth: 1, borderColor: p.night?p.border:'#B9AE9C', backgroundColor: Platform.OS==='web'?(p.night ? '#2B2B29' : '#D9D1C5'):p.field }}>
+      style={{ ...(fullWidth ? { width: '100%' } : { minWidth: 190, maxWidth: 280 }), minHeight: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 24, paddingHorizontal: 16, borderRadius: 12, borderWidth: 1, borderColor: p.night?p.border:'rgba(122,100,70,.26)', backgroundColor: Platform.OS==='web'?(p.night ? '#2B2B29' : '#FFFDF9'):p.field }}>
       <View style={{flex:1,minWidth:0,flexDirection:'row',alignItems:'center',gap:10}}>{selectedEntry?.color?<View style={{width:3,height:22,borderRadius:2,backgroundColor:selectedEntry.color}}/>:null}<Text style={{ color: p.ink, fontSize: 13, flexShrink: 1 }}>{selectedEntry?.label ?? placeholder}</Text></View>
       <Ionicons name="chevron-down" size={15} color={p.muted} />
     </Pressable>

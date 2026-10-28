@@ -17,7 +17,7 @@ export function ServicesEditorStyle(){
  if(Platform.OS!=='web')return null;
  return React.createElement('style',null,`
  [data-services-editor] { --editor-ink:${p.ink};--editor-muted:${p.muted};color-scheme:${p.night?'dark':'light'};background-color:${popupGlass(p).backgroundColor}!important;background-image:${popupGlass(p).backgroundImage}!important;backdrop-filter:blur(24px) saturate(110%);-webkit-backdrop-filter:blur(24px) saturate(110%);box-shadow:${popupGlass(p).boxShadow};border-color:${p.night?p.border:'#B9AE9C'}!important; }
- ${!p.night?'[data-services-editor] input,[data-services-editor] textarea{background-color:#EAE4DA!important;border-color:#B9AE9C!important;}':''}
+ ${!p.night?'[data-services-editor] input,[data-services-editor] textarea{background-color:#FFFDF9!important;border-color:rgba(122,100,70,.26)!important;}':''}
  [data-services-editor], [data-services-editor] * { scrollbar-width:thin;scrollbar-color:${p.night?'#777167 #22211F':'#A79B89 #DED7CD'}; }
  [data-services-editor]::-webkit-scrollbar,[data-services-editor] *::-webkit-scrollbar{width:8px;height:8px;background:${p.night?'#22211F':'#DED7CD'};}
  [data-services-editor]::-webkit-scrollbar-track,[data-services-editor] *::-webkit-scrollbar-track,[data-services-editor]::-webkit-scrollbar-corner,[data-services-editor] *::-webkit-scrollbar-corner{background:${p.night?'#22211F':'#DED7CD'};}
@@ -36,7 +36,7 @@ export function ServicesEditorStyle(){
 }
 export function servicesEditorStyles(base:Record<string,any>,p:{night:boolean;ink:string;muted:string;border:string;line:string;action:string;actionText:string}){
  const styles:any={};const put=(name:string,value:object)=>{if(base[name])styles[name]={...base[name],...value};};
- const field=p.night?'#33312E':'#EAE4DA';const rim=p.night?'#57524A':'#B9AE9C';const section=p.night?'#282725':'#D5CDC0';
+ const field=p.night?'#33312E':'#FFFDF9';const rim=p.night?'#57524A':'rgba(122,100,70,.26)';const section=p.night?'#282725':'rgba(255,255,255,.6)';
  for(const [name,old] of Object.entries(base)){
   const v:any=old;
   if(/HeadingCopy$|HeaderCopy$/.test(name))put(name,{alignItems:'flex-start',width:'100%',textAlign:'left'});
