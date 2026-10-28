@@ -264,7 +264,7 @@ function CustomerListRow({ board, active, onPress, first }: { board: CustomerPan
       accessibilityLabel={`Apri la scheda di ${board.customer.nome}`}
       onPress={onPress}
       pressScale={0.99}
-      style={{ flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 58, paddingVertical: 9, paddingHorizontal: 10, borderRadius: 12, borderTopWidth: first || active ? 0 : 1, borderTopColor: p.line, backgroundColor: active ? t.sand : 'transparent' }}
+      style={{ flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 58, paddingVertical: 9, paddingHorizontal: 10, borderRadius: active ? 12 : 0, borderTopWidth: first || active ? 0 : 1, borderTopColor: p.line, backgroundColor: active ? t.sand : 'transparent' }}
     >
       <Avatar name={board.customer.nome} size={36} />
       <View style={{ flex: 1, minWidth: 0 }}>

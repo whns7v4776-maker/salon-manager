@@ -41,6 +41,7 @@ function useTones() {
   return {
     p,
     avatar: p.night ? 'rgba(216,194,155,.14)' : 'rgba(232,222,205,.62)',
+    sand: p.night ? 'rgba(216,194,155,.08)' : 'rgba(240,229,209,.5)',
     hover: p.night ? 'rgba(255,255,255,.05)' : 'rgba(255,253,250,.7)',
     gold: p.night ? '#D8C29B' : '#9A7743',
     amber: p.night ? '#E3BD89' : '#7A5424',
@@ -55,7 +56,7 @@ function CardHeader({ title, icon, action, actionLabel, onAction }: {
   actionLabel: string;
   onAction: () => void;
 }) {
-  const { p, hover } = useTones();
+  const { p, avatar, sand } = useTones();
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 40 }}>
       <Ionicons name={icon} size={22} color={p.ink} />
@@ -74,7 +75,7 @@ function CardHeader({ title, icon, action, actionLabel, onAction }: {
           borderRadius: 18,
           borderWidth: 1,
           borderColor: p.border,
-          backgroundColor: state.hovered || state.pressed ? hover : p.field,
+          backgroundColor: state.hovered || state.pressed ? avatar : sand,
         })}
       >
         <Text style={{ fontSize: 13, fontWeight: '500', color: p.ink }}>{action}</Text>
@@ -112,7 +113,7 @@ function Row({ children, onPress, label, first }: { children: React.ReactNode; o
         paddingVertical: 9,
         paddingHorizontal: 8,
         marginHorizontal: -8,
-        borderRadius: 12,
+        borderRadius: state.hovered || state.pressed ? 12 : 0,
         borderTopWidth: first ? 0 : 1,
         borderTopColor: state.hovered || state.pressed ? 'transparent' : p.line,
         backgroundColor: state.hovered || state.pressed ? hover : 'transparent',
@@ -217,7 +218,7 @@ export function HomeCustomersCard({ upcoming, footer, loading, onOpenAll, onOpen
   onOpenAll: () => void;
   onOpenCustomer: (key: string) => void;
 }) {
-  const { p, hover } = useTones();
+  const { p, avatar, sand } = useTones();
   const stacked = useWindowDimensions().width < STACK_BELOW;
   return (
     <View {...webHomePart('customers')} style={{ gap: 2 }}>
@@ -237,7 +238,7 @@ export function HomeCustomersCard({ upcoming, footer, loading, onOpenAll, onOpen
           borderRadius: 14,
           borderWidth: 1,
           borderColor: p.border,
-          backgroundColor: state.hovered ? hover : p.field,
+          backgroundColor: state.hovered ? avatar : sand,
           ...(Platform.OS === 'web' ? ({ cursor: 'text' } as object) : null),
         })}
       >
