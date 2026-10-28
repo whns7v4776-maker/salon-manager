@@ -1,3 +1,4 @@
+import { ShopSwitch } from './shop-switch';
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Switch, Text, View } from "react-native";
 import { benefitOperationId } from "../../src/lib/service-packages";
@@ -187,7 +188,7 @@ export function ShopOrdersConsole({
           ).map(([key, label]) => (
             <View style={s.row} key={key}>
               <Text style={[s.label, s.grow]}>{label}</Text>
-              <Switch
+              <ShopSwitch
                 accessibilityLabel={label}
                 value={settings[key]}
                 disabled={busy}
@@ -360,7 +361,7 @@ export function ShopOrdersConsole({
           />
           <View style={s.row}>
             <Text style={[s.label, s.grow]}>Sospendi nuove assegnazioni</Text>
-            <Switch
+            <ShopSwitch
               value={!!reward.archived}
               disabled={busy}
               onValueChange={(archived) => setReward({ ...reward, archived })}

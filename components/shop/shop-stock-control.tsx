@@ -1,3 +1,4 @@
+import { ShopSwitch } from './shop-switch';
 import { ShopNavigation } from "./shop-navigation";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Platform, Switch, Text, View } from "react-native";
@@ -807,7 +808,7 @@ export function ShopStockControl({
               <Text style={[s.label, s.grow]}>
                 Scarico automatico dei servizi
               </Text>
-              <Switch
+              <ShopSwitch
                 accessibilityLabel="Scarico automatico dei prodotti usati nei servizi"
                 value={data.settings.consumption_enabled}
                 disabled={busy || !enabled}
@@ -858,7 +859,7 @@ export function ShopStockControl({
                 <Text style={[s.copy, s.grow]}>
                   Mostra anche consumi già gestiti
                 </Text>
-                <Switch
+                <ShopSwitch
                   accessibilityLabel="Mostra storico consumi"
                   value={history}
                   onValueChange={(v) => {
@@ -971,7 +972,7 @@ export function ShopStockControl({
           {searchBox("Cerca prodotto, barcode o lotto")}
           <View style={s.row}>
             <Text style={[s.copy, s.grow]}>Mostra anche lotti esauriti</Text>
-            <Switch
+            <ShopSwitch
               accessibilityLabel="Mostra lotti esauriti"
               value={history}
               onValueChange={(v) => {

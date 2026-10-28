@@ -28,10 +28,10 @@ export function OwnerPremiumSheetFrame({ title, icon, onClose, dismissDisabled, 
 [data-premium-sheet] input[role="switch"], [data-premium-sheet] input[type="checkbox"], [data-premium-sheet] input[type="radio"] { background:transparent!important; box-shadow:none!important; border:0!important; border-radius:0!important; min-height:0!important; }
 [data-premium-sheet] :focus-visible { outline:2px solid ${p.night ? '#DDC496' : '#9D845A'}!important; outline-offset:3px; }
 [data-premium-sheet] [data-premium-shop-nav] { background:var(--sheet-field)!important; border-color:var(--sheet-line)!important; border-radius:13px!important; }
-[data-premium-sheet] [data-premium-shop-nav] [role="tab"] { background:transparent!important; border:0!important; border-radius:10px; }
+[data-premium-sheet] [data-premium-shop-nav] [role="tab"] { background:transparent!important; border:1px solid transparent!important; border-radius:10px; }
 [data-premium-sheet] [data-premium-shop-nav] [role="tab"] [dir="auto"] { color:var(--sheet-muted)!important; font-size:13px; }
-[data-premium-sheet] [data-premium-shop-nav] [role="tab"][aria-selected="true"] { background:${p.action}!important; }
-[data-premium-sheet] [data-premium-shop-nav] [role="tab"][aria-selected="true"] [dir="auto"] { color:${p.actionText}!important; }
+[data-premium-sheet] [data-premium-shop-nav] [role="tab"][aria-selected="true"] { background:${p.night?'rgba(156,132,97,.16)':'rgba(122,100,70,.09)'}!important; border-color:${p.night?'#9C8461':'#7A6446'}!important; }
+[data-premium-sheet] [data-premium-shop-nav] [role="tab"][aria-selected="true"] [dir="auto"] { color:var(--sheet-ink, ${p.ink})!important; }
 [data-premium-sheet] [data-premium-home="logo-editor"] > div { background:transparent!important; border:0!important; box-shadow:none!important; }
 [data-premium-sheet] [data-premium-home="logo-editor"] > div > div { background:transparent!important; border-color:var(--sheet-line)!important; }
 [data-premium-sheet] [data-premium-home="activity-picker"] > div > [role="button"] { background:var(--sheet-field)!important; border-color:var(--sheet-line)!important; }

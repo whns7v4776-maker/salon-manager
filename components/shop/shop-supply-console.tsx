@@ -1,3 +1,4 @@
+import { ShopSwitch } from './shop-switch';
 import { ShopNavigation } from "./shop-navigation";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Switch, Text, View } from "react-native";
@@ -534,7 +535,7 @@ export function ShopSupplyConsole({
         />
         <View style={s.row}>
           <Text style={[s.label, s.grow]}>Archiviato</Text>
-          <Switch
+          <ShopSwitch
             disabled={busy}
             value={f.archived}
             onValueChange={(archived) => setSupplierForm({ ...f, archived })}
@@ -1188,7 +1189,7 @@ export function ShopSupplyConsole({
               ? "Mostra anche prodotti con scorte sufficienti"
               : "Mostra anche ordini chiusi"}
           </Text>
-          <Switch
+          <ShopSwitch
             value={all}
             onValueChange={(v) => {
               setAll(v);

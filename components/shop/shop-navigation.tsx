@@ -21,7 +21,7 @@ export function ShopNavigation<T extends string>({ items, value, onChange, disab
     scroll.current?.scrollTo({ x: Math.max(0, (positions.current[value] ?? 0) - 16), animated: true });
   }, [value]);
   return (
-    <View {...(Platform.OS === 'web' ? { dataSet: { premiumShopNav: 'true' } } : {})} style={[s.frame,{backgroundColor:p.field,borderColor:p.border}]}>
+    <View {...(Platform.OS === 'web' ? { dataSet: { premiumShopNav: 'true' } } : {})} style={[s.frame,{backgroundColor:p.night?'rgba(30,32,31,.88)':'rgba(248,245,239,.85)',borderColor:p.night?p.border:'rgba(122,100,70,.2)'}]}>
       <ScrollView ref={scroll} horizontal showsHorizontalScrollIndicator={false}
         keyboardShouldPersistTaps="handled" contentContainerStyle={s.track}>
         {items.map(([id, label, icon]) => (
@@ -34,14 +34,14 @@ export function ShopNavigation<T extends string>({ items, value, onChange, disab
             onPress={() => {
               onChange(id);
               scroll.current?.scrollTo({ x: Math.max(0, (positions.current[id] ?? 0) - 16), animated: true });
-            }} style={[s.tab, value === id && {backgroundColor:shopSectionTone(id,p.night).soft,borderWidth:1,borderColor:shopSectionTone(id,p.night).border}]}>
+            }} style={[s.tab, {borderWidth:1,borderColor:'transparent'}, value === id && {backgroundColor:p.night?'rgba(156,132,97,.16)':'rgba(122,100,70,.09)',borderColor:p.night?'#9C8461':'#7A6446'}]}>
             <Ionicons name={icon} size={18} color={shopSectionTone(id,p.night).ink} />
-            <Text style={[s.label,{color:p.muted}, value === id && {color:shopSectionTone(id,p.night).ink}]}>{label}</Text>
+            <Text style={[s.label,{color:p.muted}, value === id && {color:p.ink}]}>{label}</Text>
             {!!badges[id] && <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{width:9,height:9,borderRadius:5,backgroundColor:'#D94855',borderWidth:1,borderColor:'#FFFFFF'}}/>}
           </HapticTouchable>
         ))}
       </ScrollView>
-      <View pointerEvents="none" style={[s.edge,{backgroundColor:p.field}]}><Ionicons name="chevron-forward" size={13} color="#8196A3" /></View>
+      <View pointerEvents="none" style={[s.edge,{backgroundColor:p.night?'rgba(30,32,31,.96)':'rgba(248,245,239,.96)'}]}><Ionicons name="chevron-forward" size={13} color={p.muted} /></View>
     </View>
   );
 }

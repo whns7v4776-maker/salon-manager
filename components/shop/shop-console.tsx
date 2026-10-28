@@ -1,3 +1,5 @@
+import { NativeMedal } from '../owner-premium-native-home';
+import { ShopSwitch } from './shop-switch';
 import { PremiumChoiceRow } from '../ui/premium-choice-row';
 import { PremiumSectionHeading } from '../ui/premium-section-heading';
 import { PremiumSearchToolbar } from '../ui/premium-search-toolbar';
@@ -416,7 +418,7 @@ export function ShopConsole({
           premiumWeb
           title={title}
           icon="bag-handle-outline"
-          iconTone={shopSectionTone("orders")}
+          iconAccent={premiumPalette.night ? "#D69AB0" : "#9A4F67"}
           dismissDisabled={busy}
           onClose={() => {
             if (!busy) {
@@ -615,7 +617,7 @@ export function ShopConsole({
                 {form.data.purpose !== "professional" && (
                   <View style={s.between}>
                     <Text style={s.copy}>Pubblica nello shop cliente</Text>
-                    <Switch
+                    <ShopSwitch
                       value={form.data.published}
                       disabled={busy}
                       onValueChange={(published) =>
@@ -627,7 +629,7 @@ export function ShopConsole({
                 {form.product ? (
                   <View style={s.between}>
                     <Text style={s.copy}>Archiviato · storico conservato</Text>
-                    <Switch
+                    <ShopSwitch
                       value={form.data.archived}
                       disabled={busy}
                       onValueChange={(v) =>
@@ -885,7 +887,7 @@ export function ShopConsole({
                   <Text style={[s.copy, { flex: 1 }]}>
                     Prodotto integro e nuovamente vendibile
                   </Text>
-                  <Switch
+                  <ShopSwitch
                     disabled={busy}
                     value={restock}
                     onValueChange={setRestock}
@@ -1041,11 +1043,7 @@ export function ShopConsole({
                           </Text>
                           <Text style={s.title}>Prodotti e scorte</Text>
                         </View>
-                        <Ionicons
-                          name="cube-outline"
-                          size={30}
-                          color="#285B78"
-                        />
+                        <NativeMedal icon="cube-outline" size={46} iconSize={21} accent={premiumPalette.night ? "#86C2BE" : "#3E7C7A"} />
                       </View>
                       <Text style={s.copy}>
                         Vendite in salone, consumi e movimenti in un unico
@@ -1059,7 +1057,7 @@ export function ShopConsole({
                         ? "Modulo attivo"
                         : "Modulo disattivato"}
                     </Text>
-                    <Switch
+                    <ShopSwitch
                       accessibilityLabel="Attiva Shop e magazzino"
                       disabled={busy}
                       value={data.settings.enabled}
@@ -1119,21 +1117,29 @@ export function ShopConsole({
                 {mode === "overview" ? (
                   <>
                     <View style={s.wrap}>
-                      {[
-                        [data.summary.products, "Prodotti attivi"],
-                        [data.summary.low, "Da controllare"],
-                      ].map(([value, label]) => (
-                        <View key={label} style={[s.card, s.column]}>
-                          <Text style={s.total}>{value}</Text>
-                          <Text style={s.copy}>{label}</Text>
+                      {([
+                        [data.summary.products, "Prodotti attivi", "pricetag-outline", ["#BFA6D4", "#7A5C8E"]],
+                        [data.summary.low, "Da controllare", "alert-circle-outline", ["#D99A92", "#A35A52"]],
+                      ] as const).map(([value, label, icon, accent]) => (
+                        <View key={label} style={[s.card, s.column, { flexDirection: "row", alignItems: "center", gap: 14 }]}>
+                          <NativeMedal icon={icon} size={38} iconSize={17} accent={premiumPalette.night ? accent[0] : accent[1]} />
+                          <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+                            <Text style={s.total}>{value}</Text>
+                            <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8} style={s.copy}>{label}</Text>
+                          </View>
                         </View>
                       ))}
                     </View>
                     <View style={s.card}>
-                      <Text style={s.label}>Costo delle scorte da vendere</Text>
-                      <Text style={s.total}>
-                        {shopMoney(data.summary.retail_cost_cents)}
-                      </Text>
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 14 }}>
+                        <NativeMedal icon="wallet-outline" size={44} iconSize={20} accent={premiumPalette.night ? "#D6B27A" : "#8C6A35"} />
+                        <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+                          <Text style={s.label}>Costo delle scorte da vendere</Text>
+                          <Text style={s.total}>
+                            {shopMoney(data.summary.retail_cost_cents)}
+                          </Text>
+                        </View>
+                      </View>
                       <Text style={s.copy}>
                         Stima al costo attuale del catalogo. Non è una
                         valorizzazione fiscale del magazzino.
@@ -1147,12 +1153,12 @@ export function ShopConsole({
                         ["control", "cube-outline", "Magazzino", "Inventario, consumi e scadenze"],
                       ] as const).map(([destination, icon, label, description]) => (
                         <HapticTouchable key={destination} accessibilityRole="button"
-                          accessibilityLabel={`${label}${shopSectionHasAttention(orderAttention, destination) ? ", attività da gestire" : ""}`} onPress={() => setMode(destination)} style={s.quickCard}>
-                          <View style={[s.quickIcon,{backgroundColor:shopSectionTone(destination).soft}]}><Ionicons name={icon} size={22} color={shopSectionTone(destination).ink} /><ShopAttentionDot active={shopSectionHasAttention(orderAttention, destination)}/></View>
+                          accessibilityLabel={`${label}${shopSectionHasAttention(orderAttention, destination) ? ", attività da gestire" : ""}`} onPress={() => setMode(destination)} {...(Platform.OS === "web" ? { dataSet: { premiumHoverCard: "true" } } : {})} style={[s.quickCard, { borderColor: premiumPalette.night ? premiumPalette.border : "rgba(122,100,70,.2)", backgroundColor: premiumPalette.night ? "rgba(30,32,31,.88)" : "rgba(248,245,239,.85)" }]}>
+                          <View style={{ alignSelf: "flex-start" }}><NativeMedal icon={icon} size={42} iconSize={19} accent={({ products: ["#BFA6D4", "#7A5C8E"], orders: ["#D6B27A", "#8C6A35"], supply: ["#C9AA8C", "#7E6247"], control: ["#9DBAD6", "#4D6E8F"] } as Record<string, string[]>)[destination][premiumPalette.night ? 0 : 1]} /><ShopAttentionDot active={shopSectionHasAttention(orderAttention, destination)}/></View>
                           <Text style={s.label}>{label}</Text>
                           <Text style={s.meta}>{description}</Text>
                           {destination === "orders" ? <ShopOrderAttention value={orderAttention}/> : null}
-                          <Ionicons name="arrow-forward" size={18} color="#285B78" />
+                          <Ionicons name="arrow-forward" size={18} color={premiumPalette.muted} />
                         </HapticTouchable>
                       ))}
                     </View>
@@ -1192,7 +1198,7 @@ export function ShopConsole({
                     </View>
                     <View style={s.between}>
                       <Text style={s.copy}>Mostra archivio</Text>
-                      <Switch
+                      <ShopSwitch
                         value={archived}
                         onValueChange={(v) => {
                           setArchived(v);
