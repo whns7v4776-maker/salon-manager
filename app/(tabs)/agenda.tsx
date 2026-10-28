@@ -48360,7 +48360,7 @@ accessibilityHint={
                                             }
                                             disabled={!laneSalonCanQuickBook}
                                           >
-{!isLunchBreakSlot && (isPastFreeSlot || isClosedDay) && rowIndex === 0 ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaStateLabel label={isClosedDay?'Chiuso':'Passato'} action={laneSalonCanQuickBook}/></View>:null}
+{!isLunchBreakSlot && (isPastFreeSlot || isClosedDay) ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaStateLabel label={isClosedDay?'Chiuso':'Passato'} action={laneSalonCanQuickBook}/></View>:null}
                                             {laneDragPreview &&
                                             !laneOccupyingAppointment ? null : laneSalonCanQuickBook &&
                                               !laneQuickBookAvailable &&
@@ -48596,7 +48596,7 @@ null
                                             }
                                           >
                                             {(isPastFreeSlot || isLaneVisuallyDisabled || isClosedDay || isLaneOutsideScheduleSlot || laneCellState === 'outside' || (laneCellState === 'blocked' && !isLunchBreakSlot)) ? <NativeAgendaUnavailable night={availabilityPalette.night} phase={rowIndex + laneIndex}/> : null}
-{!isLunchBreakSlot && (isPastFreeSlot || isClosedDay) && rowIndex === 0 ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaStateLabel label={isClosedDay?'Chiuso':'Passato'} action={laneSalonCanQuickBook}/></View>:null}
+{!isLunchBreakSlot && (isPastFreeSlot || isClosedDay) ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaStateLabel label={isClosedDay?'Chiuso':'Passato'} action={laneSalonCanQuickBook}/></View>:null}
                                             {laneDragPreview &&
                                             !laneOccupyingAppointment ? null : laneSalonCanQuickBook &&
                                               !laneQuickBookAvailable &&
@@ -49143,7 +49143,7 @@ null
                                       cellState !== 'blocked'
                                     }
                                   >
-                                    {!isLunchBreakSlot && (isPastFreeSlot || isClosedDay) && rowIndex === 0 ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaStateLabel label={isClosedDay?'Chiuso':'Passato'} action={canSalonQuickBook}/></View>:null}
+                                    {!isLunchBreakSlot && (isPastFreeSlot || isClosedDay) ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaStateLabel label={isClosedDay?'Chiuso':'Passato'} action={canSalonQuickBook}/></View>:null}
 {isSwapPreviewFreeTarget ? (
                                       <WeekDragTargetHighlight
                                         tone={
