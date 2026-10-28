@@ -65,15 +65,17 @@ export function AgendaPremiumOperatorHeading({name,role,photo,accent,unavailable
 export function AgendaPremiumHeader({date,time,review,onAvailability}:{date:string;time?:string;review?:React.ReactNode;onAvailability:()=>void}){
  const {palette:p,toggle}=useAccessAppearance();const {width}=useWindowDimensions();const wide=web&&width>=1000,compact=width<600;
  const dateLine=<View style={{flexDirection:'row',alignItems:'center',flexWrap:'wrap',gap:8}}><Text style={{fontSize:wide?16:14,lineHeight:wide?23:20,color:p.ink}}>{date}</Text>{time?<View accessibilityLabel={`Ora attuale ${time}`} style={{flexDirection:'row',alignItems:'center',gap:6,flexShrink:0}}><View style={{width:3,height:3,borderRadius:2,backgroundColor:p.muted,opacity:.7}}/><Text style={{fontSize:wide?15:14,lineHeight:wide?23:20,color:p.muted,fontVariant:['tabular-nums']}}>{time}</Text></View>:null}</View>;
- if(!web)return <View style={{gap:8,marginBottom:12}}>
-  <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',minHeight:64,marginBottom:4}}>
+ // Same rhythm as the native Home: wordmark row, small date · time, serif title.
+ if(!web)return <View style={{gap:5,marginTop:-20,marginBottom:12}}>
+  <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',height:64}}>
    <View style={{width:154,flexShrink:1}}><AccessWordmark compact/></View>
    <Pressable accessibilityRole="button" accessibilityLabel={p.night?'Attiva tema chiaro':'Attiva tema scuro'} onPress={toggle} style={{width:40,height:40,borderRadius:20,borderWidth:1,borderColor:p.border,backgroundColor:p.field,alignItems:'center',justifyContent:'center'}}><Ionicons name={p.night?'sunny-outline':'moon-outline'} size={20} color={p.ink}/></Pressable>
   </View>
-  <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',gap:10}}>
-   <Text accessibilityRole="header" style={{fontFamily:nativeSerif,fontSize:32,lineHeight:40,color:p.ink}}>Agenda</Text>
+  <Text style={{color:p.muted,fontSize:11,letterSpacing:.6}}>{date.toLocaleUpperCase('it')}{time?` · ${time}`:''}</Text>
+  <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',gap:10,marginBottom:7}}>
+   <Text accessibilityRole="header" style={{fontFamily:nativeSerif,fontSize:27,lineHeight:34,letterSpacing:-.6,color:p.ink}}>Agenda</Text>
    <Pressable accessibilityRole="button" accessibilityLabel="Apri disponibilità e orari" onPress={onAvailability} style={{minHeight:40,flexDirection:'row',alignItems:'center',gap:6,borderWidth:1,borderColor:p.border,backgroundColor:p.field,borderRadius:12,paddingHorizontal:12}}><Ionicons name="time-outline" size={17} color={p.ink}/><Text style={{fontSize:13,color:p.ink}}>Orari</Text></Pressable>
-  </View>{dateLine}{review}
+  </View>{review}
  </View>;
  if(web&&!wide)return <View style={{gap:5,marginBottom:14}}>
   <View style={{flexDirection:'row',alignItems:'center',gap:8}}>

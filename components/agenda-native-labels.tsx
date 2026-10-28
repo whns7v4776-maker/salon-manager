@@ -24,10 +24,9 @@ export function NativeAgendaOperatorHeading({name,meta,photo,accent,unavailable,
   </View>
   <View style={{flexShrink:1,maxWidth:Math.max(30,width-side-24),minWidth:0,alignItems:'flex-start',justifyContent:'center',gap:3}}>
    <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={.72} style={{maxWidth:'100%',fontSize:14,lineHeight:18,fontWeight:'600',textAlign:'center',color:unavailable?muted:ink,includeFontPadding:false}}>{name}</Text>
-   <View style={{flexDirection:'row',alignItems:'center',justifyContent:'center',maxWidth:'100%'}}>
+   <View style={{flexDirection:'row',alignItems:'center',justifyContent:'flex-start',maxWidth:'100%'}}>
     <View style={{width:6,height:6,borderRadius:3,backgroundColor:unavailable?muted:accent,marginRight:4,flexShrink:0}}/>
-    <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={.8} style={{fontSize:11,lineHeight:14,color:muted,textAlign:'center',flexShrink:1,includeFontPadding:false}}>{meta}</Text>
-    <View style={{width:6,marginLeft:4,flexShrink:0}}/>
+    <Text numberOfLines={1} ellipsizeMode="tail" style={{fontSize:12,lineHeight:15,color:muted,textAlign:'left',flexShrink:1,includeFontPadding:false}}>{meta}</Text>
    </View>
   </View>
 

@@ -1328,7 +1328,7 @@ const NATIVE_COMPACT_CARD_DRAG_HOLD_MS = 360;
 const NATIVE_RESIZE_MOVE_JS_THROTTLE_MS = 48;
 const NATIVE_WEEK_AUTOSCROLL_UP_INTENT_DISTANCE = 10;
 const NATIVE_WEEK_AUTOSCROLL_TARGET_KEY = '__native-autoscroll__';
-const WEEK_PLANNER_LANE_HEADER_HEIGHT = IS_WEB?72:48;
+const WEEK_PLANNER_LANE_HEADER_HEIGHT = IS_WEB?72:40;
 const WEEK_PLANNER_LANE_HEADER_HALF_SPACER = WEEK_PLANNER_LANE_HEADER_HEIGHT/2;
 const WEEK_PLANNER_ROLE_TEXT_COLORS: Record<string, string> = {
   barber: '#9A4A00',
@@ -46393,7 +46393,7 @@ export default function AgendaScreen() {
             }
           }}
         >
-          {nativeScrubberHeight > 0 && <View style={{ position: 'absolute', top: effectivePlannerDayHeaderHeight - 8, left: WEEK_PLANNER_TIME_COL_TOTAL, right: 0, zIndex: 1000, elevation: 1000, alignItems: 'center' }} pointerEvents="box-none">
+          {nativeScrubberHeight > 0 && <View style={{ position: 'absolute', top: effectivePlannerDayHeaderHeight + WEEK_PLANNER_LANE_HEADER_HEIGHT - 8, left: WEEK_PLANNER_TIME_COL_TOTAL, right: 0, zIndex: 1000, elevation: 1000, alignItems: 'center' }} pointerEvents="box-none">
             <View accessibilityRole="adjustable" accessibilityLabel="Scorri colonne operatori" hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               accessibilityActions={[{ name: 'increment', label: 'Colonne successive' }, { name: 'decrement', label: 'Colonne precedenti' }]}
               onAccessibilityAction={(event) => { const direction = event.nativeEvent.actionName === 'increment' ? 1 : -1; weekPlannerHorizontalRef.current?.scrollTo({ x: Math.max(0, Math.min(weekPlannerHorizontalMetrics.maxScrollX, weekHorizontalScrollPosRef.current + direction * weekVisibleColWidth)), animated: true }); }}
