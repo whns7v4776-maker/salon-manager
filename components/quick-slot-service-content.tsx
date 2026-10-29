@@ -26,7 +26,13 @@ export function QuickSlotServiceContent({
   const {palette}=useAccessAppearance();
   const s=useMemo(()=>{
     const themed=createAgendaPremiumStyles(baseStyles,palette);
-    return {...themed,title:{...themed.title,height:undefined,minHeight:web?34:28,fontWeight:'600' as const},role:{...themed.role,backgroundColor:'transparent'},roleText:{...themed.roleText,color:palette.muted,fontWeight:'500' as const},price:{...themed.price,fontWeight:'600' as const}};
+    // Premium reading: serif name, one quiet meta line, a calm price.
+    return {...themed,
+      title:{...themed.title,height:undefined,minHeight:web?38:30,fontFamily:web?'Georgia, "Times New Roman", serif':'Georgia',fontSize:web?15.5:14,lineHeight:web?19:17,fontWeight:'500' as const,letterSpacing:.1},
+      role:{...themed.role,backgroundColor:'transparent',paddingHorizontal:0},
+      roleText:{...themed.roleText,color:palette.muted,fontWeight:'500' as const},
+      priceRow:{...themed.priceRow,borderTopColor:palette.line,paddingTop:web?9:4},
+      price:{...themed.price,fontSize:web?19:17,lineHeight:web?24:22,fontWeight:'600' as const,color:palette.ink,letterSpacing:-.2,fontVariant:['tabular-nums'] as any}};
   },[palette]);
   const original = Number(service.prezzoOriginale);
   const hasDiscount = customerPrice === undefined && Number.isFinite(original) && original > service.prezzo;
@@ -40,11 +46,13 @@ export function QuickSlotServiceContent({
   const color = roleColor || getServiceAccentByMeta({ roleName: role }).border;
   return <View style={s.content} pointerEvents="none">
     <Text style={s.title}>{name}</Text>
-    <View style={[s.role,{flexDirection:'row',alignItems:'center',gap:5}]}><View style={{width:4,height:4,borderRadius:2,backgroundColor:color}}/><Text style={s.roleText} >{role || 'Servizio'}</Text></View>
-    <View style={s.durationRow}>
-      <View style={s.durationBadge}>
-        <Ionicons name="time-outline" size={12} color={palette.ink} />
-        <Text style={s.duration} accessibilityLabel={duration}>{compactDuration}</Text>
+    <View style={[s.role,{flexDirection:'row',alignItems:'center',gap:5,flexWrap:'wrap',justifyContent:'center'}]}>
+      <View style={{width:5,height:5,borderRadius:3,backgroundColor:color}}/>
+      <Text style={s.roleText}>{role || 'Servizio'}</Text>
+      <Text style={[s.roleText,{opacity:.6}]}>·</Text>
+      <View style={{flexDirection:'row',alignItems:'center',gap:3}}>
+        <Ionicons name="time-outline" size={11} color={palette.muted} />
+        <Text style={s.roleText} accessibilityLabel={duration}>{compactDuration}</Text>
       </View>
     </View>
     <View style={[s.features, !details.length && { minHeight: 0 }]}>

@@ -29,11 +29,12 @@ export const quickSlotDesign = StyleSheet.create({
   quickCustomerSearchInlineWrap: { width: '100%', maxWidth: '100%' },
   quickCustomerSearchInput: { width: '100%', maxWidth: '100%', alignSelf: 'stretch', textAlign: 'left', fontSize: 13 },
   serviceCard: { height: web ? 232 : 200, minHeight: web ? 232 : 200, maxHeight: web ? 232 : 200, padding: web ? 10 : 8, paddingTop: 8, paddingBottom: web ? 10 : 8, borderRadius: 16, borderWidth: 1, ...quiet },
-  serviceCardSelected: { borderWidth: 3, borderColor: '#2563EB', shadowColor: '#2563EB', shadowOpacity: 0.18, shadowRadius: 8, elevation: 3, ...(web ? { boxShadow: '0 0 0 3px rgba(37,99,235,0.20)' } as any : {}) },
+  // Bronze selection, like the rest of the salon UI (no stray blue).
+  serviceCardSelected: { borderWidth: 2, borderColor: '#B0915F', shadowColor: '#B0915F', shadowOpacity: 0.32, shadowRadius: 10, elevation: 4, ...(web ? { boxShadow: '0 0 0 3px rgba(176,145,95,0.22), 0 8px 22px rgba(0,0,0,0.18)' } as any : {}) },
   // 2 pt above the cards + 200 pt cards + a separate 14 pt scroll-indicator lane.
   componentScrollNative: { height: 216, minHeight: 216, maxHeight: 216 },
   componentCardWrapNative: { height: 200, minHeight: 200, maxHeight: 200 },
-  serviceHeader: { width: '100%', height: web ? 28 : 24, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 4, marginBottom: web ? 4 : 1 },
+  serviceHeader: { width: '100%', height: web ? 34 : 28, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 4, marginBottom: web ? 6 : 2 },
   serviceHeaderEnd: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 6 },
   serviceHeaderSelection: { minWidth: 0, alignItems: 'flex-end' },
   serviceMenuButton: { width: 28, height: 28, borderRadius: 9, backgroundColor: 'rgba(255,255,255,0.68)', alignItems: 'center', justifyContent: 'center' },

@@ -301,6 +301,22 @@ export function createAgendaPremiumStyles<T extends Record<string,any>>(base:T,t
  patch('appointmentCompletionButtonText',{color:p.ink,fontSize:14,lineHeight:20,fontWeight:'600'});
  patch('webWeekDragConfirmationMessageContent',{paddingVertical:16});
  patch('webWeekDragConfirmationActions',{gap:12,paddingTop:16,flexWrap:'wrap'});
+ // Small confirmations sit in the middle of the screen over a blurred backdrop,
+ // in the salon theme: readable eyebrow, themed icon, clearly red destructive action.
+ patch('quickBookingConfirmationOverlay',{justifyContent:'center',paddingHorizontal:16,paddingVertical:24,paddingBottom:24,backgroundColor:p.night?'rgba(8,10,11,.46)':'rgba(40,36,30,.24)',...(web?{backdropFilter:'blur(10px)',WebkitBackdropFilter:'blur(10px)'}:{})} as any);
+ patch('quickBookingConfirmationCard',{maxWidth:520,borderRadius:24,paddingTop:22,backgroundColor:p.night?'#202526':'#F8F5EF',borderColor:p.border});
+ patch('quickBookingConfirmationMessageScroll',{minHeight:0,flexGrow:0});
+ patch('webWeekDragConfirmationMessageContent',{paddingVertical:10,justifyContent:'flex-start'});
+ patch('webWeekDragConfirmationEyebrow',{color:p.muted});
+ patch('webWeekDragConfirmationTitle',{color:p.ink});
+ patch('webWeekDragConfirmationMessage',{color:p.night?'#C9C4BA':'#4A4236'});
+ patch('webWeekDragConfirmationIconWrap',{backgroundColor:p.field,borderColor:p.line});
+ patch('webWeekDragConfirmationIconWrapDelete',{backgroundColor:p.night?'#422F34':'#F3E3E4',borderColor:p.night?'#78545C':'#D9B5BA'});
+ patch('webWeekDragConfirmationButton',{backgroundColor:p.action,borderColor:p.action});
+ patch('webWeekDragConfirmationButtonText',{color:p.actionText});
+ patch('webWeekDragConfirmationButtonCancel',{backgroundColor:p.field,borderColor:p.line});
+ patch('webWeekDragConfirmationButtonTextCancel',{color:p.ink});
+ patch('webWeekDragConfirmationButtonDestructive',{backgroundColor:p.night?'#8E3B45':'#A8414C',borderColor:p.night?'#A9525C':'#A8414C'});
 
  patch('weekAppointmentServiceEditButton',{minHeight:46,paddingVertical:10,paddingHorizontal:12,borderRadius:12,marginTop:0,marginBottom:12,backgroundColor:p.field,borderColor:p.line});
  patch('weekAppointmentServiceEditText',{fontSize:14,fontWeight:'500'});

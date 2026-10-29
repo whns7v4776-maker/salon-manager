@@ -6674,10 +6674,11 @@ const baseCustomerStyles = StyleSheet.create({
     textAlign: 'center',
   },
   successDialogOverlay: {
+    ...(Platform.OS === 'web' ? ({ backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)' } as object) : null),
     flex: 1,
-    justifyContent: 'flex-end',
+    justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: 22, paddingBottom: 0 },
+    paddingHorizontal: 22, paddingBottom: 24, paddingTop: 24 },
   successDialogBackdrop: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(15, 23, 42, 0.46)',

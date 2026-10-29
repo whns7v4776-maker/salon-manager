@@ -5517,11 +5517,12 @@ const baseStyles = StyleSheet.create({
     color: '#64748b',
   },
   footerDialogBackdrop: {
+    ...(Platform.OS === 'web' ? ({ backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)' } as object) : null),
     flex: 1,
     backgroundColor: 'rgba(15, 23, 42, 0.46)',
     alignItems: 'center',
-    justifyContent: 'flex-end',
-    paddingHorizontal: 22, paddingBottom: 0 },
+    justifyContent: 'center',
+    paddingHorizontal: 22, paddingBottom: 24, paddingTop: 24 },
   footerDialogCard: {
     width: '100%',
     maxWidth: 420,

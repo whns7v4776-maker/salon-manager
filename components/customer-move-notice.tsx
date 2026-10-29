@@ -12,7 +12,7 @@ export function CustomerMoveNoticeDialog(){
  const close=()=>{setQueue(q=>q.slice(1));setError('');};
  const open=async(url:string)=>{try{await Linking.openURL(url);}catch{setError('Non riesco ad aprire il canale. Contatta il cliente direttamente.');}};
  return <Modal supportedOrientations={TABLET_MODAL_ORIENTATIONS} visible={!!notice} transparent animationType="fade" onRequestClose={close}>
-  {notice&&<View style={{flex:1,backgroundColor:p.night?'rgba(0,0,0,.48)':'rgba(40,36,30,.28)',justifyContent:Platform.OS==='web'?'center':'flex-end',alignItems:'center',padding:16}}>
+  {notice&&<View style={[{flex:1,backgroundColor:p.night?'rgba(8,10,11,.46)':'rgba(40,36,30,.24)',justifyContent:'center',alignItems:'center',padding:16},Platform.OS==='web'?({backdropFilter:'blur(10px)',WebkitBackdropFilter:'blur(10px)'} as object):null]}>
    <View style={{width:'100%',maxWidth:540,backgroundColor:p.night?'#202526':'#F8F5EF',borderRadius:24,padding:22,gap:14}}>
     <Text style={{fontSize:21,fontWeight:'700',color:p.ink}}>Appuntamento aggiornato · verifica l’avviso</Text>
     <Text style={{fontSize:16,fontWeight:'600',color:p.ink}}>{notice.name}</Text>

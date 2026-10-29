@@ -204,6 +204,7 @@ import {
   getAgendaAppointmentSurface,
   getAgendaAppointmentBadgeTone,
   getServiceColorIdentityKey,
+  getServiceAccentByMeta,
   getServiceCardTheme,
   getStableServiceIdentityColor,
   normalizeServiceAccentKey,
@@ -36312,6 +36313,13 @@ export default function AgendaScreen() {
               setWeekSwapPreview(null);
             }
           }
+          if (result.ok) {
+            // A just-moved appointment keeps a temporary copy at its new slot
+            // until the move settles: drop it, or the deleted card lingers.
+            [targetAppointment, ...linkedAppointments].forEach((item) =>
+              clearMovedAppointmentOptimisticPosition(item.id),
+            );
+          }
           if (result.ok && weekAppointmentDeleteMountedRef.current) {
             // Cancellation already applied the existing suppression guards and
             // local removal. Invalidate retained planner snapshots, then wait
@@ -36319,6 +36327,8 @@ export default function AgendaScreen() {
             await new Promise<void>((resolve) => {
               weekAppointmentDeleteVisualCommitRef.current = resolve;
               setWeekClearedSlotSettleEpoch((current) => current + 1);
+              // Never leave the details stuck if that render is skipped.
+              setTimeout(resolve, 1500);
             });
             weekAppointmentDeleteInFlightRef.current = false;
             if (weekAppointmentDeleteMountedRef.current) closeWeekAppointmentDetails();
@@ -36396,6 +36406,7 @@ export default function AgendaScreen() {
     [
       appuntamenti,
       cancelAgendaAppointmentItem,
+      clearMovedAppointmentOptimisticPosition,
       closeWeekAppointmentDetails,
       getWeekAppointmentTemporalState,
       presentWeekInteractionConfirmation,
@@ -53380,17 +53391,12 @@ null
                                             styles.quickComponentRoleGroupHeading
                                           }
                                         >
-                                          <View
-                                            style={
-                                              styles.quickComponentRoleGroupIcon
-                                            }
-                                          >
-                                            <Ionicons
-                                              name="briefcase-outline"
-                                              size={14}
-                                              color={availabilityPalette.ink}
-                                            />
-                                          </View>
+                                          <NativeMedal
+                                            icon="briefcase-outline"
+                                            size={30}
+                                            iconSize={14}
+                                            accent={getServiceAccentByMeta({ roleName: group.roleLabel }).border}
+                                          />
                                           <View
                                             style={{ flex: 1, minWidth: 0 }}
                                           >
@@ -57000,8 +57006,8 @@ null
                       size={23}
                       color={
                         webWeekDragConfirmation.kind === 'delete'
-                          ? '#BE123C'
-                          : '#9A3412'
+                          ? (availabilityPalette.night ? '#E39AA2' : '#B4434E')
+                          : (availabilityPalette.night ? '#DEC89B' : '#816944')
                       }
                     />
                   </View>
@@ -57077,6 +57083,7 @@ null
                             styles.webWeekDragConfirmationButtonText,
                             isCancel &&
                               styles.webWeekDragConfirmationButtonTextCancel,
+                            isDestructive && { color: '#FFFFFF' },
                             button.tone === 'softRed' && { color: '#B42328' },
                             button.tone === 'softGreen' && { color: '#176B3A' },
                           ]}
@@ -59749,6 +59756,7 @@ null
                             styles.webWeekDragConfirmationButtonText,
                             isCancel &&
                               styles.webWeekDragConfirmationButtonTextCancel,
+                            isDestructive && { color: '#FFFFFF' },
                             button.tone === 'softRed' && { color: '#B42328' },
                             button.tone === 'softGreen' && { color: '#176B3A' },
                           ]}
@@ -76513,10 +76521,11 @@ const baseAgendaStyles = StyleSheet.create({
     color: '#64748b',
   },
   agendaComposerDialogOverlay: {
+    ...(Platform.OS === 'web' ? ({ backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)' } as object) : null),
     flex: 1,
     alignItems: 'center',
-    justifyContent: 'flex-end',
-    paddingHorizontal: 22, paddingBottom: 0 },
+    justifyContent: 'center',
+    paddingHorizontal: 22, paddingBottom: 24, paddingTop: 24 },
   agendaComposerDialogBackdrop: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(15, 23, 42, 0.46)',

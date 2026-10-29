@@ -18595,11 +18595,12 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
   successDialogOverlay: {
+    ...(Platform.OS === 'web' ? ({ backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)' } as object) : null),
     flex: 1,
-    justifyContent: 'flex-end',
+    justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: Platform.OS === 'web' ? 22 : 0,
-    paddingBottom: 0,
+    paddingBottom: 24, paddingTop: 24,
   },
   successDialogBackdrop: {
     ...StyleSheet.absoluteFillObject,

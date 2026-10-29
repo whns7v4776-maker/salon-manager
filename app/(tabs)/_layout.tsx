@@ -8,6 +8,7 @@ import { NativeHomeBackdrop } from '../../components/owner-premium-native-home';
 import { nativeBarStyles } from '../../components/owner-premium-native-style';
 import { premiumNotificationBannerTone } from '../../components/premium-notification-banner';
 import { AccessAppearanceProvider, useAccessAppearance } from '../../components/access-premium';
+import { CustomerMoveNoticeDialog } from '../../components/customer-move-notice';
 import { OWNER_RAIL_WIDTH, OwnerPremiumSidebar, OwnerPremiumCompactAppearance } from '../../components/owner-premium-web';
 import { buildOwnerWebEventKey } from '../../src/lib/push/owner-web-event-key';
 import { Ionicons } from "@expo/vector-icons";
@@ -6446,7 +6447,8 @@ function IosOwnerLiveRequestBannerHost({
 }
 
 export default function TabLayout() {
-  return <AccessAppearanceProvider><OwnerTabLayout /></AccessAppearanceProvider>;
+  // The move notice lives inside the salon theme, like the other owner popups.
+  return <AccessAppearanceProvider><OwnerTabLayout /><CustomerMoveNoticeDialog /></AccessAppearanceProvider>;
 }
 
 function OwnerTabLayout() {

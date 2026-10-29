@@ -1,6 +1,5 @@
 import { portalReadPolicy, assertOwnerPortalIdentity } from '../lib/owner-portal-read-policy';
 import { customerDeletionErrorMessage } from '../lib/customer-deletion-errors';
-import { CustomerMoveNoticeDialog } from '../../components/customer-move-notice';
 import { checkMovedCustomerNotification } from '../lib/customer-move-notice';
 import type { OwnerPackageSelection } from '../lib/owner-package-selection';
 import { rememberConfirmedAppointmentBenefits } from '../../hooks/use-appointment-benefits';
@@ -42910,7 +42909,7 @@ function AppProviderState({ children, isOwnerProtectedContextRoute }: {
   );
 
   return (
-    <AppContext.Provider value={contextValue}>{children}<CustomerMoveNoticeDialog /></AppContext.Provider>
+    <AppContext.Provider value={contextValue}>{children}</AppContext.Provider>
   );
 }
 

@@ -7,7 +7,8 @@ import { quickSlotDesign as baseStyles } from './quick-slot-design';
 import { useAccessAppearance } from './access-premium';
 import { createAgendaPremiumStyles } from './agenda-premium-style';
 import { haptic } from '../src/lib/haptics';
-import { BarberPoleIcon } from './ui/barber-pole-icon';
+import { NativeMedal } from './owner-premium-native-home';
+import { getServiceAccentByMeta } from '../src/lib/service-accents';
 
 type Props = React.ComponentProps<typeof HapticTouchable> & {
   serviceName: string;
@@ -72,9 +73,8 @@ export function QuickSlotServiceCard({ serviceName, serviceRole, selection, acti
       accessibilityHint={nativeActions ? 'Tieni premuto per modificare o eliminare il componente' : undefined}
     >
       <View style={s.serviceHeader} pointerEvents="box-none">
-        {serviceRole?.trim().toLowerCase() === 'barber'
-          ? <BarberPoleIcon />
-          : <Ionicons name="cut-outline" size={17} color={palette.ink} />}
+        {/* Enamel medallion in the role colour, as on the other premium screens. */}
+        <NativeMedal icon="cut-outline" size={Platform.OS === 'web' ? 32 : 28} iconSize={Platform.OS === 'web' ? 15 : 13} accent={getServiceAccentByMeta({ roleName: serviceRole ?? '' }).border} />
         <View style={s.serviceHeaderEnd} pointerEvents="box-none">
         {Platform.OS === 'web' && actions ? <View ref={menuAnchor} collapsable={false}>
           <HapticTouchable
