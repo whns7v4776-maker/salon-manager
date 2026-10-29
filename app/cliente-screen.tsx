@@ -497,7 +497,8 @@ const FRONTEND_DAY_SUMMARY_PAGE_SIZE = 7;
 // React Native shares one small HTTP pool per host. Two day-summary lanes leave
 // room for catalogue/session work and the selected-day planner, so the visible
 // block cannot be starved behind its own background prefetch.
-const FRONTEND_DAY_SUMMARY_MAX_CONCURRENCY = 2;
+// Browsers and iOS multiplex the requests: four lanes halve the wait there.
+const FRONTEND_DAY_SUMMARY_MAX_CONCURRENCY = Platform.OS === 'android' ? 2 : 4;
 // Publish each authoritative day independently: a full/slow neighbour must
 // not hold an already verified available date behind a three-day barrier.
 const FRONTEND_DAY_SUMMARY_BLOCK_SIZE = 1;
@@ -31938,13 +31939,15 @@ function ClienteFrontendScreenContent({ nativeInitialTab }: ClienteFrontendScree
       contact: customServiceContactEnabled && !servizio ? <View style={{ gap: 10 }}><TouchableOpacity accessibilityRole="button" onPress={() => setCustomServiceContactExpanded(value => !value)} style={{ minHeight: 44, justifyContent: 'center' }}><Text style={{ color: bookingPalette.muted, fontSize: 12 }}>Non trovi il tuo servizio? Contatta il salone</Text></TouchableOpacity>{customServiceContactExpanded ? renderCustomServiceContactCard() : null}</View> : null,
       days: giorniDisponibili.filter(day => day.value >= today).map(day => {
         const availability = getDateAvailabilityInfo(effectiveAvailabilitySettings, day.value);
+        // A known result stays visible (and tappable) while a newer one is
+        // confirmed in background: refreshes must not re-verify days one by one.
         const full = isFrontendDayFullForService(day.value);
-        const pending = !isLivePublicDaySummaryDateCurrent(day.value) || full === null;
+        const pending = full === null;
         return { value: day.value, weekday: day.weekdayShort, number: String(day.dayNumber), month: day.monthShort, label: day.fullLabel,
           pending: !availability.closed && pending, disabled: !canChooseDay || availability.closed || pending || !isDateWithinPublicBookingWindow(effectiveAvailabilitySettings, day.value, today),
           status: availability.closed ? 'Chiuso' : pending ? 'Verifica…' : full ? 'Completo' : 'Disponibile' };
       }), date: data, dateConfirmed: hasConfirmedBookingDay,
-      onDate: next => { if (!canChooseDay || !isLivePublicDaySummaryDateCurrent(next) || isFrontendDayFullForService(next) === null) return; handleDayCardPress(next); },
+      onDate: next => { if (!canChooseDay || isFrontendDayFullForService(next) === null) return; handleDayCardPress(next); },
       onPrepareDate: next => { const block = livePublicDaySummaryBlockKeyByDate[next]; if (block) livePublicDaySummaryPriorityBlockKeyRef.current = block; },
       dayError: Boolean(daySummaryFailedPlan) && daySummaryFailedPlan === livePublicDaySummaryPlanKey, onRetryDays: () => { setDaySummaryFailedPlan(''); setLivePublicDaySummaryRefreshRevision(value => value + 1); },
       operators: operatoriCompatibili.map(operator => ({ id: operator.id, name: operator.nome, role: operator.mestiere, photo: operator.fotoUri?.trim() })),
