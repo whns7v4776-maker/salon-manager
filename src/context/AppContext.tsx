@@ -3084,6 +3084,12 @@ const getSensitiveValue = async (
   legacyAsyncKey?: string,
 ) => {
   const secureStore = resolveSecureStoreModule();
+  // The browser has no secure store: secrets are never kept in localStorage,
+  // and any copy left by an older version is erased on first read.
+  if (!secureStore && Platform.OS === 'web') {
+    if (legacyAsyncKey) await AsyncStorage.removeItem(legacyAsyncKey).catch(() => undefined);
+    return null;
+  }
   const secureValue = secureStore
     ? await secureStore.getItemAsync(secureKey)
     : null;
@@ -3127,10 +3133,33 @@ const setSensitiveValue = async (
     return;
   }
 
+  if (Platform.OS === 'web') {
+    if (legacyAsyncKey) await AsyncStorage.removeItem(legacyAsyncKey).catch(() => undefined);
+    return;
+  }
+
   if (legacyAsyncKey) {
     await AsyncStorage.setItem(legacyAsyncKey, normalizedValue);
   }
 };
+
+// Older web versions saved owner passwords in clear text in localStorage.
+// Erase every such copy as soon as the app starts in a browser.
+const purgeWebStoredPasswords = async () => {
+  if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+  try {
+    const keys = await AsyncStorage.getAllKeys();
+    const passwordKeys = keys.filter(
+      (key) =>
+        key.startsWith('salon_manager_owner_password_legacy__') ||
+        key.startsWith(`${STORAGE_KEYS.biometric_login_password}__`),
+    );
+    if (passwordKeys.length) await AsyncStorage.multiRemove(passwordKeys);
+  } catch {
+    // Storage blocked or unavailable: nothing to erase.
+  }
+};
+void purgeWebStoredPasswords();
 
 const deleteSensitiveValue = async (
   secureKey: string,
