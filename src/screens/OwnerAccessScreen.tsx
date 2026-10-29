@@ -661,17 +661,10 @@ export function OwnerAccessScreen({
   const registerPasswordTopOffset = Platform.OS === 'ios' ? 212 : 176;
 
   const navigateToOwnerBackoffice = React.useCallback(() => {
-    if (
-      Platform.OS === 'web' &&
-      typeof window !== 'undefined' &&
-      typeof window.location?.replace === 'function'
-    ) {
-      // Rimuove anche eventuali marker come ownerLoggedOut=1: dopo un login
-      // confermato non devono continuare a forzare la landing disconnessa.
-      window.location.replace('/');
-      return;
-    }
-
+    // Anche sul web si naviga senza ricaricare: la sessione appena aperta
+    // resta in memoria. Un reload completo doveva rileggerla dal browser e,
+    // se il salone si apriva prima, rimandava alla landing disconnessa.
+    // La sostituzione della rotta toglie comunque marker come ownerLoggedOut=1.
     if (ownerBackofficeNavigationStartedRef.current) {
       return;
     }

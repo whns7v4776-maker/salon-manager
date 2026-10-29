@@ -562,8 +562,11 @@ function PremiumClientLandingScreen() {
   const suppressOwnerBackofficeRedirect = frontendLoggedOutParam === '1';
   const keepNativeOwnerReloginMounted =
     Platform.OS !== 'web' && forceLoggedOutLanding;
+  // A login confirmed on this page ends the "logged out" marker: without this
+  // the web landing kept the empty form even after a successful sign-in.
+  const [ownerWebLoginConfirmed, setOwnerWebLoginConfirmed] = useState(false);
   const ownerLoggedOutMarkerBlocksRedirect =
-    Platform.OS === 'web' && forceLoggedOutLanding;
+    Platform.OS === 'web' && forceLoggedOutLanding && !ownerWebLoginConfirmed;
   const showOwnerResetReadyMessage = ownerResetParam === '1';
   const showOwnerResetDoneMessage = ownerResetParam === 'done';
   const ownerReadyForBackoffice =
@@ -592,6 +595,15 @@ function PremiumClientLandingScreen() {
     ownerBackofficeRedirectStartedRef.current = true;
     ownerBackofficeReplaceRef.current(BACKOFFICE_ROUTE);
   }, []);
+
+  const handleOwnerAuthenticated = useCallback(() => {
+    if (Platform.OS === 'web' && forceLoggedOutLanding) {
+      setOwnerWebLoginConfirmed(true);
+      router.setParams({ ownerLoggedOut: undefined } as never);
+    }
+    // When the salon is not ready yet, the ready effect below opens it later.
+    beginOwnerBackofficeReplace();
+  }, [beginOwnerBackofficeReplace, forceLoggedOutLanding, router]);
 
   useEffect(() => {
     if (!ownerExplicitLogout && !forceLoggedOutLanding) {
@@ -2850,7 +2862,7 @@ function PremiumClientLandingScreen() {
                             }}
                             embedded
                             externalScrollRef={scrollRef}
-                            onAuthenticated={beginOwnerBackofficeReplace}
+                            onAuthenticated={handleOwnerAuthenticated}
                           />
                         </View>
                       </View>
