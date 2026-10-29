@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useId, useMemo, useRef, useState } from 'react';
-import { AccessibilityInfo, Animated, AppState, Easing, Platform, StyleSheet, View } from 'react-native';
+import { AccessibilityInfo, Animated, AppState, Easing, Platform, StyleSheet, Text, View } from 'react-native';
 import Svg, { Defs, LinearGradient, RadialGradient, Rect, Stop, Circle } from 'react-native-svg';
 
 const LiveSignal=createContext<{pulse:Animated.Value;sweep:Animated.Value;animate:boolean}|null>(null);
@@ -71,5 +71,11 @@ export function AgendaLiveGlow({enabled}:{night:boolean;enabled:boolean}) {
   {[{top:0,height:8,upper:true},{top:9,height:6,upper:false}].map(({top,height,upper},i)=><Animated.View key={i} style={{position:'absolute',left:0,right:0,top,height,opacity:animate?opacity(pulse,upper?.04:.025,upper?.24:.12):upper?.14:.07}}><Svg width="100%" height={height}><Defs><LinearGradient id={`${id}-${i}`} x1="0%" y1={upper?'100%':'0%'} x2="0%" y2={upper?'0%':'100%'}><Stop offset={0} stopColor="#ED9B94" stopOpacity={upper?.85:.65}/><Stop offset={1} stopColor="#ED9B94" stopOpacity={0}/></LinearGradient></Defs><Rect width="100%" height={height} fill={`url(#${id}-${i})`}/></Svg></Animated.View>)}
   {animate&&width>0&&Platform.OS==='web'?<View style={{position:'absolute',left:0,right:0,top:4,height:10,overflow:'hidden'}}>{React.createElement('div',{'data-agenda-live-sweep':'true',style:{width:Math.min(width*.34,280),height:4,top:2.625,'--agenda-live-from':`${-.36*width}px`,'--agenda-live-to':`${1.14*width}px`}})}</View>:null}
   {animate&&width>0&&Platform.OS!=='web'?<View style={{position:'absolute',left:0,right:0,top:6,height:5,overflow:'hidden'}}><Animated.View style={{width:Math.min(width*.34,280),height:4,opacity:.85,transform:[{translateX:sweep.interpolate({inputRange:[0,1],outputRange:[-.36*width,1.14*width]})}]}}><Svg width="100%" height={4}><Defs><LinearGradient id={`${id}-sweep`} x1="0%" y1="0%" x2="100%" y2="0%">{[0,.04,.22,.55,.85,.4,0].map((v,i)=><Stop key={i} offset={[0,.18,.45,.68,.81,.91,1][i]} stopColor={i===4?'#FFE3DC':'#FFB8AD'} stopOpacity={v}/>)}</LinearGradient></Defs><Rect width="100%" height={4} rx={2} fill={`url(#${id}-sweep)`}/></Svg></Animated.View></View>:null}
+ </View>;
+}
+/** "In corso" in the live slot: plain coral, no motion. */
+export function AgendaLiveSlotLabel(){
+ return <View pointerEvents="none" style={{width:'100%',height:'100%',alignItems:'center',justifyContent:'center'}}>
+  <Text numberOfLines={1} style={{color:'#E0584B',fontSize:Platform.OS==='web'?11:10,lineHeight:14,fontWeight:'800',letterSpacing:.2}}>In corso</Text>
  </View>;
 }

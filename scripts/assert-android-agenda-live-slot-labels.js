@@ -25,7 +25,10 @@ if (pastLabelBranches.length < 3) {
   );
 }
 
-if (!/isCurrentSlotToday\s*\?\s*'In corso'/.test(agenda)) {
+// "In corso" lives in its own overlay so quick-bookable cells show it too.
+const liveLabelBranches =
+  agenda.match(/isCurrentSlotToday && !isPastFreeSlot[^?]*\?\s*<View[^>]*><AgendaLiveSlotLabel\/>/g) ?? [];
+if (liveLabelBranches.length < 3) {
   throw new Error('The current live slot must keep the In progress label.');
 }
 
