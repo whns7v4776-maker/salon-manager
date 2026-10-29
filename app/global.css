@@ -742,3 +742,10 @@ html[data-agenda-sticky-on="true"] [data-agenda-operator-header="true"]{visibili
 html[data-agenda-sticky-on="true"] [data-testid="agenda-sticky-operator-header"] [data-agenda-operator-header="true"]{visibility:visible;}
 /* Browser autofill must not repaint app fields (light fill under light text in Night). */
 input:-webkit-autofill,input:-webkit-autofill:hover,input:-webkit-autofill:focus{-webkit-text-fill-color:currentColor;caret-color:currentColor;transition:background-color 100000s ease-in-out 0s;}
+
+/* Operator tiles: hover lights the rounded tile only, never the lane rectangle. */
+@media (hover:hover) and (pointer:fine){
+ html body [data-agenda-operator-header="true"] [role="button"]:hover{box-shadow:none!important;background:transparent!important;outline:none!important;filter:none!important;}
+ html body [data-agenda-operator-header="true"] [role="button"]:hover [data-agenda-operator-surface="true"]{filter:brightness(1.14);border-color:rgba(216,194,155,.42)!important;}
+}
+[data-agenda-operator-surface="true"]{transition:filter .18s ease,border-color .18s ease;}

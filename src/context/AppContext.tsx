@@ -3454,9 +3454,21 @@ const deriveFrontendCustomersFromRequests = (
     nextCustomers.map((item) => buildClienteMergeKey(item)),
   );
   const formattedNames = new Map<string, string>();
+  // A request whose email already belongs to a customer is that customer with
+  // another phone: deriving a second card made the two owner sync paths (one
+  // derives, the authoritative one does not) disagree and republish the portal.
+  const knownEmails = new Set(
+    nextCustomers
+      .map((item) => item.email?.trim().toLowerCase() ?? '')
+      .filter(Boolean),
+  );
 
   normalizeRichiestePrenotazione(requests).forEach((request) => {
     if (!shouldDeriveFrontendCustomerFromRequest(request)) {
+      return;
+    }
+    const requestEmail = request.email?.trim().toLowerCase() ?? '';
+    if (requestEmail && knownEmails.has(requestEmail)) {
       return;
     }
 
@@ -5084,14 +5096,30 @@ const overlayAuthoritativeRichiestaServerState = (
         : item.createdAt,
       viewedByCliente: authoritativeItem.viewedByCliente,
       viewedBySalon: authoritativeItem.viewedBySalon,
-      operatorChangeStatus: authoritativeItem.operatorChangeStatus,
-      operatorChangeOriginalId: authoritativeItem.operatorChangeOriginalId,
-      operatorChangeOriginalName: authoritativeItem.operatorChangeOriginalName,
-      operatorChangeProposedId: authoritativeItem.operatorChangeProposedId,
-      operatorChangeProposedName: authoritativeItem.operatorChangeProposedName,
-      operatorChangeRequestedAt: authoritativeItem.operatorChangeRequestedAt,
-      operatorChangeExpiresAt: authoritativeItem.operatorChangeExpiresAt,
-      operatorChangeRespondedAt: authoritativeItem.operatorChangeRespondedAt,
+      // This server read carries no operator-change columns: keep the ones the
+      // operator-change overlay already set, or each poll wipes and restores
+      // them and the client portal is republished in a loop.
+      ...(authoritativeItem.operatorChangeStatus
+        ? {
+            operatorChangeStatus: authoritativeItem.operatorChangeStatus,
+            operatorChangeOriginalId: authoritativeItem.operatorChangeOriginalId,
+            operatorChangeOriginalName: authoritativeItem.operatorChangeOriginalName,
+            operatorChangeProposedId: authoritativeItem.operatorChangeProposedId,
+            operatorChangeProposedName: authoritativeItem.operatorChangeProposedName,
+            operatorChangeRequestedAt: authoritativeItem.operatorChangeRequestedAt,
+            operatorChangeExpiresAt: authoritativeItem.operatorChangeExpiresAt,
+            operatorChangeRespondedAt: authoritativeItem.operatorChangeRespondedAt,
+          }
+        : {
+            operatorChangeStatus: item.operatorChangeStatus,
+            operatorChangeOriginalId: item.operatorChangeOriginalId,
+            operatorChangeOriginalName: item.operatorChangeOriginalName,
+            operatorChangeProposedId: item.operatorChangeProposedId,
+            operatorChangeProposedName: item.operatorChangeProposedName,
+            operatorChangeRequestedAt: item.operatorChangeRequestedAt,
+            operatorChangeExpiresAt: item.operatorChangeExpiresAt,
+            operatorChangeRespondedAt: item.operatorChangeRespondedAt,
+          }),
     });
   });
 
@@ -7272,8 +7300,20 @@ const buildOperatoriSignature = (items: Operatore[]) =>
     })),
   );
 
+// Field order differs between sync paths for identical data: sort keys too.
+const stableStringify = (value: unknown): string =>
+  JSON.stringify(value, (_key, current) =>
+    current && typeof current === 'object' && !Array.isArray(current)
+      ? Object.fromEntries(
+          Object.keys(current)
+            .sort()
+            .map((key) => [key, (current as Record<string, unknown>)[key]]),
+        )
+      : current,
+  );
+
 const buildOrderIndependentCollectionSignature = <T,>(items: T[]) =>
-  JSON.stringify(items.map((item) => JSON.stringify(item)).sort());
+  JSON.stringify(items.map((item) => stableStringify(item)).sort());
 
 const buildAndroidPortalRequestSignature = (
   items: RichiestaPrenotazione[],
