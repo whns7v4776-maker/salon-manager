@@ -252,7 +252,7 @@ function LandingAccessHeader({ audience, ownerMode = 'login' }: {
   const { palette } = useAccessAppearance();
   const styles = useMemo(() => accessPremiumStyles(baseStyles, palette), [palette]);
   return (
-    <View style={[styles.accessAreaHeader, Platform.OS === 'web' && {marginBottom:16}]}>
+    <View style={[styles.accessAreaHeader, Platform.OS === 'web' && {marginBottom:0}]}>
       <View style={[styles.accessBrandRow, Platform.OS === 'web' && {height:116,marginBottom:4}]}>
         <View style={styles.accessBrandMark}>
           <AccessWordmark />
@@ -2733,11 +2733,20 @@ function PremiumClientLandingScreen() {
 
       <ScrollView
         ref={scrollRef}
-        style={[styles.container, { backgroundColor: 'transparent' }]}
+        style={[
+          styles.container,
+          { backgroundColor: 'transparent' },
+          // Cards scrolling under the fixed header fade into the satin
+          // instead of being cut by a hard line. At rest they start below it.
+          Platform.OS === 'web' && ({
+            maskImage: 'linear-gradient(to bottom, transparent 0, #000 28px)',
+            WebkitMaskImage: 'linear-gradient(to bottom, transparent 0, #000 28px)',
+          } as object),
+        ]}
         contentContainerStyle={[
           styles.content,
           { paddingTop: 8 },
-          Platform.OS === 'web' && {justifyContent:'flex-start',paddingTop:8},
+          Platform.OS === 'web' && {justifyContent:'flex-start',paddingTop:24},
           { paddingHorizontal: landingHorizontalPadding },
           Platform.OS === 'android' && { paddingBottom: androidLandingBottomPadding },
           isRegistrationOnlyClientWebFlow && styles.registrationOnlyWebContent,
