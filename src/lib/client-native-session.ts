@@ -33,7 +33,7 @@ function validSession(value: unknown): value is NativeCustomerSession {
   return session.version === 1 && session.platform === Platform.OS &&
     typeof session.salonCode === 'string' && !!session.salonCode && session.salonCode === normalizeSalon(session.salonCode) &&
     typeof session.email === 'string' && session.email === normalizeEmail(session.email) &&
-    typeof session.phone === 'string' && /^\d{10}$/.test(session.phone) &&
+    typeof session.phone === 'string' && /^\d{9,10}$/.test(session.phone) &&
     typeof session.customerId === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(session.customerId) &&
     typeof session.appInstanceId === 'string' && !!session.appInstanceId.trim() && session.appInstanceId === session.appInstanceId.trim() &&
     typeof session.passwordRequired === 'boolean';

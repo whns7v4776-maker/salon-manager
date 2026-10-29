@@ -108,7 +108,7 @@ async function challenge(identity: PaymentIdentity, kind: PortalAccessChallenge[
 export async function ensureCustomerPortalSession(identity: PaymentIdentity, password = '', passwordRequired?: boolean): Promise<string> {
   const i = normalize(identity), key = keyOf(i);
   const expected = generation(i);
-  if (!i.salonCode || !i.email || i.phone.length !== 10) throw new Error('Controlla email, cellulare e salone collegato.');
+  if (!i.salonCode || !i.email || i.phone.length < 9) throw new Error('Controlla email, cellulare e salone collegato.');
   if (opening.has(key)) return opening.get(key)!;
   const task = (async () => {
     let token: string;
