@@ -74,8 +74,11 @@ export function AgendaLiveGlow({enabled}:{night:boolean;enabled:boolean}) {
  </View>;
 }
 /** "In corso" in the live slot: plain coral, no motion. */
-export function AgendaLiveSlotLabel(){
+export function AgendaLiveSlotLabel({action=false}:{action?:boolean}={}){
+ // Like "Passato": on hover the label steps aside and the "+" sits next to it.
  return <View pointerEvents="none" style={{width:'100%',height:'100%',alignItems:'center',justifyContent:'center'}}>
-  <Text numberOfLines={1} style={{color:'#E0584B',fontSize:Platform.OS==='web'?11:10,lineHeight:14,fontWeight:'800',letterSpacing:.2}}>In corso</Text>
+  <View {...(Platform.OS==='web'?{dataSet:{agendaBlockedLabel:action?'true':'false'}}:{})} style={{position:'relative',alignItems:'center'}}>
+   <Text numberOfLines={1} style={{color:'#E0584B',fontSize:Platform.OS==='web'?11:10,lineHeight:14,fontWeight:'800',letterSpacing:.2}}>In corso</Text>
+  </View>
  </View>;
 }

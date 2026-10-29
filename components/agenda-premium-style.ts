@@ -224,7 +224,9 @@ export function createAgendaPremiumStyles<T extends Record<string,any>>(base:T,t
  patch('weekPlannerTimeTextMinor',{color:p.muted,fontSize:web?11:10,lineHeight:14,fontWeight:'400'});
  patch('weekPlannerTimeTextHour',{color:p.ink,fontSize:web?12:11,lineHeight:15,fontWeight:'500'});
  // Il banner che compare è la stessa tessera arrotondata dell'intestazione: nessuna fascia squadrata dietro.
- patch('weekStickyOperatorHeaderOverlayWeb',{backgroundColor:'transparent',backgroundImage:'none',backdropFilter:'none',boxShadow:'none'} as any);
+ // Same fill as the grid (no visible band), fading out at the bottom so the
+ // slot lines slide in softly instead of drawing a hard edge under the banner.
+ patch('weekStickyOperatorHeaderOverlayWeb',{backgroundColor:'transparent',backgroundImage:`linear-gradient(to bottom, ${p.night?AGENDA_GRID_FILL.night:AGENDA_GRID_FILL.day} 0%, ${p.night?AGENDA_GRID_FILL.night:AGENDA_GRID_FILL.day} 84%, transparent 100%)`,backdropFilter:'none',boxShadow:'none'} as any);
  // The current-time indicator uses the same action tone as the controls.
  patch('weekPlannerCurrentTimeRailGlow',{top:-1,height:4,backgroundColor:'rgba(237,155,148,.08)'});
  patch('weekPlannerCurrentTimeLine',{height:1.25,backgroundColor:'#ED9B94'});

@@ -246,6 +246,7 @@ const OWNER_ANDROID_FOREGROUND_SYNC_FALLBACK_MS = 2 * 60 * 1000;
 const OWNER_WORKSPACE_FLAGS_FALLBACK_MS = 1800;
 const OWNER_ANDROID_WORKSPACE_FLAGS_FALLBACK_MS = 15000;
 const OWNER_WEB_AVAILABILITY_SYNC_FALLBACK_MS = 4000;
+const AUTOMATIC_PORTAL_PUBLISH_MIN_INTERVAL_MS = 30000;
 const OWNER_AUTO_ACCEPT_SERVER_CATCHUP_THROTTLE_MS = 10000;
 const logAndroidAgendaPerf = (
   event: string,
@@ -8904,6 +8905,7 @@ function AppProviderState({ children, isOwnerProtectedContextRoute }: {
     typeof setTimeout
   > | null>(null);
   const lastAutomaticPortalPublishSignatureRef = React.useRef('');
+  const lastAutomaticPortalPublishAtRef = React.useRef(0);
   const pendingAutomaticPortalPublishSignatureRef = React.useRef('');
   const androidOwnerCachePreviewActiveRef = React.useRef(false);
   const servicesBackendSyncDebounceRef = React.useRef<ReturnType<
@@ -8925,6 +8927,8 @@ function AppProviderState({ children, isOwnerProtectedContextRoute }: {
   const ownerSnapshotSyncDebounceRef = React.useRef<ReturnType<
     typeof setTimeout
   > | null>(null);
+  const colorOverridesLastSyncedSignatureRef = React.useRef('');
+  const colorOverridesLastSyncAtRef = React.useRef(0);
   const colorOverridesSyncDebounceRef = React.useRef<ReturnType<
     typeof setTimeout
   > | null>(null);
@@ -19825,7 +19829,14 @@ function AppProviderState({ children, isOwnerProtectedContextRoute }: {
       ),
       servizi: buildServiziSignature(servizi),
       operatori: buildOrderIndependentCollectionSignature(normalizeOperatori(operatori)),
-      richiestePrenotazione: buildAndroidPortalRequestSignature(richiestePrenotazione),
+      // The two owner sync paths disagree on these salon-only fields and keep
+      // flipping them; the client portal never shows them.
+      richiestePrenotazione: buildAndroidPortalRequestSignature(
+        richiestePrenotazione.map(
+          ({ createdAt: _createdAt, viewedBySalon: _viewedBySalon, viewedByCliente: _viewedByCliente, ...item }) =>
+            item as RichiestaPrenotazione,
+        ),
+      ),
       availabilitySettings: availabilitySettingsRef.current,
       serviceCardColorOverrides,
       roleCardColorOverrides,
@@ -19843,6 +19854,7 @@ function AppProviderState({ children, isOwnerProtectedContextRoute }: {
     let cancelled = false;
 
     const publishPortalSnapshot = async () => {
+      lastAutomaticPortalPublishAtRef.current = Date.now();
       pendingAutomaticPortalPublishSignatureRef.current =
         automaticPublishSignature;
       try {
@@ -19878,9 +19890,16 @@ function AppProviderState({ children, isOwnerProtectedContextRoute }: {
       clearTimeout(portalPublishDebounceRef.current);
     }
 
+    // Automatic publication is a safety net (owner actions publish directly):
+    // at most one every 30 s, with the latest data published at the end.
+    const automaticPublishDelay = Math.max(
+      300,
+      AUTOMATIC_PORTAL_PUBLISH_MIN_INTERVAL_MS -
+        (Date.now() - lastAutomaticPortalPublishAtRef.current),
+    );
     portalPublishDebounceRef.current = setTimeout(() => {
       void publishPortalSnapshot();
-    }, 300);
+    }, automaticPublishDelay);
 
     return () => {
       cancelled = true;
@@ -21481,8 +21500,18 @@ function AppProviderState({ children, isOwnerProtectedContextRoute }: {
       clearTimeout(colorOverridesSyncDebounceRef.current);
     }
 
+    // Colour edits sync at once. Every other data change only re-runs this
+    // full snapshot write as a slow safety net: at most once a minute, with
+    // the latest data, instead of after each background refresh.
+    const colorSignature = JSON.stringify([serviceCardColorOverrides, roleCardColorOverrides]);
+    const colorsChanged = colorSignature !== colorOverridesLastSyncedSignatureRef.current;
+    const colorSyncDelay = colorsChanged
+      ? 120
+      : Math.max(120, 60000 - (Date.now() - colorOverridesLastSyncAtRef.current));
     colorOverridesSyncDebounceRef.current = setTimeout(() => {
       if (operatorsRemoteWritePendingRef.current > 0) return;
+      colorOverridesLastSyncedSignatureRef.current = colorSignature;
+      colorOverridesLastSyncAtRef.current = Date.now();
       void Promise.allSettled([
         syncOwnerSnapshotForWorkspace(workspaceId, {
           workspace: salonWorkspace,
@@ -21525,7 +21554,7 @@ function AppProviderState({ children, isOwnerProtectedContextRoute }: {
           }
         });
       });
-    }, 120);
+    }, colorSyncDelay);
 
     return () => {
       if (colorOverridesSyncDebounceRef.current) {

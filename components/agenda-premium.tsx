@@ -176,7 +176,6 @@ export function AgendaPremiumSlotCss(){
  if(!web)return null;
  const fill=p.night?'rgba(216,194,155,.14)':'rgba(104,128,108,.13)';
  const stroke=p.night?'rgba(232,218,190,.52)':'rgba(98,118,102,.42)';
- const headerDivider=p.night?'rgba(216,194,155,.36)':'rgba(52,55,53,.26)';
  const operatorDivider=p.night?'rgba(216,194,155,.28)':'rgba(52,55,53,.22)';
  return React.createElement('style',null,`
  [data-testid="agenda-appointment-details"] {background:${p.night?'rgba(31,36,33,.98)':'rgba(247,245,238,.98)'}!important;box-shadow:0 24px 72px #0003,inset 0 1px 0 #ffffff20!important;}
@@ -190,7 +189,6 @@ export function AgendaPremiumSlotCss(){
  [data-testid="agenda-appointment-details"] [data-agenda-details-part="duration"] {flex-direction:column!important;align-items:flex-start!important;gap:6px!important;}
  [data-testid="agenda-appointment-details"] [data-agenda-details-part="duration"] > * {width:auto!important;flex:0 1 auto!important;}
  [data-agenda-operator-header="true"] {position:relative;}
- [data-agenda-operator-header="true"]::after {content:"";position:absolute;left:0;right:0;bottom:-2px;height:4px;background:linear-gradient(to bottom,transparent,${headerDivider} 45%,${headerDivider} 55%,transparent);pointer-events:none;z-index:8;}
  [data-agenda-operator-header="true"] > * + *::before {content:"";position:absolute;left:0;top:12px;bottom:12px;width:1px;background:linear-gradient(to bottom,transparent,${operatorDivider} 28%,${operatorDivider} 72%,transparent);pointer-events:none;z-index:5;}
  [data-agenda-timeline-card="true"] {padding:12px!important;}
  [data-agenda-timeline-part="top"] {margin-bottom:8px!important;}

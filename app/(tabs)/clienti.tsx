@@ -4504,6 +4504,8 @@ export default function ClientiScreen() {
                     : 'Cerca nome, telefono, email o Instagram'
                 }
                 placeholderTextColor="#8f8f8f"
+                autoComplete="off"
+                autoCorrect={false}
                 value={ricerca}
                 onChangeText={setRicerca}
                 style={[
@@ -4982,7 +4984,7 @@ export default function ClientiScreen() {
                   </View>
                 </View>
 
-              <CustomerDirectorySummary total={clienti.length} cancelled={cancellationAlertsCount} loading={ownerStartupLoading} />
+              <CustomerDirectorySummary total={clienti.length} cancelled={cancellationAlertsCount} loading={ownerStartupLoading || (clienti.length === 0 && (!ownerServerSyncReady || ownerInitialDataHydrating))} />
 
             </View>
 

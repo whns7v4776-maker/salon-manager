@@ -7,7 +7,7 @@ import { ownerAgendaCustomerLabel } from '../../src/lib/owner-portal-read-policy
 import { SkeletonSurface } from '../../components/ui/skeleton-shimmer';
 import {NativePremiumScope} from '../../components/owner-native-premium';
 import {NativeAgendaSearchToolbar} from '../../components/agenda-native-search-toolbar';
-import {NativeAgendaUnavailable,NativeAgendaMarker,NativeAgendaHeaderRule} from '../../components/agenda-native-presentation';
+import {NativeAgendaUnavailable,NativeAgendaMarker} from '../../components/agenda-native-presentation';
 import { PremiumFitLabel } from '../../components/ui/premium-fit-label';
 import { PremiumSectionHeading, PremiumSectionHeader } from '../../components/ui/premium-section-heading';
 import { PremiumSearchToolbar } from '../../components/ui/premium-search-toolbar';
@@ -1250,7 +1250,6 @@ const WEEK_PLANNER_RIGHT_CLIP_GUARD = 4;
 // perfettamente allineata anche sul web.
 const WEEK_PLANNER_TIME_COL_TOTAL = IS_WEB ? 52 : 48;
 const AGENDA_SINGLE_LANE_MAX_WIDTH = 860;
-const AGENDA_STICKY_OPERATOR_HEADER_ENABLED = false;
 
 type AgendaDensityOption = {
   id: AgendaDensityId;
@@ -34778,7 +34777,10 @@ export default function AgendaScreen() {
       const phase=[position?`Fase ${position}`:'',overlap?'Sovrapposto':final?'Ripresa':processing?`Posa ${processing} min`:''].filter(Boolean).join(' · ');
       const service=(phaseConfig?(final?phaseConfig.finalServiceName:phaseConfig.initialLabel):'')?.trim()||appointment.servizio.trim();
       const source=getEffectiveWeekAppointmentSourceBadge(appointment);
-      const origin=source==='salon'?'Salone':source==='operator'?'Operatore':'Cliente';
+      // Temporary copies (drag, optimistic moves) can lack sourceBadge: only a
+      // real client booking may read "Cliente".
+      const bookedByClient=(appointment.bookingOrigin ?? (appointment.syntheticRequestId?.trim() ? 'frontend' : 'backoffice'))==='frontend';
+      const origin=source==='salon'?'Salone':source==='operator'?'Operatore':bookedByClient?'Cliente':appointment.operatoreNome?.trim()?'Operatore':'Salone';
       const tone=getWeekAppointmentTone(appointment,showPendingVisualOverride);
       const width=blockWidthOverride??weekVisibleColWidth;
       const footer=reserveResizeFooter?(IS_WEB?getWebWeekResizeIndicatorHeight(blockHeight):getNativeWeekResizeIndicatorHeight(blockHeight)):0;
@@ -46751,7 +46753,7 @@ export default function AgendaScreen() {
                             { gap: operatorLaneGap },
                           ]}
                         >
-                          {!IS_WEB ? <NativeAgendaHeaderRule night={availabilityPalette.night}/> : null}
+                          
                           {operatorLaneDefinitions.map((lane) => {
                             const laneInfo =
                               getWeekPlannerLaneDisplayInfo(lane);
@@ -48282,7 +48284,7 @@ accessibilityHint={
                                             }
                                             disabled={!laneSalonCanQuickBook}
                                           >
-{!isLunchBreakSlot && (isPastFreeSlot || isClosedDay) && (!IS_WEB || weekBaseSlotInterval >= 15 || timeToMinutes(slotTime) % 15 === 0) ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaStateLabel label={isClosedDay?'Chiuso':'Passato'} action={laneSalonCanQuickBook}/></View>:null}{isCurrentSlotToday && !isPastFreeSlot && !isClosedDay && !isLunchBreakSlot ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaLiveSlotLabel/></View>:null}
+{!isLunchBreakSlot && (isPastFreeSlot || isClosedDay) && (!IS_WEB || weekBaseSlotInterval >= 15 || timeToMinutes(slotTime) % 15 === 0) ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaStateLabel label={isClosedDay?'Chiuso':'Passato'} action={laneSalonCanQuickBook}/></View>:null}{isCurrentSlotToday && !isPastFreeSlot && !isClosedDay && !isLunchBreakSlot ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaLiveSlotLabel action={laneSalonCanQuickBook}/></View>:null}
                                             {laneDragPreview &&
                                             !laneOccupyingAppointment ? null : laneSalonCanQuickBook &&
                                               !laneQuickBookAvailable &&
@@ -48518,7 +48520,7 @@ null
                                             }
                                           >
                                             {(isPastFreeSlot || isLaneVisuallyDisabled || isClosedDay || isLaneOutsideScheduleSlot || laneCellState === 'outside' || (laneCellState === 'blocked' && !isLunchBreakSlot)) ? <NativeAgendaUnavailable night={availabilityPalette.night} phase={rowIndex + laneIndex}/> : null}
-{!isLunchBreakSlot && (isPastFreeSlot || isClosedDay) && (!IS_WEB || weekBaseSlotInterval >= 15 || timeToMinutes(slotTime) % 15 === 0) ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaStateLabel label={isClosedDay?'Chiuso':'Passato'} action={laneSalonCanQuickBook}/></View>:null}{isCurrentSlotToday && !isPastFreeSlot && !isClosedDay && !isLunchBreakSlot ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaLiveSlotLabel/></View>:null}
+{!isLunchBreakSlot && (isPastFreeSlot || isClosedDay) && (!IS_WEB || weekBaseSlotInterval >= 15 || timeToMinutes(slotTime) % 15 === 0) ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaStateLabel label={isClosedDay?'Chiuso':'Passato'} action={laneSalonCanQuickBook}/></View>:null}{isCurrentSlotToday && !isPastFreeSlot && !isClosedDay && !isLunchBreakSlot ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaLiveSlotLabel action={laneSalonCanQuickBook}/></View>:null}
                                             {laneDragPreview &&
                                             !laneOccupyingAppointment ? null : laneSalonCanQuickBook &&
                                               !laneQuickBookAvailable &&
@@ -49065,7 +49067,7 @@ null
                                       cellState !== 'blocked'
                                     }
                                   >
-                                    {!isLunchBreakSlot && (isPastFreeSlot || isClosedDay) && (!IS_WEB || weekBaseSlotInterval >= 15 || timeToMinutes(slotTime) % 15 === 0) ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaStateLabel label={isClosedDay?'Chiuso':'Passato'} action={canSalonQuickBook}/></View>:null}{isCurrentSlotToday && !isPastFreeSlot && !isClosedDay && !isLunchBreakSlot ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaLiveSlotLabel/></View>:null}
+                                    {!isLunchBreakSlot && (isPastFreeSlot || isClosedDay) && (!IS_WEB || weekBaseSlotInterval >= 15 || timeToMinutes(slotTime) % 15 === 0) ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaStateLabel label={isClosedDay?'Chiuso':'Passato'} action={canSalonQuickBook}/></View>:null}{isCurrentSlotToday && !isPastFreeSlot && !isClosedDay && !isLunchBreakSlot ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaLiveSlotLabel action={canSalonQuickBook}/></View>:null}
 {isSwapPreviewFreeTarget ? (
                                       <WeekDragTargetHighlight
                                         tone={
@@ -49835,10 +49837,7 @@ null
   );
 
   // Il duplicato vive nel body sul web: senza il focus resterebbe sopra le altre pagine.
-  // Disattivato: scorrendo il banner fluttuava sopra gli slot. Le intestazioni
-  // restano in cima alla griglia e scorrono con essa.
   const weekStickyOperatorHeaderContent =
-    AGENDA_STICKY_OPERATOR_HEADER_ENABLED &&
     isAgendaScreenFocused &&
     !isAgendaForegroundOverlayOpen &&
     weekStickyOperatorHeaderVisible &&
@@ -49917,7 +49916,7 @@ null
                         { gap: operatorLaneGap },
                       ]}
                     >
-                          {!IS_WEB ? <NativeAgendaHeaderRule night={availabilityPalette.night}/> : null}
+                          
                       {operatorLaneDefinitions.map((lane) => {
                         const laneInfo = getWeekPlannerLaneDisplayInfo(lane);
                         const isHistoricalLaneDisabled =
@@ -49981,6 +49980,15 @@ null
     IS_WEB && typeof document !== 'undefined' && weekStickyOperatorHeaderContent
       ? createPortal(weekStickyOperatorHeaderContent, document.body)
       : weekStickyOperatorHeaderContent;
+  // While the floating copy is shown, the grid header scrolls behind it: hide
+  // that original (global.css) so the two never show as a doubled banner.
+  const weekStickyOperatorHeaderShown = !!weekStickyOperatorHeaderContent;
+  useEffect(() => {
+    if (!IS_WEB || typeof document === 'undefined') return;
+    const root = document.documentElement;
+    root.setAttribute('data-agenda-sticky-on', weekStickyOperatorHeaderShown ? 'true' : 'false');
+    return () => root.setAttribute('data-agenda-sticky-on', 'false');
+  }, [weekStickyOperatorHeaderShown]);
   const quickBookingPackageRender =
     quickSlotModalShellDraft && quickSlotDraft && quickBookingPackageMode
       ? renderQuickBookingPackageSummary()
