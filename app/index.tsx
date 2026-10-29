@@ -2726,6 +2726,10 @@ function PremiumClientLandingScreen() {
     >
       <AccessBackdrop />
       <AccessNavigationBar onBack={openAudiencePicker} backLabel={`Lato ${showOwnerLanding ? 'salone' : 'cliente'}. Cambia modalità di accesso.`} maxWidth={landingShellMaxWidth} />
+      {/* Fixed brand header: only the forms below it scroll. */}
+      <View style={{ paddingHorizontal: landingHorizontalPadding }}>
+        <LandingAccessHeader audience={showOwnerLanding ? 'owner' : 'client'} ownerMode={ownerAccessMode} />
+      </View>
 
       <ScrollView
         ref={scrollRef}
@@ -2733,7 +2737,7 @@ function PremiumClientLandingScreen() {
         contentContainerStyle={[
           styles.content,
           { paddingTop: 8 },
-          Platform.OS === 'web' && {justifyContent:'flex-start',paddingTop:76},
+          Platform.OS === 'web' && {justifyContent:'flex-start',paddingTop:8},
           { paddingHorizontal: landingHorizontalPadding },
           Platform.OS === 'android' && { paddingBottom: androidLandingBottomPadding },
           isRegistrationOnlyClientWebFlow && styles.registrationOnlyWebContent,
@@ -2798,8 +2802,6 @@ function PremiumClientLandingScreen() {
                           Platform.OS === 'web' && {flexDirection:'column',alignItems:'stretch',gap:0,width:'100%',maxWidth:560,alignSelf:'center'},
                         ]}
                       >
-                        <LandingAccessHeader ownerMode={ownerAccessMode} audience="owner" />
-
                         <View
                           style={[
                             styles.ownerInlineAccessWrap,
@@ -2921,8 +2923,6 @@ function PremiumClientLandingScreen() {
                       expandLandingWideContent && styles.clientSectionCardWide,
                     ]}
                   >
-                    <LandingAccessHeader audience="client" />
-
                     <View
                       style={[
                         styles.accessCard,
