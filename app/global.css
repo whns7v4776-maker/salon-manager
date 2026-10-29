@@ -71,10 +71,10 @@
 .slot-fit-footer .slot-fit-person-copy { flex: 0 1 auto; }
 .slot-fit-footer .slot-fit-team-badge { align-self: center; }
 .slot-fit-footer .slot-fit-avatar { background: #385C83; color: #fff; border-color: #fff; box-shadow: 0 1px 3px rgba(30,57,91,.15); }
-.slot-fit-footer .slot-fit-team-badge { background: #E2ECF8; color: #355A80; border-left: 2px solid #789FC7; border-radius: 4px; }
+.slot-fit-footer .slot-fit-team-badge { background: #E2ECF8; color: #355A80; border: 1px solid #C9DAEE; border-radius: 4px; }
 .slot-fit-content[data-selected='true'] .slot-fit-footer { background: linear-gradient(120deg, rgba(255,255,255,.16), rgba(255,255,255,.08)); border-color: rgba(255,255,255,.22); }
 .slot-fit-content[data-selected='true'] .slot-fit-avatar { background: #DCE9F8; color: #274866; border-color: #8099B4; }
-.slot-fit-content[data-selected='true'] .slot-fit-team-badge { background: rgba(255,255,255,.15); color: #E5F0FF; border-left-color: #ADCBEF; }
+.slot-fit-content[data-selected='true'] .slot-fit-team-badge { background: rgba(255,255,255,.15); color: #E5F0FF; border-color: rgba(255,255,255,.22); }
 .slot-fit-person { display: flex; align-items: center; gap: 8px; min-width: 0; padding-top: 7px; border-top: 1px solid color-mix(in srgb, var(--fit-muted) 20%, transparent); }
 .slot-fit-avatars { display: inline-flex; flex-shrink: 0; padding-right: 2px; }
 .slot-fit-avatars .slot-fit-avatar + .slot-fit-avatar { margin-left: -7px; }
