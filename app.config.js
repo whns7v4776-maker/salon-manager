@@ -1,7 +1,7 @@
 const isDevelopmentVariant = process.env.APP_VARIANT === 'development';
 const terminalBuildEnabled = process.env.STRIPE_TERMINAL_BUILD === 'true';
 const metaAppConfig = require('./config/meta-app-events');
-const appVersion = '1.0.23';
+const appVersion = '1.0.22';
 const appName = isDevelopmentVariant ? 'SalonPro DEV' : 'SalonPro';
 const appScheme = isDevelopmentVariant ? 'salonmanager-dev' : 'salonmanager';
 const iosBundleIdentifier = isDevelopmentVariant
