@@ -1250,6 +1250,7 @@ const WEEK_PLANNER_RIGHT_CLIP_GUARD = 4;
 // perfettamente allineata anche sul web.
 const WEEK_PLANNER_TIME_COL_TOTAL = IS_WEB ? 52 : 48;
 const AGENDA_SINGLE_LANE_MAX_WIDTH = 860;
+const AGENDA_STICKY_OPERATOR_HEADER_ENABLED = false;
 
 type AgendaDensityOption = {
   id: AgendaDensityId;
@@ -49834,7 +49835,10 @@ null
   );
 
   // Il duplicato vive nel body sul web: senza il focus resterebbe sopra le altre pagine.
+  // Disattivato: scorrendo il banner fluttuava sopra gli slot. Le intestazioni
+  // restano in cima alla griglia e scorrono con essa.
   const weekStickyOperatorHeaderContent =
+    AGENDA_STICKY_OPERATOR_HEADER_ENABLED &&
     isAgendaScreenFocused &&
     !isAgendaForegroundOverlayOpen &&
     weekStickyOperatorHeaderVisible &&
