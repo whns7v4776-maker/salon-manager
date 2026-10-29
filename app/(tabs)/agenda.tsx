@@ -1149,6 +1149,8 @@ const getWebWeekResizeIndicatorHeight = (contentHeight: number) => {
 
   // Il mouse conserva la presa standard da 27 px. Solo la riga web minima da
   // 30 px la comprime quanto basta per lasciare una riga informativa reale.
+  // Schede da 5 minuti: presa da 8 px, il resto alla riga di testo.
+  if (safeContentHeight < 30) return 8;
   return safeContentHeight < 38
     ? Math.max(18, Math.min(27, safeContentHeight - 10))
     : 27;
@@ -14260,8 +14262,14 @@ export default function AgendaScreen() {
       ? Math.min(...visibleDayIntervals)
       : Math.max(5, availabilitySettings.slotIntervalMinutes || 30);
   }, [availabilitySettings, weekVisibleDates]);
-  // Slot duration does not shrink physical rows. Drag and resize continue to read the measured time axis.
-  const agendaDensityRowHeight=agendaSlotRowHeight(IS_WEB,agendaDensityScale);
+  // On web, 5/10 minute slots shrink physical rows. Drag and resize continue to read the measured time axis.
+  const agendaDensityRowHeight=agendaSlotRowHeight(IS_WEB,agendaDensityScale,weekBaseSlotInterval);
+  // A lone operator column stretched across a wide screen is hard to read:
+  // header, day strip, filters and grid share one centered comfortable width.
+  const agendaSingleLaneWebFrame =
+    IS_WEB && weekVisibleDates.length === 1 && agendaVisibleOperatorCount <= 1
+      ? ({ width: '100%', maxWidth: AGENDA_SINGLE_LANE_MAX_WIDTH, alignSelf: 'center' } as const)
+      : null;
   useEffect(() => {
     nativeWeekDropTargetSlotHeight.value = Math.max(
       18,
@@ -46242,7 +46250,7 @@ export default function AgendaScreen() {
         }}
       >
         {weekEffectiveVisibleDays>1?<Text style={[styles.weekPlannerTitle,{marginBottom:8}]}>{weekRangeLabel}</Text>:null}
-        <View {...(IS_WEB?{dataSet:{agendaSearchRow:'true'}}:{})} style={{flexDirection:'row',alignItems:'center',flexWrap:'nowrap',gap:IS_WEB?10:7,marginBottom:10,zIndex:80,minWidth:0}}>
+        <View {...(IS_WEB?{dataSet:{agendaSearchRow:'true'}}:{})} style={[{flexDirection:'row',alignItems:'center',flexWrap:'nowrap',gap:IS_WEB?10:7,marginBottom:10,zIndex:80,minWidth:0},agendaSingleLaneWebFrame]}>
           {IS_WEB?<View style={{flex:1,minWidth:0,overflow:'hidden'}}><AgendaPremiumOperatorFilters inline operators={operatori} selected={agendaFilteredOperators} locked={agendaVisibleOperatorCount>1}
             onAll={()=>setAgendaOperatorFilter(null)} onToggle={id=>setAgendaOperatorFilter(current=>toggleAgendaOperator(current,id,operatori.map(op=>op.id)))}/></View>:null}
           {!IS_WEB?<View style={{flex:1,minWidth:0,overflow:'hidden'}}><AgendaPremiumOperatorFilters inline operators={operatori} selected={agendaFilteredOperators} locked={agendaVisibleOperatorCount>1}
@@ -46255,14 +46263,9 @@ export default function AgendaScreen() {
           testID={IS_WEB ? 'agenda-week-planner-overlay-host' : undefined}
           style={[
             styles.weekPlannerOverlayHost,
-            // A lone operator column stretched across a wide screen is hard to
-            // read: keep it at a comfortable width. Every lane measure derives
-            // from this host's width, so drag and resize geometry follow.
-            IS_WEB && weekVisibleDates.length === 1 && agendaVisibleOperatorCount <= 1 && {
-              width: '100%',
-              maxWidth: AGENDA_SINGLE_LANE_MAX_WIDTH,
-              alignSelf: 'center',
-            },
+            // Every lane measure derives from this host's width, so drag and
+            // resize geometry follow the comfortable single-lane frame.
+            agendaSingleLaneWebFrame,
           ]}
           onLayout={(e) => {
             // The web table has a 1px frame on each side. Columns use its
@@ -46480,6 +46483,13 @@ export default function AgendaScreen() {
                       rowIndex === 0
                         ? styles.weekPlannerTimeBoundaryRowFirst
                         : styles.weekPlannerTimeBoundaryRowMiddle;
+                    // Web grids under 15 minutes label only the quarter hours:
+                    // the 5/10 minute rows stay as thin lines in the grid.
+                    const showTimeLabel =
+                      !IS_WEB ||
+                      weekBaseSlotInterval >= 15 ||
+                      isStrongTimeBoundary ||
+                      timeToMinutes(slotTime) % 15 === 0;
 
                     return (
                       <View
@@ -46495,7 +46505,7 @@ export default function AgendaScreen() {
                           )
                         }
                       >
-                        <View
+                        {showTimeLabel ? <View
                           style={[
                             styles.weekPlannerTimeBoundaryRow,
                             boundaryRowStyle,
@@ -46521,7 +46531,7 @@ export default function AgendaScreen() {
                               {slotTime}
                             </Text>
                           </View>
-                        </View>
+                        </View> : null}
                       </View>
                     );
                   })}
@@ -48259,7 +48269,7 @@ accessibilityHint={
                                             }
                                             disabled={!laneSalonCanQuickBook}
                                           >
-{!isLunchBreakSlot && (isPastFreeSlot || isClosedDay) ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaStateLabel label={isClosedDay?'Chiuso':'Passato'} action={laneSalonCanQuickBook}/></View>:null}
+{!isLunchBreakSlot && (isPastFreeSlot || isClosedDay) && (!IS_WEB || weekBaseSlotInterval >= 15 || timeToMinutes(slotTime) % 15 === 0) ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaStateLabel label={isClosedDay?'Chiuso':'Passato'} action={laneSalonCanQuickBook}/></View>:null}
                                             {laneDragPreview &&
                                             !laneOccupyingAppointment ? null : laneSalonCanQuickBook &&
                                               !laneQuickBookAvailable &&
@@ -48495,7 +48505,7 @@ null
                                             }
                                           >
                                             {(isPastFreeSlot || isLaneVisuallyDisabled || isClosedDay || isLaneOutsideScheduleSlot || laneCellState === 'outside' || (laneCellState === 'blocked' && !isLunchBreakSlot)) ? <NativeAgendaUnavailable night={availabilityPalette.night} phase={rowIndex + laneIndex}/> : null}
-{!isLunchBreakSlot && (isPastFreeSlot || isClosedDay) ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaStateLabel label={isClosedDay?'Chiuso':'Passato'} action={laneSalonCanQuickBook}/></View>:null}
+{!isLunchBreakSlot && (isPastFreeSlot || isClosedDay) && (!IS_WEB || weekBaseSlotInterval >= 15 || timeToMinutes(slotTime) % 15 === 0) ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaStateLabel label={isClosedDay?'Chiuso':'Passato'} action={laneSalonCanQuickBook}/></View>:null}
                                             {laneDragPreview &&
                                             !laneOccupyingAppointment ? null : laneSalonCanQuickBook &&
                                               !laneQuickBookAvailable &&
@@ -49042,7 +49052,7 @@ null
                                       cellState !== 'blocked'
                                     }
                                   >
-                                    {!isLunchBreakSlot && (isPastFreeSlot || isClosedDay) ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaStateLabel label={isClosedDay?'Chiuso':'Passato'} action={canSalonQuickBook}/></View>:null}
+                                    {!isLunchBreakSlot && (isPastFreeSlot || isClosedDay) && (!IS_WEB || weekBaseSlotInterval >= 15 || timeToMinutes(slotTime) % 15 === 0) ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaStateLabel label={isClosedDay?'Chiuso':'Passato'} action={canSalonQuickBook}/></View>:null}
 {isSwapPreviewFreeTarget ? (
                                       <WeekDragTargetHighlight
                                         tone={
@@ -49251,7 +49261,7 @@ null
         </View>
       </View>
     );
-  }, [...weekPlannerPanelDependencies, weekReorganizationDraft !== null, ricerca, campoAttivo, suggerimentiRicerca, nativeAgendaSearchExpanded, getAgendaCustomerIdentityColor, weekPlannerHorizontalMetrics.maxScrollX, weekPlannerNativeScrollCueThumbStyle, nativeScrubberHeight, effectivePlannerDayHeaderHeight]);
+  }, [...weekPlannerPanelDependencies, weekReorganizationDraft !== null, ricerca, campoAttivo, suggerimentiRicerca, nativeAgendaSearchExpanded, getAgendaCustomerIdentityColor, weekPlannerHorizontalMetrics.maxScrollX, weekPlannerNativeScrollCueThumbStyle, nativeScrubberHeight, effectivePlannerDayHeaderHeight, weekBaseSlotInterval]);
 
   React.useLayoutEffect(() => {
     if (!holdWeekPlannerForQuickBooking) {
@@ -50023,8 +50033,8 @@ null
         onMomentumScrollEnd={handleAgendaListMomentumScrollEnd}
         ListHeaderComponent={
           <View style={[styles.pageShell, { maxWidth: agendaContentMaxWidth }]}>
-            <AgendaPremiumHeader date={formatDateLongLocalized(data,appLanguage)} time={`${String(weekPlannerNow.getHours()).padStart(2,'0')}:${String(weekPlannerNow.getMinutes()).padStart(2,'0')}`} onAvailability={()=>{availabilityReturnRef.current=null;if(!customizeHoursExpandedRef.current)toggleCustomizeHours();}}
-              review={servicesAwaitingCompletion.length?<HapticTouchable accessibilityRole="button" accessibilityLabel="Verifica servizi da completare" onPress={()=>servicesAwaitingCompletion.length>1?setCompletionReviewOpen(true):openWeekAppointmentDetails(servicesAwaitingCompletion[0])} style={{minHeight:44,flexDirection:'row',alignItems:'center',gap:10,paddingLeft:6,paddingRight:14,paddingVertical:6,borderRadius:22,borderWidth:1,borderColor:availabilityPalette.night?'#D9BD8733':'#EBD3AE',backgroundColor:availabilityPalette.night?'#3A3226':'#FAEBD3',maxWidth:'100%',shadowColor:'#6E542E',shadowOpacity:availabilityPalette.night?0:.08,shadowRadius:8,shadowOffset:{width:0,height:3}}}><View style={{width:32,height:32,borderRadius:16,alignItems:'center',justifyContent:'center',backgroundColor:availabilityPalette.night?'#4A3E2C':'#F3E2C4',borderWidth:1,borderColor:availabilityPalette.night?'rgba(216,194,155,.32)':'rgba(150,118,72,.3)'}}><Ionicons name="alert-circle-outline" size={18} color={availabilityPalette.night?'#E3BD89':'#7A5424'}/></View><Text style={{fontSize:13,fontWeight:'500',color:availabilityPalette.ink,flexShrink:1}}>{servicesAwaitingCompletion.length===1?'1 servizio da completare':`${servicesAwaitingCompletion.length} servizi da completare`}</Text><Text style={{fontSize:13,fontWeight:'600',color:availabilityPalette.night?'#E3BD89':'#7A5424'}}>Verifica ›</Text></HapticTouchable>:null}/>
+            <View style={agendaSingleLaneWebFrame}><AgendaPremiumHeader date={formatDateLongLocalized(data,appLanguage)} time={`${String(weekPlannerNow.getHours()).padStart(2,'0')}:${String(weekPlannerNow.getMinutes()).padStart(2,'0')}`} onAvailability={()=>{availabilityReturnRef.current=null;if(!customizeHoursExpandedRef.current)toggleCustomizeHours();}}
+              review={servicesAwaitingCompletion.length?<HapticTouchable accessibilityRole="button" accessibilityLabel="Verifica servizi da completare" onPress={()=>servicesAwaitingCompletion.length>1?setCompletionReviewOpen(true):openWeekAppointmentDetails(servicesAwaitingCompletion[0])} style={{minHeight:44,flexDirection:'row',alignItems:'center',gap:10,paddingLeft:6,paddingRight:14,paddingVertical:6,borderRadius:22,borderWidth:1,borderColor:availabilityPalette.night?'#D9BD8733':'#EBD3AE',backgroundColor:availabilityPalette.night?'#3A3226':'#FAEBD3',maxWidth:'100%',shadowColor:'#6E542E',shadowOpacity:availabilityPalette.night?0:.08,shadowRadius:8,shadowOffset:{width:0,height:3}}}><View style={{width:32,height:32,borderRadius:16,alignItems:'center',justifyContent:'center',backgroundColor:availabilityPalette.night?'#4A3E2C':'#F3E2C4',borderWidth:1,borderColor:availabilityPalette.night?'rgba(216,194,155,.32)':'rgba(150,118,72,.3)'}}><Ionicons name="alert-circle-outline" size={18} color={availabilityPalette.night?'#E3BD89':'#7A5424'}/></View><Text style={{fontSize:13,fontWeight:'500',color:availabilityPalette.ink,flexShrink:1}}>{servicesAwaitingCompletion.length===1?'1 servizio da completare':`${servicesAwaitingCompletion.length} servizi da completare`}</Text><Text style={{fontSize:13,fontWeight:'600',color:availabilityPalette.night?'#E3BD89':'#7A5424'}}>Verifica ›</Text></HapticTouchable>:null}/></View>
             {completionReviewOpen?<OwnerCompletionReview visible={!weekAppointmentDetails} items={servicesAwaitingCompletion} onClose={()=>setCompletionReviewOpen(false)} onComplete={completeOwnerAppointmentForSalon} onDetails={id=>{const item=servicesAwaitingCompletion.find(x=>x.id===id);if(item)openWeekAppointmentDetails(item);}}/>:null}
 
 
@@ -50091,7 +50101,7 @@ null
                     note="La data scelta è condivisa da form, slot rapidi e Panoramica Settimana; le regole pubbliche restano separate dalla libertà operativa del salone."
                   />
                 ) : null}
-                <AgendaPremiumDateStrip
+                <View style={agendaSingleLaneWebFrame}><AgendaPremiumDateStrip
                   onEarlierDates={extendAgendaStripHistory}
                   days={agendaStripDates.map(day=>({
                     ...day,monthLabel:day.value.endsWith('-01')?new Intl.DateTimeFormat(appLanguage,{month:'long'}).format(parseIsoDate(day.value)):undefined,closed:getDateAvailabilityInfo(availabilitySettings,day.value).closed,past:day.value<todayDate,
@@ -50111,7 +50121,7 @@ null
                   onPrevious={()=>handleSelectDateStable(addDaysToIso(data,-1))}
                   onNext={()=>handleSelectDateStable(addDaysToIso(data,1))}
                   onSelect={handleAgendaDayPickerSelectFinal} onDayMenu={handleDayLongPressStable}
-                  onHelp={()=>{const next=!(daySelectionGuideOpen||weekAgendaGuideOpen);setDaySelectionGuideOpen(next);setWeekAgendaGuideOpen(next);}}/>
+                  onHelp={()=>{const next=!(daySelectionGuideOpen||weekAgendaGuideOpen);setDaySelectionGuideOpen(next);setWeekAgendaGuideOpen(next);}}/></View>
 
 
               </View>

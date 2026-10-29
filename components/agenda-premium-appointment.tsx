@@ -9,7 +9,7 @@ const linesFor=(text:string,width:number,size:number)=>Math.max(1,Math.ceil(text
 
 /** Clock geometry belongs to the grid. This component only fills its measured body. */
 export function AgendaPremiumAppointmentContent({client,service,time,duration,phase,origin,operator,pending,ink,accent,width:estimatedWidth,height,footer,benefits,sourceBadge}:Props){
- const available=Math.max(0,height-footer),shortCard=duration===15&&available<=32;
+ const available=Math.max(0,height-footer),shortCard=duration>0&&duration<=15&&available<=32;
  const [measuredWidth,setMeasuredWidth]=React.useState(0);
  const measure=React.useCallback((event:{nativeEvent:{layout:{width:number}}})=>{
   const value=event.nativeEvent.layout.width;

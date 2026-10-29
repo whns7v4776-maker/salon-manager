@@ -4,7 +4,7 @@ export function agendaCompactFields(input: {
   service: string; time: string; phase: string; operator: string; pending: boolean;
 }) {
   const { width, bodyHeight, duration, client, service, time, phase, operator, pending } = input;
-  if (duration !== 15 || bodyHeight < 12 || bodyHeight > 32 || width < 145) return null;
+  if (duration > 15 || duration <= 0 || bodyHeight < 12 || bodyHeight > 32 || width < 145) return null;
   const clientSize = Math.min(width < 210 ? 12 : 13, bodyHeight - 2);
   const detailSize = Math.min(10.5, bodyHeight - 2);
   const measure = (value: string, size = detailSize) => [...value].reduce((sum, letter) => {
