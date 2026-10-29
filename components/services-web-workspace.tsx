@@ -4,7 +4,7 @@ import {InfoButton} from './ui/info-button';
 import {AgendaColorInfo} from './agenda-color-info';
 import {StepEditor} from './services-step-editor';
 import {ServicesProfessionFilter} from './services-profession-filter';
-import React, {useMemo, useState} from 'react';
+import React, {useEffect, useMemo, useState} from 'react';
 import {Image, Pressable, ScrollView, Text, TextInput, View, useWindowDimensions} from 'react-native';
 import {Ionicons} from '@expo/vector-icons';
 import {useAccessAppearance} from './access-premium';
@@ -23,6 +23,8 @@ export function ServicesWebWorkspace({services,operators,archivedOperators,onSer
  const roles=useMemo(()=>Array.from(new Set(services.map(s=>s.mestiereRichiesto||'Senza mestiere'))).sort(),[services]);
  const list=services.filter(s=>(archived?s.disponibileOnline===false:s.disponibileOnline!==false)&&(!role||(s.mestiereRichiesto||'Senza mestiere')===role)&&s.nome.toLocaleLowerCase('it').includes(query.toLocaleLowerCase('it')));
  const current=list.find(s=>s.id===selected)??list[0];
+ // A deleted or archived service must close its detail, not fall back to the first one.
+ useEffect(()=>{if(selected&&!list.some(s=>s.id===selected)){setSelected(null);setDetailOpen(false);}},[selected,list]);
  const money=(n:number)=>new Intl.NumberFormat('it-IT',{style:'currency',currency:'EUR'}).format(n);
  const button=(label:string,fn:()=>void,primary=false,danger=false)=><Pressable accessibilityRole="button" accessibilityLabel={label} onPress={fn} style={{alignSelf:'flex-start',flexDirection:'row',alignItems:'center',justifyContent:'center',borderWidth:1,borderColor:danger?'rgba(170,88,105,.4)':primary?p.action:(p.night?p.border:'rgba(122,100,70,.24)'),borderRadius:12,backgroundColor:primary?p.action:p.field,minHeight:48,paddingHorizontal:14,paddingVertical:11}}><Text style={{fontSize:13,fontWeight:'500',color:primary?p.actionText:danger?(p.night?'#E5AAB5':'#944559'):p.ink}}>{label}</Text></Pressable>;
  const heading=(text:string)=><Text style={{fontFamily:'Georgia',fontSize:25,lineHeight:32,color:p.ink}}>{text}</Text>;

@@ -55,8 +55,13 @@ export function AutomaticNativeSheetHandle() {
   const {palette:p}=useAccessAppearance();
   return <NativeSheetHandle style={{width:34,height:4,borderRadius:2,alignSelf:'center',backgroundColor:p.muted,opacity:.55}}/>;
 }
+/** Set by floating (centered) dialogs: no grabber, they are not dragged away. */
+export const NativeSheetFloatingContext = React.createContext(false);
+
 export function NativeSheetHandle({ style }: { style?: StyleProp<ViewStyle> }) {
   const drag = useContext(NativeSheetDragContext);
+  const floating = useContext(NativeSheetFloatingContext);
+  if (floating) return null;
   // Web docked sheets draw their own grabber (WebSheetGrabber); a second bar here doubled it.
   if (Platform.OS === 'web') return null;
   if (!drag) return <View style={style} />;

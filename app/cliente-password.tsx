@@ -828,7 +828,7 @@ export default function ClientePasswordScreen() {
         onRequestClose={handleSuccessContinue}
       >
         <View style={styles.successModalBackdrop}>
-          <DockedSheetSurface webDocked={false} accessibilityRole="alert" style={styles.successModalCard}>
+          <DockedSheetSurface floating accessibilityRole="alert" style={styles.successModalCard}>
             <View style={styles.successModalIcon}>
               <Ionicons name="checkmark" size={28} color="#ffffff" />
             </View>
@@ -1092,8 +1092,9 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "rgba(15, 23, 42, 0.48)",
     alignItems: "center",
-    justifyContent: 'flex-end',
-    paddingHorizontal: 24, paddingBottom: 0 },
+    justifyContent: 'center',
+    paddingHorizontal: 16, paddingVertical: 24,
+    ...(Platform.OS === 'web' ? ({ backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)' } as object) : null) },
   successModalCard: {
     width: "100%",
     maxWidth: 420,

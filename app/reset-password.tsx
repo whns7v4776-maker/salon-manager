@@ -409,7 +409,7 @@ export default function ResetPasswordScreen() {
         }}
       >
         <View style={styles.feedbackModalBackdrop}>
-          <DockedSheetSurface webDocked={false}
+          <DockedSheetSurface floating
             accessibilityRole="alert"
             style={[
               styles.feedbackModalCard,
@@ -667,7 +667,8 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(15, 23, 42, 0.56)',
     paddingHorizontal: 22,
     alignItems: 'center',
-    justifyContent: 'flex-end', paddingBottom: 0 },
+    justifyContent: 'center', paddingVertical: 24,
+    ...(Platform.OS === 'web' ? ({ backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)' } as object) : null) },
   feedbackModalCard: {
     width: '100%',
     maxWidth: 430,

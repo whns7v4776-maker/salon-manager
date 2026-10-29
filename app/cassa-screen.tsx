@@ -1690,7 +1690,7 @@ function CassaContent({
         }}
       >
         <View style={styles.cashIntroBackdrop}>
-          <DockedSheetSurface style={styles.cashIntroCard}>
+          <DockedSheetSurface floating style={styles.cashIntroCard}>
             <View style={styles.cashIntroIconWrap}>
               <Text style={styles.cashIntroIconText}>€</Text>
             </View>
@@ -2009,8 +2009,9 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: 'rgba(15, 23, 42, 0.42)',
     alignItems: 'center',
-    justifyContent: 'flex-end',
-    paddingHorizontal: 24, paddingBottom: 0 },
+    justifyContent: 'center',
+    paddingHorizontal: 16, paddingVertical: 24,
+    ...(Platform.OS === 'web' ? ({ backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)' } as object) : null) },
   cashIntroCard: {
     width: '100%',
     maxWidth: 420,

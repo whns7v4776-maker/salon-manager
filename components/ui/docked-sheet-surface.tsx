@@ -1,7 +1,7 @@
 import {useNativePremium} from '../owner-native-premium';
 import {useAccessAppearance} from '../access-premium';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { NativeSheetDragContext, useNativeSheetDrag, hasNativeSheetHandle, AutomaticNativeSheetHandle } from './native-sheet-drag';
+import { NativeSheetDragContext, NativeSheetFloatingContext, useNativeSheetDrag, hasNativeSheetHandle, AutomaticNativeSheetHandle } from './native-sheet-drag';
 import React, { forwardRef } from 'react';
 import { Platform, StyleSheet, useWindowDimensions, View, type ViewProps } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -10,7 +10,7 @@ import { useKeyboardSheetCorners } from './use-keyboard-sheet-corners';
 import { useWebSheetDrag, WebSheetGrabber } from './web-sheet-grabber';
 
 /** Presentation only: keep the existing form, scroll, keyboard and gesture handlers. */
-export const DockedSheetSurface = forwardRef<View, ViewProps & { animateEntrance?: boolean; onClose?: () => void; dismissDisabled?: boolean; bottomSafeAreaSpacing?: number; includeBottomSafeArea?: boolean; webDocked?: boolean }>(function DockedSheetSurface({ style, animateEntrance = false, onClose, dismissDisabled = false, bottomSafeAreaSpacing = 12, includeBottomSafeArea = true, webDocked = true, ...props }, ref) {
+export const DockedSheetSurface = forwardRef<View, ViewProps & { animateEntrance?: boolean; onClose?: () => void; dismissDisabled?: boolean; bottomSafeAreaSpacing?: number; includeBottomSafeArea?: boolean; webDocked?: boolean; floating?: boolean }>(function DockedSheetSurface({ style, animateEntrance = false, onClose, dismissDisabled = false, bottomSafeAreaSpacing = 12, includeBottomSafeArea = true, webDocked = true, floating = false, ...props }, ref) {
   const premium=useNativePremium();
   const {palette:p}=useAccessAppearance();
   const drag = useNativeSheetDrag(onClose, dismissDisabled);
@@ -18,6 +18,15 @@ export const DockedSheetSurface = forwardRef<View, ViewProps & { animateEntrance
   const { width, height } = useWindowDimensions();
   const corners = useKeyboardSheetCorners();
   const webDrag = useWebSheetDrag(onClose, dismissDisabled);
+  // Small confirmations and notices float centered on every platform: a card with
+  // all corners rounded, no grabber and no bottom docking.
+  if (floating) {
+    return <NativeSheetFloatingContext.Provider value><Animated.View {...props} ref={ref} style={[style, (premium || Platform.OS !== 'web')&&{backgroundColor:p.night?'#202426':'#F5F2EC',borderColor:p.border}, {
+      width: '100%', maxWidth: Math.min(440, width - 32), alignSelf: 'center', marginHorizontal: 0, marginBottom: 0,
+      borderRadius: 24, borderBottomLeftRadius: 24, borderBottomRightRadius: 24, borderBottomWidth: StyleSheet.flatten(style)?.borderWidth ?? 1,
+      maxHeight: height - 48, paddingBottom: 18,
+    }, Platform.OS === 'web' ? ({ overflowY: 'auto' } as object) : null]}>{props.children}</Animated.View></NativeSheetFloatingContext.Provider>;
+  }
   // Web sheets follow the app: full width, docked to the bottom edge, grabber on top.
   const docked = Platform.OS === 'web' && webDocked;
   const current = StyleSheet.flatten(style) ?? {};

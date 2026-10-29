@@ -14015,7 +14015,7 @@ export default function ServiziScreen() {
         <View style={styles.successDialogOverlay}>
           <View style={styles.successDialogBackdrop} />
           <Animated.View entering={FadeIn.duration(180)} exiting={FadeOut.duration(140)} style={styles.successDialogShell}>
-            <DockedSheetSurface onClose={closeNoticeDialog}
+            <DockedSheetSurface floating onClose={closeNoticeDialog}
               style={[
                 styles.successDialogCard,
                 noticeDialog.accent === 'service'
@@ -14033,7 +14033,7 @@ export default function ServiziScreen() {
                       : styles.successDialogIconWrapOperator,
                   ]}
                 >
-                  <Ionicons name="alert-circle" size={20} color="#0F172A" />
+                  <Ionicons name="alert-circle" size={20} color={serviceInkPalette.ink} />
                 </View>
                 <View style={styles.successDialogTitleWrap}>
                   <Text style={styles.successDialogEyebrow}>
@@ -18153,7 +18153,7 @@ export default function ServiziScreen() {
         <View style={styles.successDialogOverlay}>
           <View style={styles.successDialogBackdrop} />
           <Animated.View entering={FadeIn.duration(180)} exiting={FadeOut.duration(140)} style={styles.successDialogShell}>
-            <DockedSheetSurface onClose={closeConfirmDialog}
+            <DockedSheetSurface floating onClose={closeConfirmDialog}
               style={[
                 styles.successDialogCard,
                 confirmDialog.accent === 'service'
@@ -18171,7 +18171,7 @@ export default function ServiziScreen() {
                       : styles.successDialogIconWrapOperator,
                   ]}
                 >
-                  <Ionicons name={confirmDialog.icon ?? 'trash'} size={20} color="#0F172A" />
+                  <Ionicons name={confirmDialog.icon ?? 'trash'} size={20} color={serviceInkPalette.ink} />
                 </View>
                 <View style={styles.successDialogTitleWrap}>
                   <Text style={styles.successDialogEyebrow}>

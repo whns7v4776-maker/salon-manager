@@ -59634,7 +59634,7 @@ null
               },
             ]}
           >
-            <DockedSheetSurface dismissDisabled={webWeekDragConfirmation?.busyButtonIndex !== undefined} onClose={() => closeWebWeekDragConfirmation(webWeekDragConfirmation?.buttons.find((button) => button.style === 'cancel'))}
+            <DockedSheetSurface floating dismissDisabled={webWeekDragConfirmation?.busyButtonIndex !== undefined} onClose={() => closeWebWeekDragConfirmation(webWeekDragConfirmation?.buttons.find((button) => button.style === 'cancel'))}
               style={[
                 styles.webWeekDragConfirmationCard,
                 !IS_WEB && styles.webWeekDragConfirmationCardNative,
@@ -59795,7 +59795,7 @@ null
             exiting={FadeOut.duration(140)}
             style={styles.agendaComposerDialogShell}
           >
-            <DockedSheetSurface onClose={() => setAgendaComposerDialog((current) => ({ ...current, visible: false }))}
+            <DockedSheetSurface floating onClose={() => setAgendaComposerDialog((current) => ({ ...current, visible: false }))}
               style={[
                 styles.agendaComposerDialogCard,
                 agendaComposerDialog.tone === 'success' &&

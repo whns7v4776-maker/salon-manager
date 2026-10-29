@@ -3913,98 +3913,46 @@ export default function ClientiScreen() {
       return <View style={styles.swipeActionsColumnRight}>{actions}</View>;
     };
 
-    const renderManagementActions = () => (
-      <View style={styles.webManagementActionsRow}>
-        <HapticTouchable webHoverLift accessibilityLabel={`Pacchetti e vantaggi di ${item.full_name}`} style={[styles.webManagementActionButton, styles.webManagementActionButtonBenefits]}
-          onPress={() => { setOpenWebClientActionsId(null); setPackageClient(item); }}>
-          <Ionicons name="layers-outline" size={20} color={customerPalette.ink} />
-          <Text style={[styles.webManagementActionLabel, styles.webManagementActionLabelBenefits]}>Pacchetti e vantaggi</Text>
+    const renderManagementActions = () => {
+      const p = customerPalette;
+      const night = p.night;
+      // One premium grid: same glass tiles, a bronze medallion per action, and
+      // the two account-level actions set apart below a hairline.
+      const tile = (key: string, icon: React.ComponentProps<typeof Ionicons>["name"], label: string, accent: string, onPress: () => void, wide = false) => (
+        <HapticTouchable key={key} webHoverLift accessibilityRole="button" accessibilityLabel={`${label} di ${item.full_name}`}
+          style={{ flexBasis: wide ? '100%' : '46%', flexGrow: 1, minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 12, borderRadius: 16, borderWidth: 1, borderColor: p.border, backgroundColor: night ? 'rgba(255,255,255,.04)' : 'rgba(255,255,255,.62)', ...(Platform.OS === 'web' ? { boxShadow: night ? 'inset 0 1px 0 rgba(255,255,255,.05)' : 'inset 0 1px 0 #ffffffcc' } : {}) } as object}
+          onPress={() => { setOpenWebClientActionsId(null); onPress(); }} pressScale={0.97} pressOpacity={0.97}>
+          <NativeMedal icon={icon} size={34} iconSize={16} accent={accent} />
+          <Text numberOfLines={2} style={{ flex: 1, minWidth: 0, color: p.ink, fontSize: 14, lineHeight: 19, fontWeight: '500' }}>{label}</Text>
+          <Ionicons name="chevron-forward" size={15} color={p.muted} />
         </HapticTouchable>
-        <HapticTouchable webHoverLift style={[styles.webManagementActionButton, styles.webManagementActionButtonPayment]}
-          onPress={() => { setOpenWebClientActionsId(null); setPaymentPolicyClient(item); }}>
-          <Ionicons name="wallet-outline" size={20} color={customerPalette.ink} />
-          <Text style={[styles.webManagementActionLabel, styles.webManagementActionLabelPayment]}>Pagamento</Text>
+      );
+      const quiet = (key: string, icon: React.ComponentProps<typeof Ionicons>["name"], label: string, color: string, onPress: () => void) => (
+        <HapticTouchable key={key} webHoverLift accessibilityRole="button" accessibilityLabel={`${label} ${item.full_name}`}
+          style={{ flexBasis: '46%', flexGrow: 1, minHeight: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: 14, borderRadius: 14, borderWidth: 1, borderColor: night ? 'rgba(200,143,146,.24)' : 'rgba(180,118,121,.26)', backgroundColor: night ? 'rgba(180,118,121,.08)' : 'rgba(190,124,127,.07)' }}
+          onPress={() => { setOpenWebClientActionsId(null); onPress(); }} pressScale={0.97} pressOpacity={0.97}>
+          <Ionicons name={icon} size={18} color={color} />
+          <Text style={{ color, fontSize: 14, fontWeight: '500' }}>{label}</Text>
         </HapticTouchable>
-        <HapticTouchable webHoverLift
-          style={[styles.webManagementActionButton, styles.webManagementActionButtonEdit]}
-          onPress={() => {
-            setOpenWebClientActionsId(null);
-            apriModificaCliente(item);
-          }}
-          pressScale={0.97}
-          pressOpacity={0.97}
-        >
-          <Ionicons name="person-outline" size={20} color={styles.__premiumIcon.color} />
-          <Text style={[styles.webManagementActionLabel, styles.webManagementActionLabelEdit]}>Modifica</Text>
-        </HapticTouchable>
-        <HapticTouchable webHoverLift
-          style={[styles.webManagementActionButton, styles.webManagementActionButtonTiming]}
-          onPress={() => {
-            setOpenWebClientActionsId(null);
-            apriTempiPersonalizzatiCliente(item);
-          }}
-          pressScale={0.97}
-          pressOpacity={0.97}
-        >
-          <Ionicons name="time-outline" size={20} color={customerPalette.ink} />
-          <Text style={[styles.webManagementActionLabel, styles.webManagementActionLabelTiming]}>
-            Tempi e prezzi
-          </Text>
-        </HapticTouchable>
-        <HapticTouchable webHoverLift
-          style={[styles.webManagementActionButton, styles.webManagementActionButtonLimit]}
-          onPress={() => {
-            setOpenWebClientActionsId(null);
-            openCustomerOnlinePolicy(item);
-          }}
-          pressScale={0.97}
-          pressOpacity={0.97}
-        >
-          <Ionicons name="options-outline" size={20} color={customerPalette.ink} />
-          <Text style={[styles.webManagementActionLabel, styles.webManagementActionLabelLimit]}>
-            Regole di prenotazione
-          </Text>
-        </HapticTouchable>
-        <HapticTouchable webHoverLift
-          style={[
-            styles.webManagementActionButton,
-            isInibito ? styles.webManagementActionButtonUnlock : styles.webManagementActionButtonBlock,
-          ]}
-          onPress={() => {
-            setOpenWebClientActionsId(null);
-            toggleInibizioneCliente(item);
-          }}
-          pressScale={0.97}
-          pressOpacity={0.97}
-        >
-          <Ionicons
-            name={isInibito ? 'lock-open-outline' : 'ban-outline'}
-            size={20}
-            color={customerPalette.muted}
-          />
-          <Text
-            style={[
-              styles.webManagementActionLabel,
-              isInibito ? styles.webManagementActionLabelUnlock : styles.webManagementActionLabelBlock,
-            ]}
-          >
-            {isInibito ? 'Sblocca' : 'Inibisci'}
-          </Text>
-        </HapticTouchable>
-        <HapticTouchable webHoverLift
-          style={[styles.webManagementActionButton, styles.webManagementActionButtonDelete]}
-          onPress={() => {
-            setOpenWebClientActionsId(null);
-            eliminaCliente(item.id, item.full_name);
-          }}
-          pressScale={0.97}
-          pressOpacity={0.97}
-        >
-          <Ionicons name="trash-outline" size={20} color={customerPalette.ink} />
-          <Text style={[styles.webManagementActionLabel, styles.webManagementActionLabelDelete]}>Elimina</Text>
-        </HapticTouchable>
-      </View>
-    );
+      );
+      const danger = night ? '#D8A5A0' : '#964F48';
+      return (
+        <View style={{ gap: 14 }}>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
+            {tile('edit', 'person-outline', 'Modifica', '#7E99AE', () => apriModificaCliente(item))}
+            {tile('timing', 'time-outline', 'Tempi e prezzi', '#81A593', () => apriTempiPersonalizzatiCliente(item))}
+            {tile('rules', 'options-outline', 'Regole di prenotazione', '#A68F84', () => openCustomerOnlinePolicy(item))}
+            {tile('payment', 'wallet-outline', 'Pagamento', '#B59F74', () => setPaymentPolicyClient(item))}
+            {tile('benefits', 'layers-outline', 'Pacchetti e vantaggi', '#9C89B1', () => setPackageClient(item), true)}
+          </View>
+          <View style={{ height: 1, backgroundColor: p.line, marginHorizontal: 4 }} />
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
+            {quiet('block', isInibito ? 'lock-open-outline' : 'ban-outline', isInibito ? 'Sblocca' : 'Inibisci', isInibito ? p.ink : danger, () => toggleInibizioneCliente(item))}
+            {quiet('delete', 'trash-outline', 'Elimina', danger, () => eliminaCliente(item.id, item.full_name))}
+          </View>
+        </View>
+      );
+    };
 
     const benefitsAction = (
       <HapticTouchable
