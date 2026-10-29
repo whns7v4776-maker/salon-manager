@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import { Keyboard, Platform, type GestureResponderEvent, type ScrollView, type TextInput } from 'react-native';
 
+const NOTE_BELOW_ROW = 56;
+const NOTE_KEYBOARD_GAP = 10;
+
 /** Only the booking note requests extra keyboard clearance and a reversible scroll. */
 export function useNativeBookingNote(scroll: RefObject<ScrollView | null>, scrollY: RefObject<number>) {
   const input = useRef<TextInput | null>(null);
@@ -10,16 +13,30 @@ export function useNativeBookingNote(scroll: RefObject<ScrollView | null>, scrol
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [active, setActive] = useState(false);
   const [clearance, setClearance] = useState(0);
+  const animatingUntil = useRef(0);
+  const settleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reveal = useCallback(() => {
     const node = input.current;
     if (!node || origin.current === null) return;
+    // Focus, keyboard show/frame and content-size events all ask for a reveal:
+    // while one scroll animates, wait for it instead of stacking a second jump.
+    const wait = animatingUntil.current - Date.now();
+    if (wait > 0) {
+      if (!settleTimer.current) settleTimer.current = setTimeout(() => { settleTimer.current = null; reveal(); }, wait + 20);
+      return;
+    }
     node.measureInWindow((x, y, width, height) => {
       if (input.current !== node || origin.current === null) return;
       bounds.current = { x, y, width, height };
       const top = keyboardTop.current;
       if (top === null) return;
-      const delta = Math.max(0, y + height - (top - 24));
-      if (delta > 1) scroll.current?.scrollTo({ y: scrollY.current + delta, animated: true });
+      // The field plus the row right under it sit just above the keyboard.
+      const delta = y + height + NOTE_BELOW_ROW - (top - NOTE_KEYBOARD_GAP);
+      if (Math.abs(delta) < 4) return;
+      const target = Math.max(0, scrollY.current + delta);
+      if (Math.abs(target - scrollY.current) < 4) return;
+      animatingUntil.current = Date.now() + 380;
+      scroll.current?.scrollTo({ y: target, animated: true });
     });
   }, [scroll, scrollY]);
   const restore = useCallback(() => {
@@ -33,6 +50,8 @@ export function useNativeBookingNote(scroll: RefObject<ScrollView | null>, scrol
     setActive(false);
     setClearance(0);
     if (timer.current) clearTimeout(timer.current);
+    if (settleTimer.current) { clearTimeout(settleTimer.current); settleTimer.current = null; }
+    animatingUntil.current = 0;
     // Wait for KeyboardAvoidingView to release its padding before restoring.
     timer.current = setTimeout(() => {
       timer.current = null;
@@ -54,7 +73,7 @@ export function useNativeBookingNote(scroll: RefObject<ScrollView | null>, scrol
       if (origin.current !== null) restore();
       else keyboardTop.current = null;
     });
-    return () => { show.remove(); frame.remove(); hide.remove(); if (timer.current) clearTimeout(timer.current); };
+    return () => { show.remove(); frame.remove(); hide.remove(); if (timer.current) clearTimeout(timer.current); if (settleTimer.current) clearTimeout(settleTimer.current); };
   }, [restore, reveal]);
   const onFocus = useCallback((node: TextInput) => {
     if (Platform.OS === 'web') return;

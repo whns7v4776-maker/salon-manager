@@ -75,7 +75,7 @@ export function ClientBookingFrame({ journey, workspaceId, salonName, shop, scro
       onLayout={event => { viewportHeight.current = event.nativeEvent.layout.height; revealIncluded(includedKey); if (editingNote) onNoteLayout?.(); }}
       onContentSizeChange={() => { if (editingNote) onNoteLayout?.(); }}
       onScroll={event => { scrollPosition.current = event.nativeEvent.contentOffset.y; onScrollY?.(scrollPosition.current); }}>
-      <ClientBookingJourney {...journey} noteEditing={editingNote} hideProgress onIncludedServicesLayout={(y, height) => { includedLayout.current = { key: includedKey, y, height }; revealIncluded(includedKey); }} />
+      <ClientBookingJourney {...journey} hideProgress onIncludedServicesLayout={(y, height) => { includedLayout.current = { key: includedKey, y, height }; revealIncluded(includedKey); }} />
     </ScrollView>
     {!editingNote ? <View onLayout={native ? event => { const height = event.nativeEvent.layout.height; nativeDockHeightRef.current = height; setNativeDockHeight(height); revealIncluded(includedKey); } : undefined}
       style={{ paddingHorizontal: layout.desktop ? 32 : Math.max(12, layout.insets.left, layout.insets.right), paddingTop: 8, paddingBottom: native ? 0 : layout.navigationSpace, ...(native ? { position: 'absolute', left: 0, right: 0, bottom: layout.navigationSpace } : {}) }}><ClientBookingJourneyDock {...journey} inline /></View> : null}

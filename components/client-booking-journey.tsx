@@ -17,8 +17,6 @@ export type JourneyTime = { value: string; disabled: boolean; hint?: string };
 export type JourneyWaitlistChoice = { key: string; label: string; hint: string; active: boolean; busy: boolean; onPress: () => void };
 export type ClientBookingJourneyProps = {
   onNoteFocus?: (input: TextInput) => void; onNoteBlur?: () => void;
-  /** Native note editing: the summary steps aside so nothing overlaps the field above the keyboard. */
-  noteEditing?: boolean;
   hideProgress?: boolean; phase?: { initialLabel: string; initialDurationMinutes: number; processingLabel: string; processingDurationMinutes: number; finalServiceName: string; finalDurationMinutes: number; finalPhaseEnabled?: boolean }; linkedServiceNames?: string[];
   onHorizontalStart?: () => void; onHorizontalEnd?: () => void;
   pages: JourneyPage[]; page: number; limit: number; onPage: (page: number) => void;
@@ -276,7 +274,7 @@ export function ClientBookingJourney(props: ClientBookingJourneyProps) {
       </>}
     </> : <>
       {props.paymentHold || <>
-        {!props.noteEditing ? <View style={{ padding: 16, borderRadius: 19, backgroundColor: p.surface, borderWidth: 1, borderColor: p.border, gap: 16 }}>
+        <View style={{ padding: 16, borderRadius: 19, backgroundColor: p.surface, borderWidth: 1, borderColor: p.border, gap: 16 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
             <View style={{ minWidth: 61, minHeight: 65, padding: 8, borderRadius: 14, backgroundColor: p.field, borderWidth: 1, borderColor: p.border, alignItems: 'center', justifyContent: 'center', gap: 4 }}><Text style={{ color: p.muted, fontSize: 10, lineHeight: 15 }}>{props.date ? new Date(`${props.date}T12:00:00`).toLocaleDateString('it-IT', { month: 'short' }).toUpperCase() : ''}</Text><Text style={{ color: p.ink, fontFamily: Platform.OS === 'android' ? 'serif' : 'Georgia', fontSize: 29, lineHeight: 33 }}>{props.date ? Number(props.date.slice(-2)) : ''}</Text></View>
             <View style={{ flex: 1, minWidth: 0, gap: 6 }}><Text style={{ color: p.ink, fontSize: 14, lineHeight: 21, fontWeight: '500' }}>{dateText(props.date)}</Text><Text style={muted}>{props.time} · {props.duration}</Text></View>
@@ -287,7 +285,7 @@ export function ClientBookingJourney(props: ClientBookingJourneyProps) {
           {props.operatorName ? <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9 }}><Ionicons name="person-outline" size={17} color={p.muted} /><Text style={{ ...muted, flex: 1, color: p.ink }}>{props.operatorName}</Text></View> : null}
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9 }}><Ionicons name="person-outline" size={17} color={p.muted} /><Text style={{ ...muted, flex: 1, color: p.ink }}>{props.customerName}</Text><Text style={{ ...muted, fontSize: 10 }}>Cliente</Text></View>
           <View style={{ borderTopWidth: 1, borderTopColor: p.line }}>{moreButton('Modifica i dettagli', () => props.onPage(0))}</View>
-        </View> : null}
+        </View>
         <View style={{ backgroundColor: p.surface, borderWidth: 1, borderColor: p.border, borderRadius: 18, paddingHorizontal: 15 }}>
           {props.reviewBenefits}
           {props.reviewBenefits ? <View style={{ height: 1, backgroundColor: p.line }} /> : null}
