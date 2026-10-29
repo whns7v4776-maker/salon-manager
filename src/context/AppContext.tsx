@@ -30432,10 +30432,23 @@ function AppProviderState({ children, isOwnerProtectedContextRoute }: {
     };
 
     const realtimeWorkspaceId = salonWorkspaceRef.current.id;
+    // While the entity channel is confirmed live, polling is only a safety
+    // net: run it far less often. Any channel error restores the fast pace.
+    let ownerEntitiesRealtimeLive = false;
+    const OWNER_LIVE_FALLBACK_SLOW_MS = 15000;
+    const ownerFallbackLastRunAt = new Map<string, number>();
+    const shouldThrottleLiveFallback = (key: string, slowMs: number) => {
+      if (!ownerEntitiesRealtimeLive) return false;
+      const now = Date.now();
+      if (now - (ownerFallbackLastRunAt.get(key) ?? 0) < slowMs) return true;
+      ownerFallbackLastRunAt.set(key, now);
+      return false;
+    };
     let recentOwnerBookingEntitiesRefreshInFlight = false;
     const refreshRecentOwnerBookingEntities = async () => {
       if (
         shouldSkipOwnerSyncFallbackTick() ||
+        shouldThrottleLiveFallback('booking-entities', OWNER_LIVE_FALLBACK_SLOW_MS) ||
         recentOwnerBookingEntitiesRefreshInFlight ||
         !isUuidValue(realtimeWorkspaceId)
       ) {
@@ -31119,7 +31132,9 @@ function AppProviderState({ children, isOwnerProtectedContextRoute }: {
               scheduleOwnerRealtimeWorkspaceSync(60);
             },
           )
-          .subscribe()
+          .subscribe((status) => {
+            ownerEntitiesRealtimeLive = status === 'SUBSCRIBED';
+          })
       : null;
     // Keep customer customizations isolated from the long-standing owner entity
     // channel: a rollout/publication issue here must never interrupt Agenda,
@@ -31238,7 +31253,10 @@ function AppProviderState({ children, isOwnerProtectedContextRoute }: {
     const portalRefreshFallbackInterval =
       Platform.OS === 'web' && fallbackPollingIntervalMs > 0
         ? setInterval(() => {
-            if (shouldSkipOwnerSyncFallbackTick()) {
+            if (
+              shouldSkipOwnerSyncFallbackTick() ||
+              shouldThrottleLiveFallback('portal-refresh', 60000)
+            ) {
               return;
             }
 
@@ -31250,7 +31268,10 @@ function AppProviderState({ children, isOwnerProtectedContextRoute }: {
       Platform.OS === 'ios' ||
       Platform.OS === 'android'
         ? setInterval(() => {
-            if (shouldSkipOwnerSyncFallbackTick()) {
+            if (
+              shouldSkipOwnerSyncFallbackTick() ||
+              shouldThrottleLiveFallback('workspace-flags', 30000)
+            ) {
               return;
             }
 
@@ -31260,7 +31281,10 @@ function AppProviderState({ children, isOwnerProtectedContextRoute }: {
     const portalAvailabilityFallbackInterval =
       Platform.OS === 'web'
         ? setInterval(() => {
-            if (shouldSkipOwnerSyncFallbackTick()) {
+            if (
+              shouldSkipOwnerSyncFallbackTick() ||
+              shouldThrottleLiveFallback('availability', 30000)
+            ) {
               return;
             }
 

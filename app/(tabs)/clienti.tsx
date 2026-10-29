@@ -1262,6 +1262,9 @@ export default function ClientiScreen() {
     message: '',
     buttonLabel: 'Continua',
   });
+  // Web modals stack by the order their portal was created. A new key on each
+  // opening recreates the feedback portal last, above an already open sheet.
+  const [customerFeedbackOpenSeq, setCustomerFeedbackOpenSeq] = useState(0);
   const openCustomerFeedbackDialog = useCallback(
     ({
       kind,
@@ -1276,6 +1279,7 @@ export default function ClientiScreen() {
       eyebrow?: string;
       buttonLabel?: string;
     }) => {
+      setCustomerFeedbackOpenSeq((current) => current + 1);
       setCustomerFeedbackDialog({
         visible: true,
         kind,
@@ -4637,6 +4641,7 @@ export default function ClientiScreen() {
   );
   const renderCustomerFeedback = () => (
       <Modal supportedOrientations={TABLET_MODAL_ORIENTATIONS}
+        key={Platform.OS === 'web' ? `customer-feedback-${customerFeedbackOpenSeq}` : undefined}
         visible={customerFeedbackDialog.visible}
         onShow={resetClientSwipeAfterPopupShown}
         transparent

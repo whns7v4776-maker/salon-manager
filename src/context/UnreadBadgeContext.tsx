@@ -31,6 +31,7 @@ import {
 import { supabase } from '../lib/supabase';
 
 const WEB_BADGE_REFRESH_INTERVAL_MS = 4000;
+const WEB_BADGE_LIVE_REFRESH_INTERVAL_MS = 30000;
 const REALTIME_BADGE_REFRESH_DEBOUNCE_MS = 90;
 
 type RefreshBadgesOptions = {
@@ -658,6 +659,7 @@ export function UnreadBadgeProvider({ children }: { children: ReactNode }) {
     };
   }, [refreshBadges]);
 
+  const badgeRealtimeLiveRef = useRef(false);
   useEffect(() => {
     if (!activeIdentity?.workspaceId) {
       return;
@@ -701,6 +703,7 @@ export function UnreadBadgeProvider({ children }: { children: ReactNode }) {
     }
 
     channel.subscribe((status) => {
+      badgeRealtimeLiveRef.current = status === 'SUBSCRIBED';
       if (status === 'SUBSCRIBED') {
         scheduleRefresh();
       }
@@ -710,6 +713,7 @@ export function UnreadBadgeProvider({ children }: { children: ReactNode }) {
       if (refreshTimer) {
         clearTimeout(refreshTimer);
       }
+      badgeRealtimeLiveRef.current = false;
       void supabase.removeChannel(channel);
     };
   }, [activeIdentity, activeIdentityKey, refreshBadges]);
@@ -731,7 +735,17 @@ export function UnreadBadgeProvider({ children }: { children: ReactNode }) {
       }
     };
 
-    const intervalId = setInterval(refreshWhenVisible, WEB_BADGE_REFRESH_INTERVAL_MS);
+    // With the realtime channel live, polling is a slow safety net only.
+    let lastPollAt = 0;
+    const pollWhenVisible = () => {
+      const now = Date.now();
+      if (badgeRealtimeLiveRef.current && now - lastPollAt < WEB_BADGE_LIVE_REFRESH_INTERVAL_MS) {
+        return;
+      }
+      lastPollAt = now;
+      refreshWhenVisible();
+    };
+    const intervalId = setInterval(pollWhenVisible, WEB_BADGE_REFRESH_INTERVAL_MS);
     if (typeof window !== 'undefined') {
       window.addEventListener('focus', refreshWhenVisible);
       window.addEventListener('online', refreshWhenVisible);

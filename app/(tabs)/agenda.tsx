@@ -36378,7 +36378,17 @@ export default function AgendaScreen() {
         );
         return;
       }
-      await executeDeletion('group');
+      // A single tap must never remove a future booking: confirm it too.
+      presentWeekInteractionConfirmation(
+        'Eliminare l’appuntamento?',
+        `L’appuntamento di ${targetAppointment.cliente} del ${formatDateCompact(targetAppointment.data ?? todayDate)} alle ${targetAppointment.ora.slice(0, 5)} verrà rimosso dall’Agenda.`,
+        [
+          { text: 'Annulla', style: 'cancel' },
+          { text: 'Elimina appuntamento', style: 'destructive', awaitCompletion: true,
+            busyText: 'Eliminazione in corso…', onPress: async () => { await executeDeletion('group'); } },
+        ],
+        'delete',
+      );
     },
     [
       appuntamenti,
@@ -36386,6 +36396,7 @@ export default function AgendaScreen() {
       closeWeekAppointmentDetails,
       getWeekAppointmentTemporalState,
       presentWeekInteractionConfirmation,
+      todayDate,
     ],
   );
 
