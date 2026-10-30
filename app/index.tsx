@@ -253,15 +253,18 @@ const isClientPortalNetworkLookupError = (error: unknown) => {
 
 // Scroll distance over which the brand header settles into its compact form.
 const ACCESS_HEADER_COLLAPSE_DISTANCE = 120;
+// Room added under the form while the header can collapse: it covers the space
+// the header gives back, so the offset is never clamped and the logo never bounces.
+const ACCESS_HEADER_COLLAPSE_ROOM = 180;
 const ACCESS_HEADER_COMPACT_BRAND_HEIGHT = 50;
 
-function LandingAccessHeader({ audience, ownerMode = 'login', scrollY, collapsible }: {
+function LandingAccessHeader({ audience, ownerMode = 'login', scrollY, collapseDistance }: {
   audience: LandingAudience;
   ownerMode?: 'login' | 'register';
-  /** Form scroll offset: on long forms the logo shrinks and the greeting fades. */
+  /** Form scroll offset: the logo shrinks and the greeting fades as the form scrolls. */
   scrollY?: SharedValue<number>;
-  /** 1 when the form is long enough to collapse the header without bouncing. */
-  collapsible?: SharedValue<number>;
+  /** Offset at which the header is fully compact; 0 when the form does not scroll. */
+  collapseDistance?: SharedValue<number>;
 }) {
   const { palette } = useAccessAppearance();
   const styles = useMemo(() => accessPremiumStyles(baseStyles, palette), [palette]);
@@ -269,15 +272,18 @@ function LandingAccessHeader({ audience, ownerMode = 'login', scrollY, collapsib
   const brandHeight = typeof brandRowStyle.height === 'number' ? brandRowStyle.height : 104;
   const compactScale = ACCESS_HEADER_COMPACT_BRAND_HEIGHT / brandHeight;
   const brandAnimatedStyle = useAnimatedStyle(() => {
-    const value = (collapsible?.value ?? 0) * Math.min(Math.max((scrollY?.value ?? 0) / ACCESS_HEADER_COLLAPSE_DISTANCE, 0), 1);
+    const distance = collapseDistance?.value ?? 0;
+    const value = distance > 0 ? Math.min(Math.max((scrollY?.value ?? 0) / distance, 0), 1) : 0;
     return { height: interpolate(value, [0, 1], [brandHeight, ACCESS_HEADER_COMPACT_BRAND_HEIGHT], Extrapolation.CLAMP) };
   }, [brandHeight]);
   const wordmarkAnimatedStyle = useAnimatedStyle(() => {
-    const value = (collapsible?.value ?? 0) * Math.min(Math.max((scrollY?.value ?? 0) / ACCESS_HEADER_COLLAPSE_DISTANCE, 0), 1);
+    const distance = collapseDistance?.value ?? 0;
+    const value = distance > 0 ? Math.min(Math.max((scrollY?.value ?? 0) / distance, 0), 1) : 0;
     return { transform: [{ scale: interpolate(value, [0, 1], [1, compactScale], Extrapolation.CLAMP) }] };
   }, [compactScale]);
   const greetingAnimatedStyle = useAnimatedStyle(() => {
-    const value = (collapsible?.value ?? 0) * Math.min(Math.max((scrollY?.value ?? 0) / ACCESS_HEADER_COLLAPSE_DISTANCE, 0), 1);
+    const distance = collapseDistance?.value ?? 0;
+    const value = distance > 0 ? Math.min(Math.max((scrollY?.value ?? 0) / distance, 0), 1) : 0;
     return {
       opacity: interpolate(value, [0, 0.6], [1, 0], Extrapolation.CLAMP),
       maxHeight: interpolate(value, [0, 1], [110, 0], Extrapolation.CLAMP),
@@ -385,16 +391,24 @@ function PremiumClientLandingScreen() {
   const clientKeyboardScrollTargetRef = useRef(0);
   const landingScrollYRef = useRef(0);
   const landingHeaderScrollY = useSharedValue(0);
-  const landingHeaderCollapsible = useSharedValue(0);
+  const landingHeaderCollapseDistance = useSharedValue(0);
+  const [landingHeaderCollapseRoom, setLandingHeaderCollapseRoom] = useState(0);
+  const landingHeaderCollapseRoomRef = useRef(0);
   const landingScrollMetricsRef = useRef({ viewport: 0, content: 0, header: 0, expandedHeader: 0 });
-  // Collapse only when the form is clearly taller than the screen: on a short
-  // form the growing viewport would clamp the offset and the header would bounce.
+  // Any form that scrolls collapses the header. Distance is what the form can
+  // scroll with the header at rest, so full compaction is always reachable.
   const updateLandingHeaderCollapsible = useCallback(() => {
     const { viewport, content, header, expandedHeader } = landingScrollMetricsRef.current;
     if (!viewport || !content) return;
     const expandedViewport = viewport - Math.max(0, expandedHeader - header);
-    landingHeaderCollapsible.value = content - expandedViewport > ACCESS_HEADER_COLLAPSE_DISTANCE + 190 ? 1 : 0;
-  }, [landingHeaderCollapsible]);
+    const scrollable = content - landingHeaderCollapseRoomRef.current - expandedViewport;
+    const room = scrollable >= 24 ? ACCESS_HEADER_COLLAPSE_ROOM : 0;
+    landingHeaderCollapseDistance.value = room ? Math.min(ACCESS_HEADER_COLLAPSE_DISTANCE, scrollable) : 0;
+    if (room !== landingHeaderCollapseRoomRef.current) {
+      landingHeaderCollapseRoomRef.current = room;
+      setLandingHeaderCollapseRoom(room);
+    }
+  }, [landingHeaderCollapseDistance]);
   const [selectedLandingAudience, setSelectedLandingAudience] =
     useState<LandingAudience | null>(null);
   const [landingAudienceReady, setLandingAudienceReady] = useState(false);
@@ -2814,7 +2828,7 @@ function PremiumClientLandingScreen() {
           updateLandingHeaderCollapsible();
         }}
       >
-        <LandingAccessHeader audience={showOwnerLanding ? 'owner' : 'client'} ownerMode={ownerAccessMode} scrollY={landingHeaderScrollY} collapsible={landingHeaderCollapsible} />
+        <LandingAccessHeader audience={showOwnerLanding ? 'owner' : 'client'} ownerMode={ownerAccessMode} scrollY={landingHeaderScrollY} collapseDistance={landingHeaderCollapseDistance} />
       </View>
 
       <ScrollView
@@ -2836,6 +2850,7 @@ function PremiumClientLandingScreen() {
           { paddingHorizontal: landingHorizontalPadding },
           Platform.OS === 'android' && { paddingBottom: androidLandingBottomPadding },
           isRegistrationOnlyClientWebFlow && styles.registrationOnlyWebContent,
+          landingHeaderCollapseRoom > 0 && { paddingBottom: (Platform.OS === 'android' ? androidLandingBottomPadding : 24) + landingHeaderCollapseRoom },
         ]}
         keyboardDismissMode="on-drag"
         onScroll={(event: NativeSyntheticEvent<NativeScrollEvent>) => {

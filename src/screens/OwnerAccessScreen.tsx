@@ -1516,7 +1516,6 @@ export function OwnerAccessScreen({
                   <Text style={{ color: palette.ink, fontSize: 13 }}>Cliente</Text>
                 </TouchableOpacity>
               </View>
-              <Text accessibilityRole="header" style={{ color: palette.ink, fontFamily: 'Georgia', fontSize: 24, lineHeight: 30, textAlign: 'center', marginBottom: 22 }}>Accedi al tuo salone</Text>
             </>
           ) : null}
           {ownerPasswordRecoveryActive ? (
