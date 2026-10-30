@@ -867,7 +867,7 @@ function TabBarItemVisual({
                   <Ionicons
                     name={activeIconName}
                     size={tabIconSize}
-                    color={IS_WEB&&!compactWebBar?'#FFFFFF':!IS_WEB&&barPalette.night?'#FFFFFF':'#181A18'}
+                    color={(IS_WEB&&!compactWebBar)||barPalette.night?'#FFFFFF':'#181A18'}
                   />
                 </RNAnimated.View>
               </Animated.View>
@@ -898,7 +898,7 @@ function TabBarItemVisual({
                     <Ionicons
                       name={activeIconName}
                       size={tabIconSize}
-                      color={IS_WEB&&!compactWebBar?'#FFFFFF':!IS_WEB&&barPalette.night?'#FFFFFF':'#181A18'}
+                      color={(IS_WEB&&!compactWebBar)||barPalette.night?'#FFFFFF':'#181A18'}
                     />
                   </Animated.View>
                 </Animated.View>
@@ -925,7 +925,7 @@ function TabBarItemVisual({
                 <Ionicons
                   name={activeIconName}
                   size={tabIconSize}
-                  color={IS_WEB&&!compactWebBar?'#FFFFFF':!IS_WEB&&barPalette.night?'#FFFFFF':'#181A18'}
+                  color={(IS_WEB&&!compactWebBar)||barPalette.night?'#FFFFFF':'#181A18'}
                 />
               </Animated.View>
             </>

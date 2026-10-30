@@ -68,7 +68,7 @@ export function ClientPremiumNavigation({ items, workspaceId, salonName }: { ite
         {item.selected ? <View {...(Platform.OS === 'web' ? { dataSet: { clientTabIndicator: 'true' } } : {})} pointerEvents="none" style={[bar.animatedIndicator, { position: 'absolute', width: Math.max(44, itemWidth - 6), height: 48, borderRadius: 24 }]} /> : null}
         <View style={{ width: 26, height: 26, alignItems: 'center', justifyContent: 'center' }}>
           <Ionicons name={item.icon} size={20} color={item.selected ? p.night ? '#FFF' : '#181A18' : p.muted} />
-          {Boolean(item.badge) ? <View style={{ position: 'absolute', top: -2, right: -3, minWidth: 15, height: 15, paddingHorizontal: 3, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: CLIENT_NOTIFICATION_RED }}><Text style={{ color: CLIENT_NOTIFICATION_ON_RED, fontSize: 9 }}>{item.badge! > 99 ? '99+' : item.badge}</Text></View> : null}
+          {Boolean(item.badge) ? <View style={{ position: 'absolute', top: -6, right: -10, minWidth: 20, height: 20, paddingHorizontal: 5, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: CLIENT_NOTIFICATION_RED }}><Text style={{ color: CLIENT_NOTIFICATION_ON_RED, fontSize: 11.5, lineHeight: 14, fontWeight: '700' }}>{item.badge! > 99 ? '99+' : item.badge}</Text></View> : null}
         </View>
         <Text maxFontSizeMultiplier={1} style={[item.selected ? bar.tabBarLabelActive : bar.tabBarLabelInactive, { fontSize: width < 350 ? 7.5 : 8, lineHeight: 11, fontWeight: item.selected ? '600' : '400' }]}>{item.label}</Text>
       </Pressable>)}
