@@ -1,13 +1,10 @@
 import {NativePremiumScope,NativeReadableText as Text} from './owner-native-premium';
-import { useAccessAppearance } from './access-premium';
-import { useSettingsWebStyles } from './settings-web-styles';
+import { AccessAppearanceProvider, useAccessAppearance } from './access-premium';
 import { popupGlass } from './premium-web-surfaces';
-import { DockedSheetSurface } from './ui/docked-sheet-surface';
 import { WebPagePortal } from './ui/web-page-portal';
 import { Ionicons } from '@expo/vector-icons';
 import React, { useEffect, useState } from 'react';
 import {
-    Image,
     Platform,
     ScrollView,
     StyleSheet,
@@ -845,53 +842,61 @@ const VISUAL_ICONS: Record<OnboardingStepVisual, React.ComponentProps<typeof Ion
   requests: 'notifications-outline', guided: 'options-outline', automatic: 'checkmark-circle-outline', cash: 'wallet-outline', final: 'checkmark-done-outline',
 };
 
+type GuidePalette = ReturnType<typeof useAccessAppearance>['palette'];
+
+/** Day/night tones of the guide, derived from the shared access palette. */
+function guideTones(p: GuidePalette) {
+  return {
+    sheet: p.night ? '#1C1F20' : '#F6F3EE',
+    panel: p.night ? 'rgba(255,255,255,.045)' : 'rgba(255,255,255,.72)',
+    panelBorder: p.night ? 'rgba(237,230,215,.13)' : 'rgba(120,100,70,.14)',
+    row: p.night ? 'rgba(255,255,255,.04)' : '#FFFFFF',
+    gold: p.night ? '#D8C29B' : '#9C7A45',
+    goldSoft: p.night ? 'rgba(216,194,155,.14)' : 'rgba(156,122,69,.11)',
+    track: p.night ? 'rgba(255,255,255,.09)' : 'rgba(38,39,37,.08)',
+    scrim: p.night ? 'rgba(0,0,0,.62)' : 'rgba(40,35,29,.34)',
+  };
+}
+
 export function StepVisual({ visual, compact, step }: { visual: OnboardingStepVisual; compact: boolean; step?: OnboardingStep }) {
-  const {palette:p}=useAccessAppearance();
-  const styles=useSettingsWebStyles(baseOnboardingStyles,true);
+  const { palette: p } = useAccessAppearance();
+  const t = guideTones(p);
   const content = step ?? ONBOARDING_STEPS.find((item) => item.visual === visual) ?? ONBOARDING_STEPS[0];
   return (
-    <View style={[styles.preview, compact && styles.previewCompact]}>
-      <View style={styles.previewBrand}>
-        <View style={styles.previewBrandLogoArea}>
-          <View style={styles.logoWindow}><Image source={require('../assets/images/salon-pro-logo-ui.png')} style={[styles.logo,Platform.OS==='web'&&({filter:p.night?'invert(1) grayscale(1)':'none'} as any)]} resizeMode="contain" accessibilityLabel="SalonPro" /></View>
+    <View style={{ borderRadius: 22, borderWidth: 1, borderColor: t.panelBorder, backgroundColor: t.panel, padding: compact ? 12 : 16, gap: 10 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+        <View style={{ width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center', backgroundColor: t.goldSoft }}>
+          <Ionicons name={VISUAL_ICONS[visual]} size={18} color={t.gold} />
         </View>
-        <Text style={styles.exampleLabel}>ESEMPIO</Text>
-      </View>
-      <View style={styles.previewHeading}>
-        <Ionicons name={VISUAL_ICONS[visual]} size={20} color={Platform.OS==='web'?p.ink:'#334155'} />
-        <Text style={styles.previewTitle}>{content.screen}</Text>
+        <Text style={{ flex: 1, color: p.ink, fontSize: 15, lineHeight: 20, fontWeight: '600' }}>{content.screen}</Text>
+        <Text style={{ color: p.muted, fontSize: 10, letterSpacing: 1.4, fontWeight: '600' }}>ESEMPIO</Text>
       </View>
       {content.rows.map((row, index) => (
-        <View key={Platform.OS === 'web' ? `${content.key}-${index}` : index} style={[styles.previewRow, { borderLeftColor: ['#60A5FA', '#A78BFA', '#34D399'][index % 3] }]}>
-          <Text style={styles.previewLabel}>{row.label}</Text>
-          <Text style={styles.previewValue}>{row.value}</Text>
+        <View key={`${content.key}-${index}`} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 42, borderRadius: 13, borderWidth: 1, borderColor: t.panelBorder, backgroundColor: t.row, paddingHorizontal: 12, paddingVertical: 9 }}>
+          <View style={{ width: 3, alignSelf: 'stretch', borderRadius: 2, backgroundColor: t.gold, opacity: 1 - index * 0.25 }} />
+          <Text style={{ flex: 1, color: p.muted, fontSize: 12 }}>{row.label}</Text>
+          <Text style={{ flex: 1.4, textAlign: 'right', color: p.ink, fontSize: 13, fontWeight: '600' }}>{row.value}</Text>
         </View>
       ))}
     </View>
   );
 }
 
-export function OnboardingModal({
+export function OnboardingModal(props: OnboardingModalProps) {
+  // Mounted outside the tab layout: it needs its own appearance scope, or it
+  // would always render in the day palette whatever the salon uses.
+  if (!props.visible) return null;
+  return <AccessAppearanceProvider><OnboardingGuide {...props} /></AccessAppearanceProvider>;
+}
+
+function OnboardingGuide({
   visible,
   allowSkip = true,
   onClose,
   onComplete,
 }: OnboardingModalProps) {
-  const {palette:p}=useAccessAppearance();
-  const themedStyles=useSettingsWebStyles(baseOnboardingStyles,true);
-  // The header floats over the live app and the CTA sits on the sheet surface:
-  // both need solid fills on every platform, not the themed translucent field.
-  const styles=React.useMemo(()=>{
-    const chip={backgroundColor:p.night?'#24282A':'#FBF8F2',borderColor:p.night?'rgba(237,230,215,.22)':'rgba(120,100,70,.18)',borderWidth:1,shadowColor:'#2A2118',shadowOpacity:p.night?.3:.12,shadowRadius:10,shadowOffset:{width:0,height:3},elevation:3};
-    return {...themedStyles,
-      overlayBadge:{...themedStyles.overlayBadge,...chip},
-      overlayBadgeText:{...themedStyles.overlayBadgeText,color:p.ink,fontWeight:'600'},
-      skipButton:{...themedStyles.skipButton,...chip},
-      skipText:{...themedStyles.skipText,color:p.ink,fontWeight:'600'},
-      primaryButton:{...themedStyles.primaryButton,backgroundColor:p.action,borderWidth:0,shadowColor:'#2A2118',shadowOpacity:p.night?.25:.16,shadowRadius:12,shadowOffset:{width:0,height:5},elevation:4},
-      primaryButtonText:{...themedStyles.primaryButtonText,color:p.actionText,fontWeight:'600'},
-    } as unknown as typeof themedStyles;
-  },[themedStyles,p]);
+  const { palette: p, toggle } = useAccessAppearance();
+  const t = guideTones(p);
   const { width, height } = useWindowDimensions();
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isClosingFlow, setIsClosingFlow] = useState(false);
@@ -899,11 +904,13 @@ export function OnboardingModal({
   const androidLastNavigationAtRef = React.useRef(0);
   const cardScrollRef = React.useRef<ScrollView>(null);
 
+  // Wide screens get a centred card; phones a full-width sheet from the bottom.
+  const floating = width >= 640;
   const isCompactHeight = height < 760;
-  const cardMaxWidth = Math.min(width - 28, 560);
   const safeCurrentIndex = Math.max(0, Math.min(currentIndex, ONBOARDING_STEPS.length - 1));
   const currentStep = ONBOARDING_STEPS[safeCurrentIndex] ?? ONBOARDING_STEPS[0];
   const progressLabel = `${safeCurrentIndex + 1} / ${ONBOARDING_STEPS.length}`;
+  const serif = Platform.OS === 'android' ? 'serif' : 'Georgia';
 
   useEffect(() => {
     mountedRef.current = true;
@@ -921,14 +928,10 @@ export function OnboardingModal({
   }, [visible]);
 
   React.useLayoutEffect(() => {
-    if (visible && Platform.OS !== 'web') {
+    if (visible) {
       cardScrollRef.current?.scrollTo({ y: 0, animated: false });
     }
   }, [visible, safeCurrentIndex]);
-
-  if (!visible) {
-    return null;
-  }
 
   const acceptGuideNavigation = () => {
     if (!IS_ANDROID) return true;
@@ -960,6 +963,11 @@ export function OnboardingModal({
     setCurrentIndex((previous) => IS_ANDROID && previous !== safeCurrentIndex ? previous : Math.min(previous + 1, ONBOARDING_STEPS.length - 1));
   };
 
+  const handleBack = () => {
+    if (isClosingFlow || safeCurrentIndex === 0 || !acceptGuideNavigation()) return;
+    setCurrentIndex((index) => IS_ANDROID && index !== safeCurrentIndex ? index : Math.max(0, index - 1));
+  };
+
   const handleClose = async () => {
     if (isClosingFlow || !acceptGuideNavigation()) {
       return;
@@ -975,380 +983,232 @@ export function OnboardingModal({
     }
   };
 
+  const chip = { minHeight: 40, minWidth: 40, borderRadius: 20, borderWidth: 1, borderColor: t.panelBorder, backgroundColor: t.panel, alignItems: 'center' as const, justifyContent: 'center' as const, flexDirection: 'row' as const, gap: 6, paddingHorizontal: 12 };
+
   return (
     <WebPagePortal><NativePremiumScope.Provider value={true}><View {...(Platform.OS==='web'?{dataSet:{settingsTour:'true'}}:{})} style={styles.modalRoot} accessibilityViewIsModal>
-      <View style={[styles.scrim,Platform.OS==='web'&&{backgroundColor:p.night?'rgba(0,0,0,.54)':'rgba(40,35,29,.28)',backdropFilter:'blur(8px)'} as any]} />
-      <View pointerEvents="none" style={[styles.scrimVignetteTop,Platform.OS==='web'&&{display:'none'}]} />
-      <View pointerEvents="none" style={[styles.scrimVignetteBottom,Platform.OS==='web'&&{display:'none'}]} />
-
-      <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
-        <View style={[styles.overlayHeader, { maxWidth: cardMaxWidth, marginTop: isCompactHeight ? 8 : 12 }]}>
-          <View style={styles.overlayBadge}>
-            <Text numberOfLines={Platform.OS==='web'?undefined:1} adjustsFontSizeToFit minimumFontScale={0.82} style={styles.overlayBadgeText}>Guida SalonPro</Text>
-          </View>
-          {allowSkip ? (
-            <GuideButton
-              style={styles.skipButton}
-              accessibilityRole="button"
-              accessibilityLabel="Salta la guida ed entra in SalonPro"
-              onPress={() => {
-                void handleClose();
-              }}
-              hapticType="light"
-              pressInHapticType="light"
-              activeOpacity={0.9}
-              disabled={isClosingFlow}
-            >
-              <Text numberOfLines={Platform.OS==='web'?undefined:1} adjustsFontSizeToFit minimumFontScale={0.82} style={styles.skipText}>Salta</Text>
-            </GuideButton>
-          ) : (
-            <View style={styles.skipButtonPlaceholder} />
-          )}
-        </View>
-
+      <View style={[StyleSheet.absoluteFill, { backgroundColor: t.scrim }, Platform.OS === 'web' && ({ backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)' } as object)]} />
+      <SafeAreaView style={[styles.safeArea, { justifyContent: floating ? 'center' : 'flex-end', paddingHorizontal: floating ? 24 : 0, paddingVertical: floating ? 24 : 0 }]} edges={floating ? ['top', 'bottom', 'left', 'right'] : ['top', 'left', 'right']}>
         <View
           style={[
-            styles.centerLayer,
+            styles.card,
             {
-              paddingTop: 14,
-              paddingBottom: 0,
+              backgroundColor: t.sheet,
+              borderColor: t.panelBorder,
+              maxWidth: floating ? 620 : undefined,
+              maxHeight: floating ? Math.min(height - 48, 860) : height - (isCompactHeight ? 24 : 56),
+              borderRadius: floating ? 30 : 0,
+              borderTopLeftRadius: 30,
+              borderTopRightRadius: 30,
+              shadowOpacity: p.night ? 0.42 : 0.16,
             },
+            Platform.OS === 'web' && { ...popupGlass(p), backgroundColor: p.night ? 'rgba(28,31,32,.97)' : 'rgba(246,243,238,.97)' },
           ]}
         >
-          <DockedSheetSurface
-            {...(Platform.OS === 'web' ? { onClose: () => { void handleClose(); }, dismissDisabled: isClosingFlow || !allowSkip } : {})}
-            style={[
-              styles.cardShell,
-              Platform.OS==='web'&&popupGlass(p),
-              {
-                maxWidth: cardMaxWidth,
-                flex: 1,
-                // On web, fill the available viewport below the guide header.
-                // The inner ScrollView keeps long steps clear of the fixed footer.
-                maxHeight: undefined,
-                ...(Platform.OS === 'web' ? { minHeight: 0 } : {}),
-              },
-            ]}
-          >
-            <View style={[styles.cardTint,Platform.OS==='web'&&{backgroundColor:'transparent'}]} />
-
-            <ScrollView
-              key={Platform.OS === 'web' ? currentStep.key : 'native-guide-content'}
-              ref={cardScrollRef}
-              style={styles.cardScroll}
-              contentContainerStyle={styles.cardScrollContent}
-              showsVerticalScrollIndicator
-              bounces={false}
-              scrollEnabled
-            >
-              {Platform.OS !== 'web' ? <View style={styles.cardAccent} /> : null}
-
-
-              <View style={styles.copyBlock}>
-                <Text numberOfLines={Platform.OS==='web'?undefined:1} adjustsFontSizeToFit minimumFontScale={0.82} style={styles.progressText}>{currentStep.section} · {progressLabel}</Text>
-                <Text accessibilityRole="header" style={[styles.title, isCompactHeight && styles.titleCompact]}>
-                  {currentStep.title}
-                </Text>
-                <Text style={[styles.body, isCompactHeight && styles.bodyCompact]}>
-                  {currentStep.body}
-                </Text>
+          {/* Header: brand left, appearance and skip right, edge to edge. */}
+          <View style={[styles.header, { borderBottomColor: t.panelBorder }]}>
+            {!floating ? <View style={[styles.grabber, { backgroundColor: t.track }]} /> : null}
+            <View style={styles.headerRow}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexShrink: 1 }}>
+                <View style={{ width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center', backgroundColor: t.goldSoft }}>
+                  <Ionicons name="sparkles" size={14} color={t.gold} />
+                </View>
+                <Text numberOfLines={1} style={{ color: p.ink, fontSize: 12, fontWeight: '600', letterSpacing: 1.6, textTransform: 'uppercase' }}>Guida SalonPro</Text>
               </View>
-              <View style={[styles.visualWrap, isCompactHeight && styles.visualWrapCompact]}>
-                <StepVisual visual={currentStep.visual} compact={isCompactHeight} step={currentStep} />
-              </View>
-              <View style={styles.copyBlock}>
-                <View style={styles.location}><Ionicons name="navigate-outline" size={16} color={Platform.OS==='web'?p.ink:'#2563EB'} /><Text style={styles.locationText}>{currentStep.path}</Text></View>
-                {currentStep.instructions.map((instruction, index) => (
-                  <View key={Platform.OS === 'web' ? instruction : index} style={styles.instructionRow}>
-                    <Text style={styles.instructionNumber}>{index + 1}</Text>
-                    <Text style={styles.instructionText}>{instruction}</Text>
-                  </View>
-                ))}
-                <View style={styles.tipBox}><Ionicons name="information-circle-outline" size={18} color={Platform.OS==='web'?p.ink:'#475569'} /><Text style={styles.tipText}>{currentStep.tip}</Text></View>
-              </View>
-            </ScrollView>
-
-            <View style={styles.footer}>
-              <View style={styles.footerProgress}>
-                <GuideButton accessibilityRole="button" accessibilityLabel="Passaggio precedente" disabled={safeCurrentIndex === 0 || isClosingFlow} onPress={() => { if (acceptGuideNavigation()) setCurrentIndex((index) => IS_ANDROID && index !== safeCurrentIndex ? index : Math.max(0, index - 1)); }} style={[styles.backButton, safeCurrentIndex === 0 && styles.backDisabled]}>
-                  <Ionicons name="chevron-back" size={16} color={Platform.OS==='web'?p.ink:'#334155'} /><Text style={styles.backText}>Indietro</Text>
-                </GuideButton>
-                <Text style={styles.footerCount}>{progressLabel}</Text>
-              </View>
-              <View accessibilityRole="progressbar" accessibilityValue={{ min: 1, max: ONBOARDING_STEPS.length, now: safeCurrentIndex + 1 }} style={styles.progressTrack}><View style={[styles.progressFill, { width: `${((safeCurrentIndex + 1) / ONBOARDING_STEPS.length) * 100}%` }]} /></View>
-
-              <GuideButton
-                style={styles.primaryButton}
-                immediatePress
-                accessibilityRole="button"
-                onPress={() => {
-                  void handleNext();
-                }}
-                hapticType="medium"
-                pressInHapticType="light"
-                activeOpacity={0.92}
-                disabled={isClosingFlow}
-              >
-                <Text
-                  numberOfLines={Platform.OS==='web'?undefined:1}
-                  ellipsizeMode="clip"
-                  adjustsFontSizeToFit
-                  minimumFontScale={0.78}
-                  style={styles.primaryButtonText}
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <GuideButton
+                  accessibilityRole="button"
+                  accessibilityLabel={p.night ? 'Attiva aspetto giorno' : 'Attiva aspetto night'}
+                  onPress={toggle}
+                  hapticType="light"
+                  style={[chip, { paddingHorizontal: 0, width: 40 }]}
                 >
-                  {currentStep.cta}
-                </Text>
-              </GuideButton>
+                  <Ionicons name={p.night ? 'sunny-outline' : 'moon-outline'} size={17} color={p.ink} />
+                </GuideButton>
+                {allowSkip ? (
+                  <GuideButton
+                    style={chip}
+                    accessibilityRole="button"
+                    accessibilityLabel="Salta la guida ed entra in SalonPro"
+                    onPress={() => {
+                      void handleClose();
+                    }}
+                    hapticType="light"
+                    pressInHapticType="light"
+                    activeOpacity={0.9}
+                    disabled={isClosingFlow}
+                  >
+                    <Text numberOfLines={1} style={{ color: p.ink, fontSize: 13, fontWeight: '600' }}>Salta</Text>
+                  </GuideButton>
+                ) : null}
+              </View>
             </View>
-          </DockedSheetSurface>
+            <View accessibilityRole="progressbar" accessibilityValue={{ min: 1, max: ONBOARDING_STEPS.length, now: safeCurrentIndex + 1 }} style={[styles.progressTrack, { backgroundColor: t.track }]}>
+              <View style={[styles.progressFill, { backgroundColor: t.gold, width: `${((safeCurrentIndex + 1) / ONBOARDING_STEPS.length) * 100}%` }]} />
+            </View>
+          </View>
+
+          <ScrollView
+            key={Platform.OS === 'web' ? currentStep.key : 'native-guide-content'}
+            ref={cardScrollRef}
+            style={styles.scroll}
+            contentContainerStyle={[styles.scrollContent, { paddingHorizontal: floating ? 28 : 20 }]}
+            showsVerticalScrollIndicator={false}
+            bounces={false}
+          >
+            <View style={{ alignItems: 'center', gap: 8 }}>
+              <Text numberOfLines={1} style={{ color: t.gold, fontSize: 11, fontWeight: '600', letterSpacing: 1.8, textTransform: 'uppercase' }}>{currentStep.section} · {progressLabel}</Text>
+              <Text accessibilityRole="header" style={{ color: p.ink, fontFamily: serif, fontSize: isCompactHeight ? 25 : 29, lineHeight: isCompactHeight ? 31 : 35, textAlign: 'center', letterSpacing: -0.4 }}>
+                {currentStep.title}
+              </Text>
+              <Text style={{ color: p.muted, fontSize: isCompactHeight ? 14 : 15, lineHeight: isCompactHeight ? 20 : 22, textAlign: 'center', maxWidth: 460 }}>
+                {currentStep.body}
+              </Text>
+            </View>
+
+            <View style={{ marginTop: isCompactHeight ? 16 : 22 }}>
+              <StepVisual visual={currentStep.visual} compact={isCompactHeight} step={currentStep} />
+            </View>
+
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9, marginTop: 16, paddingHorizontal: 14, paddingVertical: 11, borderRadius: 14, backgroundColor: t.goldSoft }}>
+              <Ionicons name="navigate-outline" size={15} color={t.gold} />
+              <Text style={{ flex: 1, color: p.ink, fontSize: 12, lineHeight: 18 }}>{currentStep.path}</Text>
+            </View>
+
+            <View style={{ gap: 12, marginTop: 18 }}>
+              {currentStep.instructions.map((instruction, index) => (
+                <View key={`${currentStep.key}-${index}`} style={{ flexDirection: 'row', gap: 12, alignItems: 'flex-start' }}>
+                  <View style={{ width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: t.gold }}>
+                    <Text style={{ color: t.gold, fontSize: 11, fontWeight: '700' }}>{index + 1}</Text>
+                  </View>
+                  <Text style={{ flex: 1, color: p.ink, fontSize: 14, lineHeight: 21 }}>{instruction}</Text>
+                </View>
+              ))}
+            </View>
+
+            {currentStep.tip ? (
+              <View style={{ flexDirection: 'row', gap: 9, alignItems: 'flex-start', marginTop: 18, padding: 13, borderRadius: 14, borderWidth: 1, borderColor: t.panelBorder, backgroundColor: t.panel }}>
+                <Ionicons name="bulb-outline" size={16} color={t.gold} />
+                <Text style={{ flex: 1, color: p.muted, fontSize: 12, lineHeight: 18 }}>{currentStep.tip}</Text>
+              </View>
+            ) : null}
+          </ScrollView>
+
+          {/* Footer: back on the left, the next step as the main action. */}
+          <SafeAreaView edges={floating ? [] : ['bottom']} style={[styles.footer, { borderTopColor: t.panelBorder, paddingHorizontal: floating ? 28 : 20 }]}>
+            <GuideButton
+              accessibilityRole="button"
+              accessibilityLabel="Passaggio precedente"
+              disabled={safeCurrentIndex === 0 || isClosingFlow}
+              onPress={handleBack}
+              style={[chip, { width: 54, height: 54, borderRadius: 18, paddingHorizontal: 0, opacity: safeCurrentIndex === 0 ? 0.35 : 1 }]}
+            >
+              <Ionicons name="chevron-back" size={20} color={p.ink} />
+            </GuideButton>
+            <GuideButton
+              style={[styles.primaryButton, { backgroundColor: p.action, shadowOpacity: p.night ? 0.3 : 0.16 }]}
+              immediatePress
+              accessibilityRole="button"
+              onPress={() => {
+                void handleNext();
+              }}
+              hapticType="medium"
+              pressInHapticType="light"
+              activeOpacity={0.92}
+              disabled={isClosingFlow}
+            >
+              <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.78} style={{ color: p.actionText, fontSize: 15, fontWeight: '600', paddingHorizontal: ANDROID_TEXT_BREATHING_ROOM }}>
+                {currentStep.cta}
+              </Text>
+              <Ionicons name={safeCurrentIndex >= ONBOARDING_STEPS.length - 1 ? 'checkmark' : 'arrow-forward'} size={17} color={p.actionText} />
+            </GuideButton>
+          </SafeAreaView>
         </View>
       </SafeAreaView>
     </View></NativePremiumScope.Provider></WebPagePortal>
   );
 }
 
-const baseOnboardingStyles = StyleSheet.create({
+const styles = StyleSheet.create({
   modalRoot: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'transparent',
     zIndex: 9999,
     elevation: 9999,
   },
-  scrim: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(7, 12, 22, 0.82)',
-  },
-  scrimVignetteTop: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    height: '38%',
-    backgroundColor: 'rgba(7, 12, 22, 0.14)',
-  },
-  scrimVignetteBottom: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    height: '32%',
-    backgroundColor: 'rgba(7, 12, 22, 0.18)',
-  },
   safeArea: {
     flex: 1,
-    position: 'relative',
+    alignItems: 'center',
   },
-  overlayHeader: {
+  card: {
     width: '100%',
+    overflow: 'hidden',
+    borderWidth: 1,
+    shadowColor: '#000000',
+    shadowRadius: 30,
+    shadowOffset: { width: 0, height: 14 },
+    elevation: 12,
+  },
+  header: {
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    paddingBottom: 0,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  grabber: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
     alignSelf: 'center',
+    marginBottom: 8,
+  },
+  headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 20,
-    paddingHorizontal: 16,
+    gap: 12,
     minHeight: 44,
-    flexShrink: 0,
-  },
-  overlayBadge: {
-    borderRadius: 999,
-    paddingHorizontal: IS_ANDROID ? 14 : 12,
-    paddingVertical: 8,
-    backgroundColor: '#111827',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
-  },
-  overlayBadgeText: {
-    fontSize: 11,
-    fontWeight: '900',
-    letterSpacing: 1,
-    textTransform: 'uppercase',
-    color: '#f8fafc',
-    paddingHorizontal: ANDROID_TEXT_BREATHING_ROOM,
-  },
-  skipButton: {
-    minHeight: 44,
-    justifyContent: 'center',
-    borderRadius: 999,
-    paddingHorizontal: IS_ANDROID ? 16 : 14,
-    paddingVertical: 8,
-    backgroundColor: '#111827',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
-  },
-  skipButtonPlaceholder: {
-    position: 'absolute',
-    right: 10,
-    width: 74,
-    height: 38,
-  },
-  skipText: {
-    fontSize: 14,
-    fontWeight: '800',
-    color: '#f8fafc',
-    paddingHorizontal: ANDROID_TEXT_BREATHING_ROOM,
-  },
-  centerLayer: {
-    flex: 1,
-    minHeight: 0,
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    paddingHorizontal: 14,
-  },
-  cardShell: {
-    width: '100%',
-    borderRadius: 30,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.55)',
-    backgroundColor: 'rgba(255, 255, 255, 0.94)',
-    shadowColor: '#020617',
-    shadowOpacity: 0.12,
-    shadowRadius: 22,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 10,
-  },
-  cardTint: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(244, 248, 252, 0.9)',
-  },
-  cardScroll: {
-    flex: 1,
-    minHeight: 0,
-  },
-  cardScrollContent: {
-    flexGrow: 1,
-    paddingHorizontal: 18,
-    paddingTop: 12,
-    paddingBottom: 8,
-  },
-  cardAccent: {
-    width: 44,
-    height: 4,
-    borderRadius: 999,
-    alignSelf: 'center',
-    backgroundColor: 'rgba(71, 85, 105, 0.28)',
     marginBottom: 10,
   },
-  visualWrap: {
-    marginTop: 16,
-    marginBottom: 16,
+  progressTrack: {
+    height: 3,
+    marginHorizontal: -16,
+    overflow: 'hidden',
   },
-  visualWrapCompact: {
-    marginTop: 12,
-    marginBottom: 12,
+  progressFill: {
+    height: 3,
+    borderTopRightRadius: 2,
+    borderBottomRightRadius: 2,
   },
-  copyBlock: {
-    alignItems: 'center',
-    paddingTop: 6,
+  scroll: {
+    flexGrow: 0,
+    flexShrink: 1,
+    minHeight: 0,
   },
-  progressText: {
-    fontSize: 12,
-    fontWeight: '900',
-    color: '#475569',
-    letterSpacing: 0.8,
-    textTransform: 'uppercase',
-    marginBottom: 6,
-    paddingHorizontal: ANDROID_TEXT_BREATHING_ROOM,
-  },
-  title: {
-    fontSize: 27,
-    lineHeight: 32,
-    fontWeight: '900',
-    color: '#0f172a',
-    textAlign: 'center',
-    marginBottom: 6,
-    paddingHorizontal: ANDROID_TEXT_BREATHING_ROOM,
-  },
-  titleCompact: {
-    fontSize: 23,
-    lineHeight: 28,
-    marginBottom: 6,
-  },
-  body: {
-    fontSize: 15,
-    lineHeight: 22,
-    fontWeight: '600',
-    color: '#334155',
-    textAlign: 'center',
-    maxWidth: 420,
-    paddingHorizontal: ANDROID_TEXT_BREATHING_ROOM,
-  },
-  bodyCompact: {
-    fontSize: 14,
-    lineHeight: 20,
+  scrollContent: {
+    paddingTop: 22,
+    paddingBottom: 22,
   },
   footer: {
-    flexShrink: 0,
-    paddingHorizontal: 18,
-    paddingTop: 8,
-    paddingBottom: 12,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.24)',
-    backgroundColor: 'rgba(255, 255, 255, 0.12)',
-  },
-  dotsRow: {
     flexDirection: 'row',
-    justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 10,
-  },
-  dotButton: {
-    paddingHorizontal: 5,
-    paddingVertical: 4,
-  },
-  dot: {
-    width: 8,
-    height: 8,
-    borderRadius: 999,
-    backgroundColor: 'rgba(100, 116, 139, 0.32)',
-  },
-  dotActive: {
-    width: 24,
-    backgroundColor: '#0f172a',
+    gap: 10,
+    paddingTop: 12,
+    paddingBottom: 14,
+    borderTopWidth: StyleSheet.hairlineWidth,
   },
   primaryButton: {
+    flex: 1,
     minHeight: 54,
     borderRadius: 18,
-    backgroundColor: '#111827',
-    paddingHorizontal: IS_ANDROID ? 16 : 0,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#0f172a',
-    shadowOpacity: 0.12,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 8 },
+    gap: 8,
+    paddingHorizontal: 16,
+    shadowColor: '#2A2118',
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 5 },
     elevation: 4,
   },
-  primaryButtonText: {
-    fontSize: 15,
-    fontWeight: '900',
-    color: '#ffffff',
-    paddingHorizontal: ANDROID_TEXT_BREATHING_ROOM,
-  },
-  preview: { borderRadius: 22, backgroundColor: '#F1F5F9', borderWidth: 1, borderColor: '#CBD5E1', padding: 14, gap: 8 },
-  previewCompact: { padding: 12 },
-  previewBrand: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  previewBrandLogoArea: { flex: 1, alignItems: 'flex-start', paddingLeft: 6, minWidth: 0 },
-  logoWindow: { width: 108, maxWidth: '100%', height: 36, overflow: 'hidden' },
-  logo: { position: 'absolute', width: 108, height: 72, top: -14, left: '50%', marginLeft: -54 },
-  exampleLabel: { flexShrink: 0, color: '#64748B', fontSize: 9, fontWeight: '700', letterSpacing: 1 },
-  previewHeading: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 5 },
-  previewTitle: { flex: 1, color: '#0F172A', fontSize: 15, fontWeight: '800' },
-  previewRow: { backgroundColor: '#FFFFFF', borderRadius: 11, borderWidth: 1, borderColor: '#E2E8F0', borderLeftWidth: 3, paddingHorizontal: 11, paddingVertical: 10, gap: 10, flexDirection: 'row', alignItems: 'center' },
-  previewLabel: { flex: 1, color: '#64748B', fontSize: 11, fontWeight: '600' },
-  previewValue: { flex: 1.2, textAlign: 'right', color: '#0F172A', fontSize: 13, fontWeight: '700' },
-  location: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#EFF6FF', borderRadius: 12, padding: 12, marginVertical: 16, width: '100%' },
-  locationText: { flex: 1, fontSize: 12, lineHeight: 18, fontWeight: '700', color: '#1D4ED8' },
-  instructionRow: { flexDirection: 'row', gap: 10, marginBottom: 14, width: '100%' },
-  instructionNumber: { color: '#334155', backgroundColor: '#E2E8F0', borderRadius: 12, width: 24, height: 24, textAlign: 'center', lineHeight: 24, fontSize: 12, fontWeight: '800' },
-  instructionText: { flex: 1, color: '#334155', fontSize: 14, lineHeight: 21 },
-  tipBox: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, padding: 12, borderRadius: 12, backgroundColor: '#E8EEF4', marginBottom: 12 },
-  tipText: { flex: 1, fontSize: 12, lineHeight: 18, color: '#475569' },
-  footerProgress: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  backButton: { flexDirection: 'row', alignItems: 'center', gap: 3, minHeight: 44, paddingRight: 12 },
-  backDisabled: { opacity: 0.3 },
-  backText: { color: '#334155', fontSize: 13, fontWeight: '700' },
-  footerCount: { color: '#64748B', fontSize: 12, fontWeight: '700' },
-  progressTrack: { height: 3, backgroundColor: '#E2E8F0', borderRadius: 3, marginBottom: 12, overflow: 'hidden' },
-  progressFill: { height: 3, backgroundColor: '#334155', borderRadius: 3 },
 });
