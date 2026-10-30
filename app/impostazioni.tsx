@@ -938,7 +938,7 @@ export function ImpostazioniScreen({
               <Text style={styles.guideHeroEyebrow}>SALONPRO</Text>
               <Text style={styles.guideHeroTitle}>Guida SalonPro</Text>
               <Text style={styles.guideHeroText}>
-                Rivedi la guida completa: servizi, mestieri, operatori, clienti, personalizzazioni, QR e codice salone, Agenda, orari e richieste online. Puoi saltarla in qualsiasi momento.
+                Rivedi in 14 passi listino e team, clienti, QR e codice salone, Agenda e orari, richieste online, notifiche e cassa. Puoi saltarla in qualsiasi momento.
               </Text>
 
               <View style={styles.guideHeroActions}>

@@ -54,7 +54,7 @@ export const ONBOARDING_STEPS: OnboardingStep[] = [
   {
     "key": "welcome",
     "title": "Benvenuto in SalonPro",
-    "body": "Prepariamo insieme il tuo salone, dal primo servizio alla prima prenotazione.",
+    "body": "In pochi passi prepariamo il tuo salone, dal listino alla prima prenotazione online.",
     "cta": "Inizia la guida",
     "visual": "welcome",
     "section": "Si parte",
@@ -63,87 +63,57 @@ export const ONBOARDING_STEPS: OnboardingStep[] = [
     "rows": [
       {
         "label": "01",
-        "value": "Crea il listino e il team"
+        "value": "Identità, listino e team"
       },
       {
         "label": "02",
-        "value": "Configura orari e clienti"
+        "value": "Clienti, Agenda e orari"
       },
       {
         "label": "03",
-        "value": "Ricevi le prime prenotazioni"
+        "value": "Prenotazioni online e cassa"
       }
     ],
     "instructions": [
-      "Segui il percorso per scoprire dove si trova ogni funzione e come usarla.",
-      "Gli esempi della guida sono illustrativi: configurerai i tuoi dati una volta entrato."
+      "Ogni passo ti mostra dove si trova una funzione e come usarla.",
+      "Gli esempi sono illustrativi: inserirai i dati reali del tuo salone una volta entrato."
     ],
-    "tip": "Puoi saltare la guida in qualsiasi momento con Salta."
+    "tip": "Puoi saltare la guida in qualsiasi momento con Salta e rivederla dalle Impostazioni."
   },
   {
-  "key": "salon-logo",
-  "title": "Il logo reale del tuo salone",
-  "body": "Personalizza la targhetta che identifica il salone e che vedono anche i clienti.",
-  "cta": "Scopri l’IA",
-  "visual": "welcome",
-  "section": "La tua identità",
-  "path": "Home → Logo e targhetta → Logo · IA",
-  "screen": "Logo e targhetta",
-  "rows": [
-    {
-      "label": "Nome salone",
-      "value": "Scegli font e finitura"
-    },
-    {
-      "label": "Logo · IA",
-      "value": "Carica il tuo logo reale"
-    },
-    {
-      "label": "Metallo",
-      "value": "Finitura della targhetta"
-    }
-  ],
-  "instructions": [
-    "Nella Home apri Logo e targhetta e scegli Logo · IA.",
-    "Tocca Scegli foto o screenshot, seleziona il logo del salone e regola il ritaglio senza tagliare lettere o simboli.",
-    "Se il logo è già nitido, scegli Usa originale. Seleziona la finitura, controlla l’anteprima e premi Salva."
-  ],
-  "tip": "Puoi anche usare Nome salone per personalizzare solo scritta, font e finitura, senza IA."
-},
-  {
-  "key": "salon-logo-ai",
-  "title": "Sistema il logo con l’IA",
-  "body": "L’IA elabora la foto caricata e genera una nuova anteprima del logo: utile per migliorare la nitidezza e ripulire lo sfondo.",
-  "cta": "Continua",
-  "visual": "welcome",
-  "section": "La tua identità",
-  "path": "Home → Logo e targhetta → Logo · IA",
-  "screen": "Elabora con IA",
-  "rows": [
-    {
-      "label": "1 · Carica",
-      "value": "Foto o screenshot del logo"
-    },
-    {
-      "label": "2 · Crea con IA",
-      "value": "Genera e controlla l’anteprima"
-    },
-    {
-      "label": "3 · Salva",
-      "value": "Applica il risultato scelto"
-    }
-  ],
-  "instructions": [
-    "Dopo aver caricato e ritagliato il logo, seleziona Elabora con IA e premi Crea con IA.",
-    "Attendi l’anteprima: puoi chiudere e tornare nella sezione mentre la creazione continua. Il logo attuale resta visibile.",
-    "Controlla nome, lettere, simboli e colori: l’IA può modificare i dettagli. Scegli la finitura e premi Salva solo quando il risultato ti convince."
-  ],
-  "tip": "Il ritaglio viene inviato a OpenAI. Sono previste fino a 3 prove al giorno, salvo account abilitati a prove illimitate. Annullare una creazione non restituisce il tentativo."
-},
+    "key": "salon-logo",
+    "title": "Il logo del tuo salone",
+    "body": "Personalizza la targhetta che ti identifica e che vedono anche i clienti, con o senza l’aiuto dell’IA.",
+    "cta": "Avanti",
+    "visual": "welcome",
+    "section": "La tua identità",
+    "path": "Home → Logo e targhetta → Logo · IA",
+    "screen": "Logo e targhetta",
+    "rows": [
+      {
+        "label": "Nome salone",
+        "value": "Scritta, font e finitura"
+      },
+      {
+        "label": "Logo · IA",
+        "value": "Carica e migliora il tuo logo"
+      },
+      {
+        "label": "Metallo",
+        "value": "Finitura della targhetta"
+      }
+    ],
+    "instructions": [
+      "Nella Home apri Logo e targhetta e scegli Logo · IA, poi carica una foto o uno screenshot del logo e regola il ritaglio senza tagliare lettere o simboli.",
+      "Se il logo è già nitido scegli Usa originale; altrimenti seleziona Elabora con IA e premi Crea con IA per ripulire sfondo e dettagli.",
+      "Controlla lettere, simboli e colori dell’anteprima, scegli la finitura e premi Salva solo quando il risultato ti convince."
+    ],
+    "tip": "Il ritaglio elaborato con l’IA viene inviato a OpenAI: sono previste fino a 3 prove al giorno e annullare una creazione non restituisce il tentativo. Con Nome salone personalizzi solo la scritta, senza IA."
+  },
   {
     "key": "services",
-    "title": "Aggiungi il primo servizio",
-    "body": "Il listino è il punto di partenza per costruire appuntamenti e disponibilità.",
+    "title": "Crea il tuo listino",
+    "body": "I servizi sono la base di appuntamenti e disponibilità: dai singoli trattamenti ai percorsi in più fasi.",
     "cta": "Avanti",
     "visual": "services",
     "section": "Listino e team",
@@ -164,44 +134,16 @@ export const ONBOARDING_STEPS: OnboardingStep[] = [
       }
     ],
     "instructions": [
-      "Apri Servizi e scegli Aggiungi servizio.",
-      "Inserisci nome, durata e prezzo, poi associa il mestiere richiesto e salva."
+      "Apri Servizi, scegli Aggiungi servizio e inserisci nome, durata e prezzo.",
+      "Associa il mestiere richiesto e salva.",
+      "Per trattamenti con più fasi scegli Composizione: collega i servizi nell’ordine di esecuzione e indica pose e pause."
     ],
-    "tip": "Scegli durate coerenti con il passo della tua Agenda: SalonPro ti avvisa se non sono compatibili."
+    "tip": "Scegli durate compatibili con il passo dell’Agenda: SalonPro ti avvisa se non lo sono. Durante la posa l’operatore può restare libero per altri clienti."
   },
   {
-    "key": "roles",
-    "title": "Crea i tuoi mestieri",
-    "body": "I mestieri collegano i servizi alle competenze degli operatori.",
-    "cta": "Avanti",
-    "visual": "roles",
-    "section": "Listino e team",
-    "path": "Servizi → Aggiungi servizio → Mestiere",
-    "screen": "Mestieri suggeriti",
-    "rows": [
-      {
-        "label": "Mestiere",
-        "value": "Parrucchiere"
-      },
-      {
-        "label": "Mestiere",
-        "value": "Estetista"
-      },
-      {
-        "label": "＋",
-        "value": "Crea nuovo mestiere"
-      }
-    ],
-    "instructions": [
-      "Nel campo del mestiere scegli una delle proposte.",
-      "Per una specializzazione diversa, tocca + Crea nuovo mestiere, scrivi il nome e conferma."
-    ],
-    "tip": "Usa lo stesso mestiere per collegare il servizio agli operatori che possono eseguirlo."
-  },
-  {
-    "key": "operators",
-    "title": "Aggiungi gli operatori",
-    "body": "Ogni professionista ha competenze e disponibilità proprie.",
+    "key": "team",
+    "title": "Il tuo team",
+    "body": "I mestieri collegano i servizi alle persone che sanno eseguirli.",
     "cta": "Avanti",
     "visual": "operators",
     "section": "Listino e team",
@@ -222,44 +164,16 @@ export const ONBOARDING_STEPS: OnboardingStep[] = [
       }
     ],
     "instructions": [
-      "Inserisci il nome e assegna il mestiere. Puoi aggiungere anche una foto.",
-      "Scegli i servizi gestiti e configura giorni e intervalli di disponibilità, poi salva."
+      "Nel campo del mestiere scegli una proposta oppure tocca + Crea nuovo mestiere.",
+      "Aggiungi ogni operatore con nome, mestiere ed eventuale foto.",
+      "Scegli i servizi che gestisce e i suoi giorni e orari di disponibilità, poi salva."
     ],
-    "tip": "L’operatore compare nella sua corsia in Agenda. Le disponibilità online rispettano le sue competenze."
-  },
-  {
-    "key": "compositions",
-    "title": "Più servizi, un percorso",
-    "body": "Puoi organizzare anche trattamenti con più fasi.",
-    "cta": "Avanti",
-    "visual": "services",
-    "section": "Listino e team",
-    "path": "Servizi → Aggiungi servizi → Composizione",
-    "screen": "Composizione",
-    "rows": [
-      {
-        "label": "Fase 1",
-        "value": "Colore"
-      },
-      {
-        "label": "Attesa",
-        "value": "Posa"
-      },
-      {
-        "label": "Fase finale",
-        "value": "Piega"
-      }
-    ],
-    "instructions": [
-      "Scegli Composizione e collega i servizi nell’ordine di esecuzione.",
-      "Configura operatori, lavorazioni e pause previste prima di salvare."
-    ],
-    "tip": "La posa può liberare l’operatore mentre il cliente resta impegnato. Inizia con un servizio semplice se non ti serve un percorso composto."
+    "tip": "Ogni operatore ha la sua corsia in Agenda e le disponibilità online rispettano le sue competenze."
   },
   {
     "key": "clients",
-    "title": "Aggiungi un cliente",
-    "body": "La rubrica raccoglie i contatti utili al lavoro del salone.",
+    "title": "La rubrica clienti",
+    "body": "Tutti i contatti del salone in un unico posto, con i nuovi clienti in evidenza.",
     "cta": "Avanti",
     "visual": "clients",
     "section": "Clienti",
@@ -280,131 +194,45 @@ export const ONBOARDING_STEPS: OnboardingStep[] = [
       }
     ],
     "instructions": [
-      "Apri Clienti e tocca Nuovo cliente.",
-      "Compila i dati richiesti e i contatti disponibili, poi salva la scheda."
+      "Apri Clienti, tocca Nuovo cliente, compila i dati e salva la scheda.",
+      "I clienti che si registrano da soli compaiono come Nuovo cliente: aprendo la loro card li segni come letti."
     ],
-    "tip": "La scheda creata dal salone e l’account personale del cliente sono due passaggi diversi: il cliente registra il proprio accesso."
+    "tip": "La scheda creata dal salone e l’account personale del cliente sono due cose diverse: il cliente registra il proprio accesso."
   },
   {
-    "key": "customer-times",
-    "title": "Tempi su misura per cliente",
-    "body": "Lo stesso servizio può richiedere tempi diversi da persona a persona.",
+    "key": "customer-rules",
+    "title": "Su misura per ogni cliente",
+    "body": "Tempi, prezzi e servizi prenotabili possono cambiare da persona a persona.",
     "cta": "Avanti",
     "visual": "clients",
-    "section": "Personalizzazioni cliente",
-    "path": "Clienti → Azioni della card → Tempi e prezzi",
+    "section": "Clienti",
+    "path": "Clienti → Gestisci cliente → Tempi e prezzi · Regole",
     "screen": "Tempi e prezzi · Sofia Rossi",
     "rows": [
       {
-        "label": "Servizio",
-        "value": "Taglio"
-      },
-      {
-        "label": "Durata standard",
-        "value": "30 min"
-      },
-      {
         "label": "Durata per Sofia",
-        "value": "45 min"
-      }
-    ],
-    "instructions": [
-      "Nell’app scorri la card del cliente verso sinistra; sul web apri il pannello delle azioni della card. Scegli Tempi e prezzi.",
-      "Cerca il servizio, tocca Durata e salva il tempo dedicato. Per i servizi a fasi puoi regolare Lavoro, Posa e Finale."
-    ],
-    "tip": "I valori personali vengono usati nei prossimi appuntamenti in Agenda e online. Gli appuntamenti già creati non cambiano."
-  },
-  {
-    "key": "customer-prices",
-    "title": "Un prezzo dedicato",
-    "body": "Personalizza il prezzo del servizio per il singolo cliente.",
-    "cta": "Avanti",
-    "visual": "clients",
-    "section": "Personalizzazioni cliente",
-    "path": "Clienti → Tempi e prezzi → Prezzo",
-    "screen": "Listino personale · Sofia Rossi",
-    "rows": [
-      {
-        "label": "Servizio",
-        "value": "Taglio"
-      },
-      {
-        "label": "Prezzo standard",
-        "value": "25 €"
+        "value": "45 min invece di 30"
       },
       {
         "label": "Prezzo per Sofia",
-        "value": "22 €"
-      }
-    ],
-    "instructions": [
-      "Apri Tempi e prezzi dalle azioni della card cliente e cerca il servizio.",
-      "Tocca Prezzo, imposta l’importo dedicato e conferma con Salva prezzo."
-    ],
-    "tip": "Il prezzo personale prevale sul listino standard per quel cliente. Il comando di ripristino permette di tornare al prezzo standard."
-  },
-  {
-    "key": "customer-discounts",
-    "title": "Riserva uno sconto personale",
-    "body": "Per riservare un’agevolazione, salva il prezzo finale dedicato al cliente.",
-    "cta": "Avanti",
-    "visual": "clients",
-    "section": "Personalizzazioni cliente",
-    "path": "Clienti → Tempi e prezzi → Prezzo",
-    "screen": "Esempio di prezzo agevolato",
-    "rows": [
-      {
-        "label": "Prezzo standard",
-        "value": "50 €"
-      },
-      {
-        "label": "Sconto desiderato · esempio",
-        "value": "10% = 5 €"
-      },
-      {
-        "label": "Prezzo cliente da salvare",
-        "value": "45 €"
-      }
-    ],
-    "instructions": [
-      "Calcola il prezzo finale dopo lo sconto che vuoi riservare al cliente.",
-      "Salva quell’importo nel Prezzo del servizio: nell’esempio, inserisci 45 €."
-    ],
-    "tip": "Qui imposti un importo in euro, non una percentuale automatica. L’agevolazione riguarda il servizio e il cliente selezionati."
-  },
-  {
-    "key": "customer-visibility",
-    "title": "Scegli i servizi per ogni cliente",
-    "body": "Personalizza quali servizi il cliente può prenotare online.",
-    "cta": "Avanti",
-    "visual": "clients",
-    "section": "Personalizzazioni cliente",
-    "path": "Clienti → Azioni della card → Prenotazioni online",
-    "screen": "Servizi prenotabili · Sofia Rossi",
-    "rows": [
-      {
-        "label": "Taglio",
-        "value": "Consentito"
-      },
-      {
-        "label": "Piega",
-        "value": "Consentito"
+        "value": "22 € invece di 25"
       },
       {
         "label": "Colore",
-        "value": "Escluso per questo cliente"
+        "value": "Non prenotabile online"
       }
     ],
     "instructions": [
-      "Apri Prenotazioni online dalle azioni della card e raggiungi Servizi prenotabili.",
-      "Consenti o escludi i servizi per quel cliente, poi salva le regole personali."
+      "Apri il menu Gestisci cliente (nell’app anche scorrendo la card verso sinistra) e scegli Tempi e prezzi.",
+      "Cerca il servizio e salva la durata o il prezzo dedicati. Per uno sconto, inserisci direttamente il prezzo finale: da 50 € con il 10% salvi 45 €.",
+      "In Regole scegli quali servizi il cliente può prenotare online."
     ],
-    "tip": "Escludere un servizio esclude anche le composizioni e le scelte collegate che lo richiedono. I nuovi servizi sono consentiti di default."
+    "tip": "I valori personali valgono per i prossimi appuntamenti, in Agenda e online: quelli già creati non cambiano. Escludere un servizio esclude anche le composizioni che lo richiedono."
   },
   {
     "key": "invite",
     "title": "Fatti trovare dai clienti",
-    "body": "Condividi l’accesso al tuo salone per permettere ai clienti di collegarsi.",
+    "body": "I clienti collegano il tuo salone con il QR o il codice, poi creano il proprio accesso.",
     "cta": "Avanti",
     "visual": "qr",
     "section": "Clienti",
@@ -413,56 +241,28 @@ export const ONBOARDING_STEPS: OnboardingStep[] = [
     "rows": [
       {
         "label": "QR del salone",
-        "value": "Da esporre, mostrare o condividere"
+        "value": "Da esporre o condividere"
       },
       {
         "label": "Codice salone",
-        "value": "Da mostrare per farti aggiungere"
+        "value": "6 cifre da comunicare"
       },
       {
-        "label": "Accesso cliente",
-        "value": "Collega il salone"
+        "label": "Registrazione",
+        "value": "Dati, email e verifica"
       }
     ],
     "instructions": [
-      "Dalla Home puoi stampare ed esporre il QR code in salone, oppure mostrarlo e condividerlo direttamente.",
-      "In alternativa, mostra il codice identificativo del salone: il cliente lo inserisce nell’area cliente per trovare e aggiungere il tuo salone."
+      "Dalla Home stampa ed esponi il QR in salone, oppure mostralo e condividilo.",
+      "In alternativa comunica il codice del salone: il cliente lo inserisce in Collega il tuo salone.",
+      "Il cliente completa la registrazione con i suoi dati e il codice di verifica ricevuto via email."
     ],
-    "tip": "Il cliente può aggiungere il salone scansionando il QR oppure inserendo il codice identificativo. Usa il QR e il codice reali presenti nella tua Home."
-  },
-  {
-    "key": "registration",
-    "title": "Il cliente crea il suo accesso",
-    "body": "Il cliente può registrarsi e ritrovare il salone dal proprio account.",
-    "cta": "Avanti",
-    "visual": "clients",
-    "section": "Clienti",
-    "path": "Accesso cliente → Registrazione",
-    "screen": "Registrazione cliente",
-    "rows": [
-      {
-        "label": "Profilo",
-        "value": "Dati personali"
-      },
-      {
-        "label": "Accesso",
-        "value": "Email e password"
-      },
-      {
-        "label": "Verifica",
-        "value": "Codice ricevuto via email"
-      }
-    ],
-    "instructions": [
-      "Invita il cliente a completare la registrazione con i propri dati e recapiti.",
-      "Segue la verifica richiesta e si collega al salone tramite QR o codice."
-    ],
-    "tip": "Per un cliente già presente in rubrica, usare gli stessi recapiti aiuta a riconoscere la scheda corretta."
+    "tip": "Per un cliente già in rubrica, usare gli stessi recapiti aiuta a riconoscere la scheda giusta."
   },
   {
     "key": "agenda",
-    "title": "Leggi la tua Agenda",
-    "body": "Giorni, operatori e appuntamenti sono raccolti in una sola griglia.",
+    "title": "La tua Agenda",
+    "body": "Giorni, operatori e appuntamenti in una sola griglia, da leggere e riorganizzare al volo.",
     "cta": "Avanti",
     "visual": "agenda",
     "section": "Agenda",
@@ -483,73 +283,16 @@ export const ONBOARDING_STEPS: OnboardingStep[] = [
       }
     ],
     "instructions": [
-      "Scegli il giorno dalle date o apri il calendario. Usa Oggi per tornare alla giornata corrente.",
-      "Nella Panoramica Settimana leggi gli orari in verticale e gli operatori nelle rispettive corsie."
+      "Scegli il giorno dalle date o dal calendario; Oggi ti riporta alla giornata corrente. Gli orari scorrono in verticale, gli operatori nelle loro corsie.",
+      "Tocca uno slot libero per prenotare: giorno, ora e operatore sono già pronti, scegli cliente e servizio e conferma.",
+      "Tocca una card per i dettagli; trascinala per spostarla e usa la maniglia in basso per cambiare la durata."
     ],
-    "tip": "Puoi scegliere la vista Auto oppure da 1 a 7 giorni visibili."
-  },
-  {
-    "key": "booking",
-    "title": "Prenota uno slot",
-    "body": "Inserisci il primo appuntamento direttamente dall’Agenda.",
-    "cta": "Avanti",
-    "visual": "booking",
-    "section": "Agenda",
-    "path": "Agenda → Slot libero → Prenota slot",
-    "screen": "Prenota slot",
-    "rows": [
-      {
-        "label": "Cliente",
-        "value": "Sofia Rossi"
-      },
-      {
-        "label": "Servizio",
-        "value": "Taglio · 30 min"
-      },
-      {
-        "label": "Quando",
-        "value": "09:00 · Giulia"
-      }
-    ],
-    "instructions": [
-      "Tocca uno slot libero: giorno, ora e operatore vengono predisposti.",
-      "Scegli cliente e servizio, controlla il riepilogo e conferma lo slot."
-    ],
-    "tip": "Se è un cliente occasionale, puoi inserire i suoi dati nella prenotazione e scegliere se salvarlo in rubrica."
-  },
-  {
-    "key": "move",
-    "title": "Sposta e modifica",
-    "body": "L’Agenda ti permette di riorganizzare il lavoro della giornata.",
-    "cta": "Avanti",
-    "visual": "agenda",
-    "section": "Agenda",
-    "path": "Agenda → Card appuntamento",
-    "screen": "Il tuo appuntamento",
-    "rows": [
-      {
-        "label": "Tocca",
-        "value": "Apri i dettagli"
-      },
-      {
-        "label": "Tieni premuto",
-        "value": "Trascina la card"
-      },
-      {
-        "label": "Maniglia inferiore",
-        "value": "Modifica la durata"
-      }
-    ],
-    "instructions": [
-      "Tocca una card per vedere dettagli e azioni disponibili.",
-      "Nell’app tieni premuto e trascina la card; sul web trascinala direttamente. Usa la maniglia inferiore per cambiare durata."
-    ],
-    "tip": "Controlla gli eventuali avvisi e conferma quando richiesto: spazi occupati e fasi collegate richiedono attenzione."
+    "tip": "Puoi scegliere la vista Auto oppure da 1 a 7 giorni. Se uno spostamento tocca spazi occupati o fasi collegate, SalonPro ti chiede conferma."
   },
   {
     "key": "hours",
-    "title": "Imposta gli orari del salone",
-    "body": "La disponibilità online parte dalla tua settimana di lavoro.",
+    "title": "Orari e disponibilità",
+    "body": "La settimana di lavoro decide cosa vedono i clienti quando prenotano.",
     "cta": "Avanti",
     "visual": "hours",
     "section": "Orari e disponibilità",
@@ -565,111 +308,25 @@ export const ONBOARDING_STEPS: OnboardingStep[] = [
         "value": "13:00 – 14:00"
       },
       {
-        "label": "Domenica",
-        "value": "Chiuso"
+        "label": "Formazione",
+        "value": "Eccezione · 12 marzo"
       }
     ],
     "instructions": [
-      "In Agenda apri Personalizza orari.",
-      "Imposta i giorni aperti, l’orario di entrata e uscita e la pausa pranzo, poi salva."
+      "In Agenda apri Personalizza orari e imposta giorni aperti, entrata, uscita e pausa pranzo.",
+      "Per ferie, formazione o chiusure aggiungi un’eccezione: tutto il giorno o una fascia, per il salone o per singoli operatori.",
+      "Scegli il passo interno della griglia e, separatamente, ogni quanto proporre gli orari ai clienti online."
     ],
-    "tip": "La finestra online decide fino a quanto avanti il cliente può prenotare; non limita la tua Agenda interna."
-  },
-  {
-    "key": "exceptions",
-    "title": "Gestisci le eccezioni",
-    "body": "Ferie, formazione e chiusure non richiedono di riscrivere tutta la settimana.",
-    "cta": "Avanti",
-    "visual": "exceptions",
-    "section": "Orari e disponibilità",
-    "path": "Agenda → Personalizza orari → Eccezioni",
-    "screen": "Eccezioni calendario",
-    "rows": [
-      {
-        "label": "Motivo",
-        "value": "Formazione"
-      },
-      {
-        "label": "Durata",
-        "value": "Una fascia o più giorni"
-      },
-      {
-        "label": "Per chi",
-        "value": "Salone o operatori scelti"
-      }
-    ],
-    "instructions": [
-      "Aggiungi un’eccezione e scegli la data o l’intervallo.",
-      "Indica tutto il giorno oppure una fascia oraria e gli operatori coinvolti."
-    ],
-    "tip": "Se ci sono appuntamenti interessati, leggi come gestirne l’impatto prima di confermare."
-  },
-  {
-    "key": "interval",
-    "title": "Scegli il passo dell’Agenda",
-    "body": "Il passo interno stabilisce la suddivisione della griglia di lavoro.",
-    "cta": "Avanti",
-    "visual": "interval",
-    "section": "Orari e disponibilità",
-    "path": "Agenda → Personalizza orari",
-    "screen": "Passo interno Agenda",
-    "rows": [
-      {
-        "label": "Esempio · 15 min",
-        "value": "09:00 · 09:15 · 09:30"
-      },
-      {
-        "label": "Taglio · 30 min",
-        "value": "Occupa due intervalli"
-      },
-      {
-        "label": "Durata servizio",
-        "value": "Deve essere compatibile"
-      }
-    ],
-    "instructions": [
-      "Scegli un passo coerente con la durata dei tuoi servizi.",
-      "Per una modifica programmata, controlla la data di attivazione indicata dall’app."
-    ],
-    "tip": "Le giornate con appuntamenti o richieste già accettate mantengono il passo precedente."
-  },
-  {
-    "key": "public",
-    "title": "Decidi gli orari visibili",
-    "body": "La frequenza mostrata al cliente è separata dal passo interno.",
-    "cta": "Avanti",
-    "visual": "public",
-    "section": "Orari e disponibilità",
-    "path": "Agenda → Personalizza orari",
-    "screen": "Orari mostrati al cliente",
-    "rows": [
-      {
-        "label": "Agenda interna",
-        "value": "Passo di 15 min"
-      },
-      {
-        "label": "Frequenza cliente",
-        "value": "Ogni 30 min"
-      },
-      {
-        "label": "Esempio online",
-        "value": "09:00 · 09:30 · 10:00"
-      }
-    ],
-    "instructions": [
-      "Configura la frequenza degli orari proposti nella prenotazione cliente.",
-      "Il cliente sceglie il servizio e vede gli inizi compatibili con la disponibilità reale."
-    ],
-    "tip": "La frequenza non cambia la durata del servizio e non rende liberi gli orari occupati, chiusi o in pausa."
+    "tip": "Le giornate con appuntamenti già accettati mantengono il passo precedente. La frequenza online non rende liberi orari occupati, chiusi o in pausa."
   },
   {
     "key": "requests",
-    "title": "Gestisci le richieste",
-    "body": "Le prenotazioni online arrivano nella sezione Richieste.",
+    "title": "Le richieste online",
+    "body": "Le prenotazioni dei clienti arrivano nella sezione Richieste, pronte da gestire.",
     "cta": "Avanti",
     "visual": "requests",
     "section": "Prenotazioni online",
-    "path": "Richieste → In attesa",
+    "path": "Richieste → Richieste recenti",
     "screen": "Richiesta di prenotazione",
     "rows": [
       {
@@ -687,100 +344,70 @@ export const ONBOARDING_STEPS: OnboardingStep[] = [
     ],
     "instructions": [
       "Apri una richiesta e controlla servizio, orario e operatore.",
-      "Con la gestione manuale scegli se accettarla o rifiutarla."
+      "Accettala o rifiutala: il cliente riceve subito l’esito.",
+      "Confermate e annullate restano raccolte nelle loro sezioni, con le novità da leggere in evidenza."
     ],
-    "tip": "Una richiesta in attesa non equivale a un appuntamento confermato: controllane sempre lo stato."
+    "tip": "Una richiesta in attesa non è ancora un appuntamento confermato: controllane sempre lo stato."
   },
   {
-    "key": "guided",
-    "title": "Attiva gli slot guidati",
-    "body": "Aiuta il cliente a scegliere gli orari più utili al tuo salone.",
+    "key": "automation",
+    "title": "Prenotazioni più intelligenti",
+    "body": "Guida i clienti verso gli orari migliori e conferma in automatico le richieste compatibili.",
     "cta": "Avanti",
     "visual": "guided",
     "section": "Prenotazioni online",
-    "path": "Richieste → Slot guidati",
-    "screen": "Strategia slot guidati",
+    "path": "Richieste → Slot guidati · Accettazione automatica",
+    "screen": "Slot guidati",
     "rows": [
       {
-        "label": "Consigliati intelligenti",
-        "value": "Preserva spazi utili al listino"
+        "label": "Strategia",
+        "value": "Consigliati intelligenti"
       },
       {
-        "label": "Equilibrata",
-        "value": "Bilancia l’Agenda"
+        "label": "Visualizzazione",
+        "value": "Consigliati + tutti"
       },
       {
-        "label": "Proteggi lunghi",
-        "value": "Conserva spazi consecutivi"
-      },
-      {
-        "label": "Riempi buchi",
-        "value": "Completa gli spazi liberi"
+        "label": "Accettazione automatica",
+        "value": "Dopo 15 secondi"
       }
     ],
     "instructions": [
-      "Attiva gli slot guidati nella sezione Richieste.",
-      "Consigliati intelligenti è la strategia proposta all’attivazione. Puoi anche scegliere Equilibrata, Proteggi lunghi o Riempi buchi."
+      "Attiva gli slot guidati e scegli la strategia: Consigliati intelligenti, Equilibrata, Proteggi lunghi o Riempi buchi.",
+      "Decidi cosa vede il cliente: Consigliati + tutti, Prima i consigliati oppure Solo consigliati.",
+      "Con Accettazione automatica le richieste compatibili vengono confermate dopo 15 secondi, così hai il tempo di intervenire."
     ],
-    "tip": "I suggerimenti rispettano servizi, operatori, durata, pause ed eccezioni."
+    "tip": "Solo consigliati limita gli orari mostrati: sceglilo consapevolmente. Le richieste che richiedono una decisione restano da gestire a mano."
   },
   {
-    "key": "guided-view",
-    "title": "Scegli quanta scelta offrire",
-    "body": "Decidi come presentare i consigli nella prenotazione cliente.",
+    "key": "notifications",
+    "title": "Notifiche e promemoria",
+    "body": "Salone e clienti restano allineati senza messaggi dispersi.",
     "cta": "Avanti",
-    "visual": "public",
-    "section": "Prenotazioni online",
-    "path": "Richieste → Slot guidati → Visualizzazione",
-    "screen": "Come vede gli orari il cliente",
-    "rows": [
-      {
-        "label": "Consigliati + tutti",
-        "value": "Scelta predefinita con tutti gli orari disponibili"
-      },
-      {
-        "label": "Prima i consigliati",
-        "value": "Suggerimenti in evidenza"
-      },
-      {
-        "label": "Solo consigliati",
-        "value": "Scelta limitata ai consigli"
-      }
-    ],
-    "instructions": [
-      "Scegli la modalità di visualizzazione degli slot guidati.",
-      "Consigliati intelligenti parte con Consigliati + tutti. Puoi scegliere Prima i consigliati oppure Solo consigliati per restringere la visualizzazione."
-    ],
-    "tip": "Solo consigliati restringe gli orari mostrati ai suggerimenti: scegli questa modalità consapevolmente."
-  },
-  {
-    "key": "automatic",
-    "title": "Accetta in automatico",
-    "body": "Puoi automatizzare la conferma delle richieste compatibili.",
-    "cta": "Avanti",
-    "visual": "automatic",
-    "section": "Prenotazioni online",
-    "path": "Richieste → Accettazione automatica",
-    "screen": "Accettazione automatica",
+    "visual": "requests",
+    "section": "Comunicazioni",
+    "path": "Richieste · Agenda · Clienti",
+    "screen": "Le tue notifiche",
     "rows": [
       {
         "label": "Nuova richiesta",
-        "value": "In attesa · 15 secondi"
+        "value": "Si apre sulla prenotazione"
       },
       {
-        "label": "Controlli",
-        "value": "Slot e regole del salone"
+        "label": "Cliente",
+        "value": "Conferme, modifiche, promemoria"
       },
       {
-        "label": "Esito compatibile",
-        "value": "Accettata"
+        "label": "In ritardo",
+        "value": "Invia promemoria"
       }
     ],
     "instructions": [
-      "Attiva Accettazione automatica dalla sezione Richieste.",
-      "Le nuove richieste restano visibili per 15 secondi: puoi intervenire prima della scadenza."
+      "Consenti le notifiche: nuove richieste, annullamenti e nuovi clienti ti avvisano anche con app chiusa.",
+      "Tocca una notifica per aprire direttamente la richiesta, l’appuntamento o la scheda del cliente.",
+      "I clienti ricevono conferme e modifiche e possono attivare il promemoria a 30 minuti; se uno tarda, puoi inviargli un promemoria dalla card dell’appuntamento."
     ],
-    "tip": "Le richieste che richiedono una decisione manuale restano da gestire. Disattiva la funzione per tornare all’accettazione manuale."
+    "tip": "Il permesso per le notifiche non sostituisce il consenso alle comunicazioni commerciali, quando questo è richiesto."
   },
   {
     "key": "cash",
@@ -792,21 +419,30 @@ export const ONBOARDING_STEPS: OnboardingStep[] = [
     "path": "Cassa",
     "screen": "Cassa",
     "rows": [
-      { "label": "Periodo", "value": "Oggi · Questo mese · Storico" },
-      { "label": "Già ricevuto", "value": "Contanti · POS esterno · Bonifico" },
-      { "label": "Stripe", "value": "QR e link, se abilitato" }
+      {
+        "label": "Periodo",
+        "value": "Oggi · Questo mese · Storico"
+      },
+      {
+        "label": "Già ricevuto",
+        "value": "Contanti · POS · Bonifico"
+      },
+      {
+        "label": "Stripe",
+        "value": "QR e link, se abilitato"
+      }
     ],
     "instructions": [
-      "Scegli il periodo e registra solo i pagamenti ricevuti. La fine della giornata non conferma un incasso.",
-      "Per Stripe verifica lo stato del collegamento: la modalità di prova non riceve denaro reale. Il pagamento viene confermato dal server.",
-      "Le vecchie registrazioni automatiche sono da verificare. I riferimenti carta sono semplici annotazioni, non autorizzano addebiti."
+      "Scegli il periodo e registra solo i pagamenti davvero ricevuti: la fine della giornata non conferma un incasso.",
+      "Con Stripe controlla lo stato del collegamento: il pagamento viene confermato dal server e in modalità prova non si riceve denaro reale.",
+      "I riferimenti carta sono solo annotazioni e non autorizzano addebiti."
     ],
-    "tip": "Nelle Impostazioni Cassa puoi nascondere la sezione: i movimenti restano salvati e gli eventuali link Stripe restano attivi. Per emettere documenti fiscali configura Ricevute fiscali e verifica lo stato del collegamento; in modalità prova non vengono emessi documenti fiscali reali."
+    "tip": "Dalle Impostazioni Cassa puoi nascondere la sezione: i movimenti restano salvati. Per i documenti fiscali configura Ricevute fiscali; in modalità prova non vengono emessi documenti reali."
   },
   {
     "key": "final",
     "title": "Ora tocca al tuo salone",
-    "body": "Hai visto il percorso dalla configurazione alla prima prenotazione.",
+    "body": "Hai visto tutto il percorso, dalla configurazione alla prima prenotazione.",
     "cta": "Entra nell’app",
     "visual": "final",
     "section": "Pronto a iniziare",
@@ -815,22 +451,22 @@ export const ONBOARDING_STEPS: OnboardingStep[] = [
     "rows": [
       {
         "label": "1 · Servizi",
-        "value": "Crea listino, mestieri e operatori"
+        "value": "Listino, mestieri e operatori"
       },
       {
         "label": "2 · Agenda",
-        "value": "Imposta orari e disponibilità"
+        "value": "Orari e disponibilità"
       },
       {
         "label": "3 · Clienti",
-        "value": "Aggiungi i contatti e condividi il QR"
+        "value": "Contatti e QR del salone"
       }
     ],
     "instructions": [
       "Inizia dal listino, poi configura la settimana di lavoro.",
       "Quando sei pronto, condividi il salone con i clienti e controlla le prime richieste."
     ],
-    "tip": "Nelle sezioni dell’app trovi anche i pulsanti informativi per rileggere le spiegazioni delle funzioni."
+    "tip": "In ogni sezione trovi il pulsante informativo per rileggere come funziona."
   }
 ];
 
