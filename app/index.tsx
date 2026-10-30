@@ -12,9 +12,15 @@ import { HapticNativeTouchableOpacity, HapticNativePressable as Pressable } from
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
   Easing,
+  Extrapolation,
   FadeIn,
+  interpolate,
   LinearTransition,
+  type SharedValue,
+  useAnimatedStyle,
+  useSharedValue,
 } from 'react-native-reanimated';
+import Svg, { Defs, LinearGradient as SvgLinearGradient, Rect, Stop } from 'react-native-svg';
 import { AccessAppearanceProvider, AccessGlassReflection, AccessBackdrop, AccessWordmark, accessPremiumStyles, useAccessAppearance } from '../components/access-premium';
 import { AccessNavigationBar } from '../components/access-navigation-bar';
 import { AccessSalonBadge } from '../components/ui/access-salon-badge';
@@ -245,28 +251,74 @@ const isClientPortalNetworkLookupError = (error: unknown) => {
   return /network request failed|failed to fetch|networkerror|timeout|aborted/i.test(message);
 };
 
-function LandingAccessHeader({ audience, ownerMode = 'login' }: {
+// Scroll distance over which the brand header settles into its compact form.
+const ACCESS_HEADER_COLLAPSE_DISTANCE = 120;
+const ACCESS_HEADER_COMPACT_BRAND_HEIGHT = 50;
+
+function LandingAccessHeader({ audience, ownerMode = 'login', scrollY, collapsible }: {
   audience: LandingAudience;
   ownerMode?: 'login' | 'register';
+  /** Form scroll offset: on long forms the logo shrinks and the greeting fades. */
+  scrollY?: SharedValue<number>;
+  /** 1 when the form is long enough to collapse the header without bouncing. */
+  collapsible?: SharedValue<number>;
 }) {
   const { palette } = useAccessAppearance();
   const styles = useMemo(() => accessPremiumStyles(baseStyles, palette), [palette]);
+  const brandRowStyle = StyleSheet.flatten([styles.accessBrandRow, Platform.OS === 'web' && {height:116,marginBottom:4}]);
+  const brandHeight = typeof brandRowStyle.height === 'number' ? brandRowStyle.height : 104;
+  const compactScale = ACCESS_HEADER_COMPACT_BRAND_HEIGHT / brandHeight;
+  const brandAnimatedStyle = useAnimatedStyle(() => {
+    const value = (collapsible?.value ?? 0) * Math.min(Math.max((scrollY?.value ?? 0) / ACCESS_HEADER_COLLAPSE_DISTANCE, 0), 1);
+    return { height: interpolate(value, [0, 1], [brandHeight, ACCESS_HEADER_COMPACT_BRAND_HEIGHT], Extrapolation.CLAMP) };
+  }, [brandHeight]);
+  const wordmarkAnimatedStyle = useAnimatedStyle(() => {
+    const value = (collapsible?.value ?? 0) * Math.min(Math.max((scrollY?.value ?? 0) / ACCESS_HEADER_COLLAPSE_DISTANCE, 0), 1);
+    return { transform: [{ scale: interpolate(value, [0, 1], [1, compactScale], Extrapolation.CLAMP) }] };
+  }, [compactScale]);
+  const greetingAnimatedStyle = useAnimatedStyle(() => {
+    const value = (collapsible?.value ?? 0) * Math.min(Math.max((scrollY?.value ?? 0) / ACCESS_HEADER_COLLAPSE_DISTANCE, 0), 1);
+    return {
+      opacity: interpolate(value, [0, 0.6], [1, 0], Extrapolation.CLAMP),
+      maxHeight: interpolate(value, [0, 1], [110, 0], Extrapolation.CLAMP),
+    };
+  });
+  const fadeHeight = 26;
+  const fadeAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(scrollY?.value ?? 0, [0, 14], [0, 1], Extrapolation.CLAMP),
+  }));
   return (
     <View style={[styles.accessAreaHeader, Platform.OS === 'web' && {marginBottom:0}]}>
-      <View style={[styles.accessBrandRow, Platform.OS === 'web' && {height:116,marginBottom:4}]}>
-        <View style={styles.accessBrandMark}>
+      <Animated.View style={[brandRowStyle, { overflow: 'visible' }, brandAnimatedStyle]}>
+        <Animated.View style={[styles.accessBrandMark, wordmarkAnimatedStyle]}>
           <AccessWordmark />
-        </View>
-      </View>
+        </Animated.View>
+      </Animated.View>
       <>
       <Text accessibilityRole="header" style={styles.accessAreaTitle}>
         {audience === 'client' ? 'Area cliente' : 'Area salone'}
       </Text>
+      <Animated.View style={[{ width: '100%', alignItems: 'center', overflow: 'hidden' }, greetingAnimatedStyle]}>
       <Text style={styles.accessAreaSubtitle} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.8}>
         {audience === 'client' ? 'Il tuo prossimo appuntamento' : ownerMode === 'register' ? 'Crea il tuo salone' : 'Bentornato'}
       </Text>
       {audience === 'owner' ? <Text style={{ color: palette.muted, fontSize: 14, marginTop: 6 }}>{ownerMode === 'register' ? 'Inizia con i dati del tuo salone' : 'Accedi al tuo salone'}</Text> : null}
+      </Animated.View>
       </>
+      {Platform.OS !== 'web' ? (
+        // Native has no CSS mask: a soft veil lets the cards fade under the header.
+        <Animated.View pointerEvents="none" style={[{ position: 'absolute', left: 0, right: 0, bottom: -fadeHeight, height: fadeHeight }, fadeAnimatedStyle]}>
+        <Svg width="100%" height={fadeHeight}>
+          <Defs>
+            <SvgLinearGradient id="accessHeaderFade" x1="0" y1="0" x2="0" y2="1">
+              <Stop offset="0" stopColor={palette.canvas} stopOpacity={palette.night ? 0.92 : 0.86} />
+              <Stop offset="1" stopColor={palette.canvas} stopOpacity={0} />
+            </SvgLinearGradient>
+          </Defs>
+          <Rect x="0" y="0" width="100%" height={fadeHeight} fill="url(#accessHeaderFade)" />
+        </Svg>
+        </Animated.View>
+      ) : null}
     </View>
   );
 }
@@ -332,6 +384,17 @@ function PremiumClientLandingScreen() {
   const clientFocusedInputRef = useRef<TextInput | null>(null);
   const clientKeyboardScrollTargetRef = useRef(0);
   const landingScrollYRef = useRef(0);
+  const landingHeaderScrollY = useSharedValue(0);
+  const landingHeaderCollapsible = useSharedValue(0);
+  const landingScrollMetricsRef = useRef({ viewport: 0, content: 0, header: 0, expandedHeader: 0 });
+  // Collapse only when the form is clearly taller than the screen: on a short
+  // form the growing viewport would clamp the offset and the header would bounce.
+  const updateLandingHeaderCollapsible = useCallback(() => {
+    const { viewport, content, header, expandedHeader } = landingScrollMetricsRef.current;
+    if (!viewport || !content) return;
+    const expandedViewport = viewport - Math.max(0, expandedHeader - header);
+    landingHeaderCollapsible.value = content - expandedViewport > ACCESS_HEADER_COLLAPSE_DISTANCE + 190 ? 1 : 0;
+  }, [landingHeaderCollapsible]);
   const [selectedLandingAudience, setSelectedLandingAudience] =
     useState<LandingAudience | null>(null);
   const [landingAudienceReady, setLandingAudienceReady] = useState(false);
@@ -930,6 +993,8 @@ function PremiumClientLandingScreen() {
     !hasSavedClientProfile &&
     (normalizedIncomingSalonCode !== '' || normalizedAssociatedSalonCode !== '' || sideParam === 'client');
   const hasAssociatedSalon = normalizedAssociatedSalonCode !== '';
+  // First visit: no salon yet, nothing saved. The association reads as step 1 of 2.
+  const isFreshSalonAssociation = !hasAssociatedSalon && savedSalonCodes.length === 0;
   const splitClientAccessPanels = wideAccessPanels && !hasAssociatedSalon && responsive.height < 960;
   const requestRemoveSavedSalon = (code: string) => {
     const remove = async () => {
@@ -2703,7 +2768,7 @@ function PremiumClientLandingScreen() {
               }}
               style={({ pressed }) => [styles.audienceChoiceCard, choice.audience === 'client' ? styles.audienceChoiceClient : styles.audienceChoiceOwner, pressed && styles.audienceChoicePressed]}
             >
-              <AccessGlassReflection />
+              <AccessGlassReflection subtle />
               <View style={[styles.audienceChoiceIcon, choice.audience === 'client' ? styles.audienceChoiceClientIcon : styles.audienceChoiceOwnerIcon]}><Ionicons name={choice.icon} size={30} color={choice.audience === 'client' ? (palette.night ? '#DCD8CD' : '#42494D') : (palette.night ? '#D8C29B' : '#95703E')} /></View>
               <View style={{ flex: 1, gap: 6 }}>
                 <Text style={styles.audienceChoiceCardTitle}>{choice.title}</Text>
@@ -2739,8 +2804,17 @@ function PremiumClientLandingScreen() {
       <AccessBackdrop />
       <AccessNavigationBar onBack={openAudiencePicker} backLabel={`Lato ${showOwnerLanding ? 'salone' : 'cliente'}. Cambia modalità di accesso.`} maxWidth={landingShellMaxWidth} />
       {/* Fixed brand header: only the forms below it scroll. */}
-      <View style={{ paddingHorizontal: landingHorizontalPadding }}>
-        <LandingAccessHeader audience={showOwnerLanding ? 'owner' : 'client'} ownerMode={ownerAccessMode} />
+      <View
+        style={{ paddingHorizontal: landingHorizontalPadding, zIndex: 2, elevation: 2 }}
+        onLayout={(event) => {
+          const metrics = landingScrollMetricsRef.current;
+          metrics.header = event.nativeEvent.layout.height;
+          // The resting height is the one measured at the top of the form.
+          if (landingHeaderScrollY.value <= 1 || !metrics.expandedHeader) metrics.expandedHeader = metrics.header;
+          updateLandingHeaderCollapsible();
+        }}
+      >
+        <LandingAccessHeader audience={showOwnerLanding ? 'owner' : 'client'} ownerMode={ownerAccessMode} scrollY={landingHeaderScrollY} collapsible={landingHeaderCollapsible} />
       </View>
 
       <ScrollView
@@ -2767,6 +2841,15 @@ function PremiumClientLandingScreen() {
         onScroll={(event: NativeSyntheticEvent<NativeScrollEvent>) => {
           salonOutsideTapRef.current = null;
           landingScrollYRef.current = event.nativeEvent.contentOffset.y;
+          landingHeaderScrollY.value = event.nativeEvent.contentOffset.y;
+        }}
+        onLayout={(event) => {
+          landingScrollMetricsRef.current.viewport = event.nativeEvent.layout.height;
+          updateLandingHeaderCollapsible();
+        }}
+        onContentSizeChange={(_width, contentHeight) => {
+          landingScrollMetricsRef.current.content = contentHeight;
+          updateLandingHeaderCollapsible();
         }}
         onScrollBeginDrag={() => {
           registerScrollRequestRef.current = null;
@@ -2960,7 +3043,7 @@ function PremiumClientLandingScreen() {
                         style={[styles.heroActionLabel, styles.accessEyebrow]}
                         maxFontSizeMultiplier={isTightAndroidLandingViewport ? 1 : undefined}
                       >
-                        Sei un cliente?
+                        {shouldShowSalonDiscovery ? 'Passo 1 di 2' : 'Sei un cliente?'}
                       </Text>
                       <Text
                         style={[
@@ -2970,7 +3053,7 @@ function PremiumClientLandingScreen() {
                         ]}
                         maxFontSizeMultiplier={isTightAndroidLandingViewport ? 1 : undefined}
                       >
-                        {shouldShowSalonDiscovery ? 'Il tuo salone, a portata di mano' : 'Sei nel salone giusto'}
+                        {shouldShowSalonDiscovery ? 'Collega il tuo salone' : 'Sei nel salone giusto'}
                       </Text>
                       <Text
                         style={[
@@ -2982,7 +3065,7 @@ function PremiumClientLandingScreen() {
                       >
                         {!shouldShowSalonDiscovery
                           ? 'Abbiamo gia aperto la pagina corretta del salone: ora puoi accedere o prenotare senza reinserire il codice.'
-                          : 'Trova il tuo salone, scegli uno di quelli salvati oppure usa codice e QR.'}
+                          : 'Cercalo per nome, oppure usa il codice o il QR che trovi in salone.'}
                       </Text>
 
                       </> : null}
@@ -2997,9 +3080,49 @@ function PremiumClientLandingScreen() {
                           isCompactPhoneViewport && styles.quickAccessCardCompact,
                           expandLandingWideContent && styles.quickAccessCardWide,
                           hasAssociatedSalon && styles.associatedSalonCompactCard,
+                          isFreshSalonAssociation && { backgroundColor: 'transparent', borderWidth: 0, paddingHorizontal: 0, paddingTop: 0, shadowOpacity: 0, elevation: 0, ...(Platform.OS === 'web' ? { boxShadow: 'none', backgroundImage: 'none', backdropFilter: 'none' } as object : {}) },
                         ]}
                         layout={CARD_TOGGLE_LAYOUT}
                       >
+                        {isFreshSalonAssociation ? (
+                          <View style={{ gap: 14, width: '100%', alignSelf: 'stretch' }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                              <View style={{ flex: 1, height: 1, backgroundColor: palette.line }} />
+                              <Text style={{ color: palette.muted, fontSize: 12, letterSpacing: 0.4 }}>oppure</Text>
+                              <View style={{ flex: 1, height: 1, backgroundColor: palette.line }} />
+                            </View>
+                            <View style={{ flexDirection: 'row', gap: 10 }}>
+                              {([
+                                { key: 'code', icon: 'keypad-outline', title: 'Codice salone', caption: '6 cifre dal salone', active: isSalonAssociationCardExpanded, onPress: () => { Keyboard.dismiss(); setIsSalonSelectorOpen(false); setIsSalonAssociationCardExpanded(!isSalonAssociationCardExpanded); } },
+                                { key: 'qr', icon: 'qr-code-outline', title: 'Scansiona QR', caption: 'Inquadra il codice', active: false, onPress: () => { Keyboard.dismiss(); openSalonScanner(); } },
+                              ] as const).map((option) => (
+                                <NativePressable
+                                  key={option.key}
+                                  accessibilityRole="button"
+                                  accessibilityLabel={`${option.title}. ${option.caption}`}
+                                  accessibilityState={option.key === 'code' ? { expanded: option.active } : undefined}
+                                  disabled={isAssociatingSalon}
+                                  onPress={option.onPress}
+                                  style={({ pressed }) => ({
+                                    flex: 1, minHeight: 88, borderRadius: 18, borderWidth: 1, padding: 14, gap: 10, justifyContent: 'space-between',
+                                    borderColor: option.active ? palette.action : palette.border,
+                                    backgroundColor: palette.field,
+                                    opacity: pressed ? 0.78 : 1,
+                                    transform: [{ scale: pressed ? 0.98 : 1 }],
+                                  })}
+                                >
+                                  <View style={{ width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: palette.surface, borderWidth: 1, borderColor: palette.border }}>
+                                    <Ionicons name={option.icon} size={18} color={option.active ? palette.action : palette.ink} />
+                                  </View>
+                                  <View style={{ gap: 2 }}>
+                                    <Text style={{ color: palette.ink, fontSize: 15, fontWeight: '600' }}>{option.title}</Text>
+                                    <Text style={{ color: palette.muted, fontSize: 12 }}>{option.caption}</Text>
+                                  </View>
+                                </NativePressable>
+                              ))}
+                            </View>
+                          </View>
+                        ) : <>
                         <View style={[styles.quickAccessHeader, hasAssociatedSalon && styles.associatedSalonCompactHeader]}>
                           {!hasAssociatedSalon ? <View style={styles.quickAccessIconBadge}>
                             <Ionicons name="storefront" size={17} color="#294D79" />
@@ -3166,6 +3289,7 @@ function PremiumClientLandingScreen() {
                           )}
                         </View>
 
+                        </>}
                         {isSalonAssociationCardExpanded ? (
                           <Animated.View
                             style={styles.salonAssociationFormWrap}
@@ -3177,11 +3301,11 @@ function PremiumClientLandingScreen() {
                                 <SalonSearch premiumAppearance alternate disabled={isAssociatingSalon} onSelect={associateSalonWithCode} />
                               </View>
                             ) : null}
-                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 10, marginBottom: 8 }}>
+                            {!isFreshSalonAssociation ? <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 10, marginBottom: 8 }}>
                               <View style={{ flex: 1, height: 1, backgroundColor: palette.line }} />
                               <Text style={{ color: palette.muted, fontSize: 12 }}>oppure usa il codice</Text>
                               <View style={{ flex: 1, height: 1, backgroundColor: palette.line }} />
-                            </View>
+                            </View> : <View style={{ height: 6 }} />}
                             {!useLegacySalonCode ? <SalonCodeInput
                               premiumAppearance
                               ref={salonCodeRef}
@@ -3253,7 +3377,7 @@ function PremiumClientLandingScreen() {
                               </View>
                             </TouchableOpacity>
 
-                            <NativePressable
+                            {!isFreshSalonAssociation ? <NativePressable
                               style={[styles.quickAccessButton, styles.qrQuickAccessButton]}
                               onPress={openSalonScanner}
                               accessibilityRole="button"
@@ -3264,7 +3388,7 @@ function PremiumClientLandingScreen() {
                                   Usa QR del salone
                                 </Text>
                               </View>
-                            </NativePressable>
+                            </NativePressable> : null}
                           </Animated.View>
                         ) : null}
                       </Animated.View>

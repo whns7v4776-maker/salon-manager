@@ -12938,6 +12938,10 @@ export default function AgendaScreen() {
     typeof startParam === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(startParam);
   const appliedStartDateRef = useRef('');
   const appliedWeekRequestTargetRef = useRef('');
+  const pendingWeekRequestTargetRef = useRef<{
+    signature: string;
+    since: number;
+  } | null>(null);
 
   useFocusEffect(
     useCallback(() => {
@@ -16830,7 +16834,12 @@ export default function AgendaScreen() {
       const dayAppointments = blockingAppointmentsByDate[targetDate] ?? [];
       const matchedPendingBlock =
         dayAppointments.find(
-          (item) => pendingRequestBlockId && item.id === pendingRequestBlockId,
+          (item) =>
+            !!normalizedRequestId &&
+            (item.id === pendingRequestBlockId ||
+              item.id === normalizedRequestId ||
+              item.syntheticRequestId === normalizedRequestId ||
+              item.bookingRequestId === normalizedRequestId),
         ) ??
         dayAppointments.find(
           (item) =>
@@ -16893,13 +16902,23 @@ export default function AgendaScreen() {
         return undefined;
       }
 
-      appliedWeekRequestTargetRef.current = targetSignature;
+      // A notification can open the app before its request is loaded: keep
+      // retrying as the agenda data arrives, for a few seconds at most.
+      const firstAttempt = pendingWeekRequestTargetRef.current;
+      if (firstAttempt?.signature !== targetSignature) {
+        pendingWeekRequestTargetRef.current = {
+          signature: targetSignature,
+          since: Date.now(),
+        };
+        setAgendaView('week');
+        setData(startParam);
+        setCalendarMonth(startParam);
+      } else if (Date.now() - firstAttempt.since > 8000) {
+        appliedWeekRequestTargetRef.current = targetSignature;
+        return undefined;
+      }
       let cancelled = false;
       const timeouts = new Set<ReturnType<typeof setTimeout>>();
-
-      setAgendaView('week');
-      setData(startParam);
-      setCalendarMonth(startParam);
 
       const scheduleAttempt = (attempt: number) => {
         const delay = attempt === 0 ? 0 : 48 * attempt;
@@ -16916,7 +16935,9 @@ export default function AgendaScreen() {
               shouldOpenWeekRequestDetails,
             );
 
-            if (!foundTarget && attempt < 2) {
+            if (foundTarget) {
+              appliedWeekRequestTargetRef.current = targetSignature;
+            } else if (attempt < 2) {
               scheduleAttempt(attempt + 1);
             }
           };

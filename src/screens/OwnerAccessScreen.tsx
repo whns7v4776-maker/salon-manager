@@ -1505,7 +1505,7 @@ export function OwnerAccessScreen({
 
       {activeMode === 'login' ? (
         <View style={[styles.card, embedded && styles.embeddedCard, embedded && isCompactWidth && styles.embeddedCardCompact]}>
-          <AccessGlassReflection />
+          <AccessGlassReflection subtle />
           {embedded && width >= 768 && !ownerPasswordRecoveryActive ? (
             <>
               <View style={{ flexDirection: 'row', padding: 4, borderRadius: 16, borderWidth: 1, borderColor: palette.line, backgroundColor: palette.field, marginBottom: 18 }}>

@@ -15,7 +15,7 @@ export function resolveOwnerNotificationTarget(data: Record<string, unknown>, sa
   const types = [data.kind, data.event_type, data.eventType, data.notificationType, data._pushEventType, data.type].map(value => text(value).toLowerCase());
   if (types.includes('shop_order')) return { pathname: '/(tabs)/cassa', params: { shopOrderId: text(data.shopOrderId) } };
   if (types.includes('cash_terminal_outcome')) return { pathname: '/(tabs)/cassa', params: {} };
-  if (types.includes('frontend_customer_registered')) return { pathname: '/(tabs)/clienti', params: {} };
+  if (types.includes('frontend_customer_registered')) { const customerId = text(data.customerId ?? data.customer_id); return { pathname: '/(tabs)/clienti', params: customerId ? { customerId } : {} }; }
   if (types.includes('owner_badge_refresh')) return null;
   const requestId = text(data.bookingRequestId ?? data.booking_request_id ?? data.requestId ?? data.request_id);
   const status = text(data.statusCode ?? data.status ?? data.response).toLowerCase();

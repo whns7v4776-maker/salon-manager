@@ -42,7 +42,7 @@ import { createCustomerCardExpansionStore } from '../../src/lib/customer-card-ex
 import { useCustomerIdentityColors } from '../../src/lib/use-customer-identity-colors';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import React, {
@@ -3783,6 +3783,29 @@ export default function ClientiScreen() {
     [salonWorkspace.id, salonAccountEmail],
   );
 
+  // A "new customer" notification opens that customer's card and marks it read.
+  const routeParams = useLocalSearchParams<{ customerId?: string | string[]; openToken?: string | string[] }>();
+  const routeCustomerId = (Array.isArray(routeParams.customerId) ? routeParams.customerId[0] : routeParams.customerId)?.trim() ?? '';
+  const routeOpenToken = (Array.isArray(routeParams.openToken) ? routeParams.openToken[0] : routeParams.openToken) ?? '';
+  const handledRouteCustomerRef = useRef('');
+  useFocusEffect(
+    useCallback(() => {
+      if (!routeCustomerId) return;
+      const signature = `${routeCustomerId}:${routeOpenToken}`;
+      if (handledRouteCustomerRef.current === signature) return;
+      const customer = clienti.find((item) => item.id === routeCustomerId);
+      if (!customer) return;
+      handledRouteCustomerRef.current = signature;
+      if (customer.viewedBySalon === false) markFrontendClientsAsViewed([customer.id]);
+      if (Platform.OS !== 'web') {
+        setClientDetailsId(customer.id);
+        return;
+      }
+      setRicerca(customer.full_name);
+      if (!customerCardExpansion.isExpanded(customer.id)) customerCardExpansion.toggle(customer.id);
+    }, [clienti, customerCardExpansion, markFrontendClientsAsViewed, routeCustomerId, routeOpenToken]),
+  );
+
   const renderClienteCard = useCallback((item: ClienteItem, expanded: boolean, toggleExpanded: () => void, displayMode: 'card' | 'table' | 'detail' = 'card', selected = false) => {
     const useCompactCustomerCard = true;
     const isDesktopWeb = isDesktopWebClientActionsLayout;
@@ -4259,7 +4282,7 @@ export default function ClientiScreen() {
               </View>
             </Modal>
           ) : null) : null;
-    const directoryRow = <CustomerDirectoryRow premium={Platform.OS==='web'?customerPremiumStatuses.get(item.id):undefined} name={item.full_name} initials={buildClientMonogram(item.full_name)} color={customerIdentityColor} unread={isUnreadFrontendClient} status={isPendingRegistration?'Da approvare':isInibito?'Inibito':isUnreadFrontendClient?'Nuovo cliente':'Attivo'} visit={customerDirectoryVisits.get(item.id)} table={displayMode==='table'} selected={selected} onSelect={Platform.OS!=='web'?()=>setClientDetailsId(item.id):toggleExpanded} onOptions={() => setOpenWebClientActionsId(item.id)} onCall={() => Linking.openURL(`tel:${buildDialablePhone(item.phone)}`).catch(() => null)} onMessage={() => { const url=buildWhatsappUrl(item.phone); if(url) Linking.openURL(url).catch(() => null); }} />;
+    const directoryRow = <CustomerDirectoryRow premium={Platform.OS==='web'?customerPremiumStatuses.get(item.id):undefined} name={item.full_name} initials={buildClientMonogram(item.full_name)} color={customerIdentityColor} unread={isUnreadFrontendClient} status={isPendingRegistration?'Da approvare':isInibito?'Inibito':isUnreadFrontendClient?'Nuovo cliente':'Attivo'} visit={customerDirectoryVisits.get(item.id)} table={displayMode==='table'} selected={selected} onSelect={()=>{if(isUnreadFrontendClient&&!expanded)markFrontendClientsAsViewed([item.id]);if(Platform.OS!=='web')setClientDetailsId(item.id);else toggleExpanded();}} onOptions={() => setOpenWebClientActionsId(item.id)} onCall={() => Linking.openURL(`tel:${buildDialablePhone(item.phone)}`).catch(() => null)} onMessage={() => { const url=buildWhatsappUrl(item.phone); if(url) Linking.openURL(url).catch(() => null); }} />;
     const profileDetails = <CustomerProfileSummary premium={Platform.OS==='web'?customerPremiumStatuses.get(item.id):undefined} name={item.full_name} initials={buildClientMonogram(item.full_name)} color={customerIdentityColor} phone={item.phone??''} email={item.email??''} status={isPendingRegistration?'Da approvare':isInibito?'Inibito':'Attivo'} cancellations={cancellationCount} limits={[typeof item.maxFutureAppointments==='number'?`${item.maxFutureAppointments} ${item.maxFutureAppointmentsMode==='total_future'?'prenotazioni future':'prenotazioni al mese'}`:'Senza limite mensile',typeof item.maxDailyAppointments==='number'?`${item.maxDailyAppointments} al giorno`:'Senza limite giornaliero'].join(' · ')} onEdit={()=>leaveClientDetailsFor('edit',item)} onOptions={()=>leaveClientDetailsFor('options',item)} onBenefits={()=>leaveClientDetailsFor('benefits',item)} actions={[
       {label:'Chiama',icon:'call-outline',onPress:()=>{Linking.openURL(`tel:${buildDialablePhone(item.phone)}`).catch(()=>null);}},
       {label:'WhatsApp',icon:'chatbubble-outline',onPress:()=>{Linking.openURL(buildWhatsappUrl(item.phone)).catch(()=>null);}},
@@ -4385,7 +4408,7 @@ export default function ClientiScreen() {
             <InfoButton size={Platform.OS==='web'?48:28} accessibilityLabel="Come funziona la Rubrica clienti" accessibilityState={{expanded:rubricaGuideOpen}} onPress={()=>{setRubricaGuideOpen(value=>!value);setRemindersGuideOpen(false);}}/>
           </View>
 
-          {unreadFrontendClientIds.length > 0 ? (
+          {unreadFrontendClientIds.length > 1 ? (
             <View style={styles.markAllClientsReadRow}>
               <MarkAllReadButton
                 count={unreadFrontendClientIds.length}
@@ -4403,7 +4426,7 @@ export default function ClientiScreen() {
                 {
                   title: 'Trova e apri',
                   description:
-                    'Cerca per nome, telefono, email o Instagram. Premi la spunta accanto al badge Nuovo per segnare il cliente come letto.',
+                    'Cerca per nome, telefono, email o Instagram. Aprendo la card di un nuovo cliente lo segni come letto; con più nuovi clienti trovi in alto «Segna nuovi letti».',
                 },
                 {
                   title: 'Contatta subito',

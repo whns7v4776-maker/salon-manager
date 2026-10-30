@@ -4840,6 +4840,7 @@ function BottomTabBar({
         TabActions.jumpTo("prenotazioni", {
           section: targetSection,
           requestId: targetRequestId,
+          openToken: String(Date.now()),
         }),
       );
       requestAnimationFrame(() => {
@@ -4858,7 +4859,12 @@ function BottomTabBar({
         fallback: true,
         elapsedMs: Math.round(getCustomBarNavPerfNow() - tapAt),
       });
-      navigation.dispatch(TabActions.jumpTo("prenotazioni"));
+      navigation.dispatch(
+        TabActions.jumpTo("prenotazioni", {
+          requestId: targetRequestId,
+          openToken: String(Date.now()),
+        }),
+      );
       requestAnimationFrame(() => {
         dismissLiveRequestBanner();
         logCustomBarNavPerf("owner_banner_dismiss_after_nav", {
@@ -4880,6 +4886,7 @@ function BottomTabBar({
         requestId: targetRequestId,
         requestTime: targetRequestTime,
         openDetails: shouldOpenAgendaDetails ? "true" : "false",
+        requestOpenToken: String(Date.now()),
       }),
     );
     requestAnimationFrame(() => {
@@ -6369,6 +6376,7 @@ function IosOwnerLiveRequestBannerHost({
         params: {
           section: target.targetSection ?? undefined,
           requestId: target.requestId ?? undefined,
+          openToken: String(Date.now()),
         },
       });
       requestAnimationFrame(() => {
@@ -6392,6 +6400,7 @@ function IosOwnerLiveRequestBannerHost({
         requestId: target.requestId ?? undefined,
         requestTime: target.requestTime ?? undefined,
         openDetails: (target.openDetails ?? true) ? "true" : "false",
+        requestOpenToken: String(Date.now()),
       },
     });
     requestAnimationFrame(() => {

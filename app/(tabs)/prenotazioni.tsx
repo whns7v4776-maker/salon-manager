@@ -791,6 +791,7 @@ export default function PrenotazioniScreen() {
   const routeParams = useLocalSearchParams<{
     section?: string | string[];
     requestId?: string | string[];
+    openToken?: string | string[];
   }>();
   const scrollRef = useRef<ScrollView | null>(null);
   const isScreenFocusedRef = useRef(false);
@@ -813,6 +814,9 @@ export default function PrenotazioniScreen() {
     (sectionKeys?: string[]) => void
   >(() => undefined);
   const handledRouteTargetRef = useRef("");
+  const requestScrollYRef = useRef(0);
+  const routeTargetWaitRef = useRef("");
+  const routeTargetWaitStartedAtRef = useRef(0);
   const pendingRequestsCountRef = useRef(0);
   const requestSnapshotsRef = useRef<
     Record<
@@ -850,6 +854,7 @@ export default function PrenotazioniScreen() {
   const [expandedSections, setExpandedSections] =
     useState<Record<string, boolean>>(collapsedSections);
   const [workspaceSection,setWorkspaceSection]=useState("pending");
+  const [routeTargetRetry,setRouteTargetRetry]=useState(0);
   const expandedSectionsRef = useRef(expandedSections);
   const [expandedDateGroups, setExpandedDateGroups] = useState<
     Record<string, boolean>
@@ -3606,39 +3611,10 @@ export default function PrenotazioniScreen() {
   const requestedRequestIdParam = Array.isArray(routeParams.requestId)
     ? routeParams.requestId[0]
     : routeParams.requestId;
+  const requestedOpenTokenParam = Array.isArray(routeParams.openToken)
+    ? routeParams.openToken[0]
+    : routeParams.openToken;
 
-  useEffect(() => {
-    if (requestedSectionParam !== "cancelled") {
-      return;
-    }
-
-    const targetSignature = [
-      requestedSectionParam,
-      requestedRequestIdParam ?? "",
-    ].join(":");
-    if (handledRouteTargetRef.current === targetSignature) {
-      return;
-    }
-    handledRouteTargetRef.current = targetSignature;
-
-    runAccordionAnimation();
-    setExpandedSections((current) => ({
-      ...current,
-      pending: false,
-      accepted: false,
-      salonDeclined: false,
-      cancelled: true,
-    }));
-
-    requestAnimationFrame(() => {
-      setTimeout(() => {
-        scrollRef.current?.scrollTo({
-          y: Math.max(0, cancelledSectionYRef.current - 18),
-          animated: true,
-        });
-      }, 80);
-    });
-  }, [requestedRequestIdParam, requestedSectionParam]);
 
   useEffect(() => {
     pendingRequestsCountRef.current = richiesteDaAccettare.length;
@@ -3699,6 +3675,88 @@ export default function PrenotazioniScreen() {
         setExpandedSections(collapsedSections());
       };
     }, [collapsedSections]),
+  );
+
+  // A notification opens the section holding its request and brings the card
+  // into view. Declared after the focus reset above so it is not collapsed.
+  useFocusEffect(
+    useCallback(() => {
+      const requestId = requestedRequestIdParam?.trim() ?? "";
+      const sectionLists: [string, { id: string }[]][] = [
+        ["pending", richiesteInAttesaRecenti.filter((item) => item.stato === "In attesa")],
+        ["customerConfirmation", richiesteInAttesaConfermaCliente],
+        ["accepted", richiesteAccettateRecenti],
+        ["cancelled", richiesteAnnullateClienteRecenti],
+        ["salonDeclined", richiesteCancellateORifiutateDalSaloneRecenti],
+        ["archive", richiesteArchivioStorico],
+      ];
+      const sectionWithRequest = requestId
+        ? sectionLists.find(([, items]) => items.some((item) => item.id === requestId))?.[0]
+        : undefined;
+      const requestedSection = sectionLists.some(([key]) => key === requestedSectionParam)
+        ? requestedSectionParam
+        : undefined;
+      const sectionKey = sectionWithRequest ?? requestedSection ?? (requestId ? "pending" : undefined);
+      if (!sectionKey) return undefined;
+      const targetSignature = [sectionKey, requestId, requestedOpenTokenParam ?? ""].join(":");
+      if (handledRouteTargetRef.current === targetSignature) return undefined;
+      // Without the request loaded yet, wait for the lists to fill in; after a
+      // few seconds open the requested section anyway.
+      const waitKey = `waiting:${requestId}:${requestedOpenTokenParam ?? ""}`;
+      if (requestId && !sectionWithRequest && routeTargetWaitRef.current !== `expired:${waitKey}`) {
+        if (routeTargetWaitRef.current !== waitKey) {
+          routeTargetWaitRef.current = waitKey;
+          routeTargetWaitStartedAtRef.current = Date.now();
+        }
+        const timer = setTimeout(() => {
+          routeTargetWaitRef.current = `expired:${waitKey}`;
+          setRouteTargetRetry((value) => value + 1);
+        }, Math.max(0, 6000 - (Date.now() - routeTargetWaitStartedAtRef.current)));
+        return () => clearTimeout(timer);
+      }
+      handledRouteTargetRef.current = targetSignature;
+
+      runAccordionAnimation();
+      setWorkspaceSection(sectionKey);
+      setExpandedSections({ ...collapsedSections(), [sectionKey]: true });
+
+      const timers: ReturnType<typeof setTimeout>[] = [];
+      const reveal = (attempt: number) => {
+        const node = requestId ? requestCardRefs.current.get(requestId) : null;
+        if (!node) {
+          if (attempt < 6) timers.push(setTimeout(() => reveal(attempt + 1), 160));
+          else if (sectionKey === "cancelled") {
+            scrollRef.current?.scrollTo({ y: Math.max(0, cancelledSectionYRef.current - 18), animated: true });
+          }
+          return;
+        }
+        if (IS_WEB) {
+          (node as unknown as HTMLElement).scrollIntoView?.({ behavior: "smooth", block: "center" });
+          return;
+        }
+        node.measureInWindow((_x, y) => {
+          scrollRef.current?.scrollTo({
+            y: Math.max(0, requestScrollYRef.current + y - height * 0.3),
+            animated: true,
+          });
+        });
+      };
+      timers.push(setTimeout(() => reveal(0), 120));
+      return () => timers.forEach(clearTimeout);
+    }, [
+      collapsedSections,
+      height,
+      requestedOpenTokenParam,
+      requestedRequestIdParam,
+      requestedSectionParam,
+      richiesteAccettateRecenti,
+      richiesteAnnullateClienteRecenti,
+      richiesteArchivioStorico,
+      richiesteCancellateORifiutateDalSaloneRecenti,
+      richiesteInAttesaConfermaCliente,
+      richiesteInAttesaRecenti,
+      routeTargetRetry,
+    ]),
   );
 
   const aggiornaStatoRichiesta = useCallback(
@@ -5830,6 +5888,7 @@ export default function PrenotazioniScreen() {
           if (ENABLE_ANDROID_BACKOFFICE_PERF_LOGS) {
             prenotazioniPerfCountersRef.current.scrollEvents += 1;
           }
+          requestScrollYRef.current = event.nativeEvent.contentOffset.y;
           markVisibleOpenRequestCardsAsViewedAfterScroll(
             event.nativeEvent.contentOffset.y,
           );

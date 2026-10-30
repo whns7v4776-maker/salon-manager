@@ -1915,7 +1915,9 @@ function AppContent() {
       const key = String(data.notificationId ?? data.eventId ?? identifier);
       const now = Date.now();
       if (now - (ownerHandledTapRef.current.get(key) ?? 0) < 1500) return true;
-      router.push(target);
+      // A fresh token lets a second tap on the same event open it again.
+      const openToken = String(now);
+      router.push({ ...target, params: { ...target.params, openToken, requestOpenToken: openToken } });
       ownerHandledTapRef.current.set(key, now);
       ownerHandledTapRef.current.forEach((at, id) => {
         if (now - at > 60000) ownerHandledTapRef.current.delete(id);
