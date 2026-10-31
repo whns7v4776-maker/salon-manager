@@ -46532,10 +46532,9 @@ export default function AgendaScreen() {
                       rowIndex === 0
                         ? styles.weekPlannerTimeBoundaryRowFirst
                         : styles.weekPlannerTimeBoundaryRowMiddle;
-                    // Web grids under 15 minutes label only the quarter hours:
+                    // Grids under 15 minutes label only the quarter hours:
                     // the 5/10 minute rows stay as thin lines in the grid.
                     const showTimeLabel =
-                      !IS_WEB ||
                       weekBaseSlotInterval >= 15 ||
                       isStrongTimeBoundary ||
                       timeToMinutes(slotTime) % 15 === 0;
@@ -48318,7 +48317,7 @@ accessibilityHint={
                                             }
                                             disabled={!laneSalonCanQuickBook}
                                           >
-{!isLunchBreakSlot && (isPastFreeSlot || isClosedDay) && (!IS_WEB || weekBaseSlotInterval >= 15 || timeToMinutes(slotTime) % 15 === 0) ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaStateLabel label={isClosedDay?'Chiuso':'Passato'} action={laneSalonCanQuickBook}/></View>:null}{isCurrentSlotToday && !isPastFreeSlot && !isClosedDay && !isLunchBreakSlot ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaLiveSlotLabel action={laneSalonCanQuickBook}/></View>:null}
+{!isLunchBreakSlot && (isPastFreeSlot || isClosedDay) && (weekBaseSlotInterval >= 15 || timeToMinutes(slotTime) % 15 === 0) ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaStateLabel label={isClosedDay?'Chiuso':'Passato'} action={laneSalonCanQuickBook}/></View>:null}{isCurrentSlotToday && !isPastFreeSlot && !isClosedDay && !isLunchBreakSlot ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaLiveSlotLabel action={laneSalonCanQuickBook}/></View>:null}
                                             {laneDragPreview &&
                                             !laneOccupyingAppointment ? null : laneSalonCanQuickBook &&
                                               !laneQuickBookAvailable &&
@@ -48554,7 +48553,7 @@ null
                                             }
                                           >
                                             {(isPastFreeSlot || isLaneVisuallyDisabled || isClosedDay || isLaneOutsideScheduleSlot || laneCellState === 'outside' || (laneCellState === 'blocked' && !isLunchBreakSlot)) ? <NativeAgendaUnavailable night={availabilityPalette.night} phase={rowIndex + laneIndex}/> : null}
-{!isLunchBreakSlot && (isPastFreeSlot || isClosedDay) && (!IS_WEB || weekBaseSlotInterval >= 15 || timeToMinutes(slotTime) % 15 === 0) ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaStateLabel label={isClosedDay?'Chiuso':'Passato'} action={laneSalonCanQuickBook}/></View>:null}{isCurrentSlotToday && !isPastFreeSlot && !isClosedDay && !isLunchBreakSlot ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaLiveSlotLabel action={laneSalonCanQuickBook}/></View>:null}
+{!isLunchBreakSlot && (isPastFreeSlot || isClosedDay) && (weekBaseSlotInterval >= 15 || timeToMinutes(slotTime) % 15 === 0) ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaStateLabel label={isClosedDay?'Chiuso':'Passato'} action={laneSalonCanQuickBook}/></View>:null}{isCurrentSlotToday && !isPastFreeSlot && !isClosedDay && !isLunchBreakSlot ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaLiveSlotLabel action={laneSalonCanQuickBook}/></View>:null}
                                             {laneDragPreview &&
                                             !laneOccupyingAppointment ? null : laneSalonCanQuickBook &&
                                               !laneQuickBookAvailable &&
@@ -49101,7 +49100,7 @@ null
                                       cellState !== 'blocked'
                                     }
                                   >
-                                    {!isLunchBreakSlot && (isPastFreeSlot || isClosedDay) && (!IS_WEB || weekBaseSlotInterval >= 15 || timeToMinutes(slotTime) % 15 === 0) ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaStateLabel label={isClosedDay?'Chiuso':'Passato'} action={canSalonQuickBook}/></View>:null}{isCurrentSlotToday && !isPastFreeSlot && !isClosedDay && !isLunchBreakSlot ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaLiveSlotLabel action={canSalonQuickBook}/></View>:null}
+                                    {!isLunchBreakSlot && (isPastFreeSlot || isClosedDay) && (weekBaseSlotInterval >= 15 || timeToMinutes(slotTime) % 15 === 0) ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaStateLabel label={isClosedDay?'Chiuso':'Passato'} action={canSalonQuickBook}/></View>:null}{isCurrentSlotToday && !isPastFreeSlot && !isClosedDay && !isLunchBreakSlot ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaLiveSlotLabel action={canSalonQuickBook}/></View>:null}
 {isSwapPreviewFreeTarget ? (
                                       <WeekDragTargetHighlight
                                         tone={
