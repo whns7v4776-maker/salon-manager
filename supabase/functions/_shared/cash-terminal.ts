@@ -62,7 +62,7 @@ export async function terminalAction({admin,stripe,account,workspaceId,body,live
   let locations = await stripe.terminal.locations.list({limit:100},options);
   // Review copy only: a TEST account without an Italian location gets one, so the reader can connect.
   if (allowTest === true && !live && !locations.data.some((l:any)=>l.address?.country==='IT')) {
-   await stripe.terminal.locations.create({display_name:'SalonPro · sede di prova',address:{line1:'Via di prova 1',city:'Milano',postal_code:'20121',country:'IT'}},options);
+   await stripe.terminal.locations.create({display_name:'SalonPro · sede di prova',address:{line1:'Via di prova 1',city:'Milano',state:'MI',postal_code:'20121',country:'IT'}},options);
    locations = await stripe.terminal.locations.list({limit:100},options);
   }
   return {enabled:true,locations:locations.data.filter((l:any)=>l.address?.country==='IT').map((l:any)=>({id:l.id,name:l.display_name}))};
