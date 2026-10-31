@@ -535,8 +535,14 @@ export function OwnerSubscriptionPaywall({ onDevContinue, onActivationTransition
   const canUseLocalActivation = __DEV__ && !isWeb && !!onDevContinue;
   const shouldShowConfigurationIssue = configurationIssue && !canUseLocalActivation && !isWeb;
   const testerProgramOpen = founderOfferAvailable && paywallMode === 'activation_required';
+  // Accesso Salone Fondatore concesso dal server (piano ancora 'demo'): nessun
+  // abbonamento store e' mai stato attivato, quindi non si parla di "riattivare".
+  const founderAccessEnded =
+    paywallMode === 'trial_expired' && salonWorkspace.subscriptionPlan === 'demo';
   const titleText =
-    paywallMode === 'trial_expired'
+    founderAccessEnded
+      ? 'I tuoi 60 giorni da Salone Fondatore sono finiti'
+      : paywallMode === 'trial_expired'
       ? 'La prova gratuita è terminata'
       : paywallMode === 'subscription_expired'
         ? 'Abbonamento scaduto'
@@ -544,14 +550,16 @@ export function OwnerSubscriptionPaywall({ onDevContinue, onActivationTransition
           ? 'Diventa un salone tester'
           : 'Il tuo salone, organizzato.';
   const subtitleText =
-    paywallMode === 'trial_expired'
+    founderAccessEnded
+      ? `Ti sei trovato bene? Continua con SalonPro${founderOfferAvailable ? ' al prezzo da Salone Fondatore, bloccato finché resti abbonato' : ''}. Agenda, clienti e dati del salone restano come li hai lasciati.`
+      : paywallMode === 'trial_expired'
       ? 'Per continuare a usare SalonPro, riattiva il piano scelto. I dati del salone restano al sicuro.'
       : paywallMode === 'subscription_expired'
         ? 'L’accesso al gestionale è sospeso. Riattiva l’abbonamento per continuare senza perdere i dati.'
         : testerProgramOpen
           ? trialEligibleForSelectedPlan
             ? `Usa SalonPro gratis per ${trialLabel} nel tuo salone, con una persona del team che ti segue.`
-            : 'Prezzo di lancio riservato ai primi 100 saloni, con una persona del team che ti segue.'
+            : 'Prezzo da Salone Fondatore, bloccato finché resti abbonato, con una persona del team che ti segue.'
           : !trialEligibleForSelectedPlan
             ? 'Scegli il piano più adatto a te. Condizioni confermate nello store.'
             : `${trialLabel} gratis per scoprire SalonPro.`;
@@ -560,6 +568,8 @@ export function OwnerSubscriptionPaywall({ onDevContinue, onActivationTransition
       ? trialEligibleForSelectedPlan
         ? `${trialLabel} gratis`
         : 'Condizioni store'
+      : founderAccessEnded
+        ? 'Salone Fondatore'
       : paywallMode === 'trial_expired'
         ? 'Prova terminata'
         : 'Accesso sospeso';
@@ -568,7 +578,9 @@ export function OwnerSubscriptionPaywall({ onDevContinue, onActivationTransition
       ? canStartFreeTrial
         ? `Inizia ${trialLabel} gratis`
         : `Continua con il piano ${selectedPeriodLabel}`
-      : `Riattiva SalonPro ${selectedPeriodLabel}`;
+      : founderAccessEnded
+        ? `Continua con il piano ${selectedPeriodLabel}`
+        : `Riattiva SalonPro ${selectedPeriodLabel}`;
   const priceNote = founderOfferAvailable ? 'Prezzo di lancio bloccato' : 'Prezzo standard';
   const selectedPrice = selectedBillingPeriod === 'monthly' ? monthlyPrice : annualPrice;
   const paymentDisclosureText = canStartFreeTrial
@@ -679,7 +691,7 @@ export function OwnerSubscriptionPaywall({ onDevContinue, onActivationTransition
               {!isWeb && loading && !monthlyPackage ? <SkeletonShimmer accessibilityLabel="Caricamento piano mensile" style={{ height: 40, width: '82%', borderRadius: 10, marginVertical: 8 }} /> : <Text style={[styles.planPrice, selectedBillingPeriod === 'monthly' && styles.planPriceSelected]}>{monthlyPrice}</Text>}
               <Text style={[styles.planNote, selectedBillingPeriod === 'monthly' && styles.planNoteSelected]}>{priceNote}</Text>
               {founderOfferAvailable && standardMonthlyPrice ? (
-                <Text style={[styles.planSubNote, selectedBillingPeriod === 'monthly' && styles.planNoteSelected]}>Dopo i primi 100 saloni: {standardMonthlyPrice}</Text>
+                <Text style={[styles.planSubNote, selectedBillingPeriod === 'monthly' && styles.planNoteSelected]}>Prezzo standard: {standardMonthlyPrice}</Text>
               ) : null}
             </TouchableOpacity>
 
@@ -730,7 +742,7 @@ export function OwnerSubscriptionPaywall({ onDevContinue, onActivationTransition
                     selectedBillingPeriod === 'annual' && styles.planNoteSelected,
                   ]}
                 >
-                  Dopo i primi 100 saloni: {standardAnnualPrice}
+                  Prezzo standard: {standardAnnualPrice}
                 </Text>
               ) : null}
             </TouchableOpacity>

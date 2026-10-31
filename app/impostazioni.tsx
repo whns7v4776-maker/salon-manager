@@ -140,6 +140,17 @@ const getSubscriptionSummary = (workspace: {
     };
   }
 
+  // Accesso Salone Fondatore dato dal server: piano ancora 'demo', nessun
+  // abbonamento store e quindi nessun rinnovo automatico.
+  if (trialActive && workspace.subscriptionPlan === 'demo' && !details?.externalSubscriptionId) {
+    return {
+      title: 'Salone Fondatore',
+      price: `Gratis, senza carta. Poi da ${SALON_PRO_FOUNDER_PRICE_LABEL} solo se scegli di continuare`,
+      remaining: formatRemainingDays(currentTrialEndsAt),
+      renewal: `Nessun rinnovo automatico: l'accesso gratuito termina il ${formatShortDate(currentTrialEndsAt)}`,
+    };
+  }
+
   if (trialActive) {
     const nextPrice = `poi ${annualLike
       ? founderPrice
