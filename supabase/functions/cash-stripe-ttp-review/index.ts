@@ -47,6 +47,14 @@ async function reconcile(session: Stripe.Checkout.Session, account: string) {
  }
 }
 
+const terminalErrorText = (e: unknown) => {
+ const m = e instanceof Error ? e.message.toLowerCase() : '';
+ if (!(e instanceof Error) || !('type' in e)) return e instanceof Error ? e.message : 'Contactless non disponibile. Riprova tra poco.';
+ if (m.includes('address') || m.includes('location')) return 'La sede del salone su Stripe è incompleta. Controlla indirizzo e provincia in Stripe → Terminal → Sedi.';
+ if (m.includes('no such account') || m.includes('permission') || m.includes('not have access')) return 'Il collegamento Stripe del salone non permette ancora Tap to Pay. Ricollega Stripe dalla Cassa.';
+ if (m.includes('rate limit')) return 'Troppe richieste in poco tempo. Attendi qualche secondo e riprova.';
+ return 'Tap to Pay non è disponibile in questo momento. Riprova tra poco; QR e link restano disponibili.';
+};
 Deno.serve(async request => {
  if (request.method === 'OPTIONS') return new Response('ok', { headers: cors });
  // Review copy: TEST keys only, owner actions and the OAuth callback only.
@@ -228,7 +236,7 @@ Deno.serve(async request => {
   if (!account || account.livemode !== live) return reply({ error: 'Collega Stripe per questo salone.' });
   if (['terminal-status','terminal-token','terminal-intent','terminal-check','terminal-cancel'].includes(body.action)) {
    try { return reply(await terminalAction({admin,stripe,account,workspaceId,body,live,enabled:Deno.env.get('TTP_REVIEW_CASH_STRIPE_TERMINAL_ENABLED')==='true',allowTest:true})); }
-   catch(e) { console.error('ttp-review terminal', e); return reply({error:e instanceof Error ? `Stripe: ${e.message}` : 'Contactless non disponibile. Verifica lo stato prima di riprovare.'},400); }
+   catch(e) { console.error('ttp-review terminal', e); return reply({error:terminalErrorText(e)},400); }
   }
   if (body.action !== 'checkout' && body.action !== 'cancel' && body.action !== 'check') return reply({ error: 'Operazione non valida.' }, 400);
   if (!/^[a-f0-9-]{36}$/i.test(body.movementId || '')) return reply({ error: 'Attendi il salvataggio del movimento prima di incassare.' });
