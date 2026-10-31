@@ -9065,7 +9065,16 @@ export default function ServiziScreen() {
       return;
     }
 
-    const duplicato = servizi.some(
+    // Editing a service without touching its name or role must always save, even if the catalogue
+    // already holds a twin (an archived copy, older data): only a rename onto another service is a duplicate.
+    const serviceBeingEdited = servizioInModifica
+      ? servizi.find((item) => item.id === servizioInModifica)
+      : null;
+    const keepsOwnIdentity =
+      !!serviceBeingEdited &&
+      normalizeServiceName(serviceBeingEdited.nome) === nomeNormalizzato &&
+      normalizeRoleName(serviceBeingEdited.mestiereRichiesto ?? '') === mestiereNormalizzato;
+    const duplicato = !keepsOwnIdentity && servizi.some(
       (item) =>
         item.id !== servizioInModifica &&
         normalizeServiceName(item.nome) === nomeNormalizzato &&
