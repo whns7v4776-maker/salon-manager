@@ -149,6 +149,13 @@ module.exports = () => {
     ...baseConfig.expo,
     ios: {
       ...baseConfig.expo.ios,
+      // The app is Italian: system screens (Tap to Pay PIN, Apple merchant education) follow this language.
+      infoPlist: {
+        ...(baseConfig.expo.ios.infoPlist ?? {}),
+        CFBundleDevelopmentRegion: 'it',
+        CFBundleLocalizations: ['it'],
+        CFBundleAllowMixedLocalizations: true,
+      },
       runtimeVersion: terminalBuildEnabled ? `${appVersion}-terminal2${metaEnabled ? '-meta1' : ''}` : metaEnabled ? `${appVersion}-meta1` : baseConfig.expo.ios.runtimeVersion,
       ...(terminalBuildEnabled ? {entitlements:{'com.apple.developer.proximity-reader.payment.acceptance':true}} : {}),
     },
