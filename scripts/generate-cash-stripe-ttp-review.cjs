@@ -39,10 +39,19 @@ swap(
   "   if (account) return reply({ error: 'Stripe è già collegato. Verifica il collegamento.' });\n",
   `   if (account) return reply({ error: 'Stripe è già collegato. Verifica il collegamento.' });
    if (!Deno.env.get('TTP_REVIEW_CASH_STRIPE_CONNECT_CLIENT_ID')) {
-    const created = await stripe.accounts.create({ type: 'standard', country: 'IT', metadata: { salonpro_workspace: workspaceId, purpose: 'apple-ttp-review' } });
-    checked(await admin.from('cash_stripe_accounts').insert({ workspace_id: workspaceId, account_id: created.id, livemode: false }));
-    const link = await stripe.accountLinks.create({ account: created.id, type: 'account_onboarding', refresh_url: returnUrl!, return_url: returnUrl! });
-    return reply({ url: link.url });
+    try {
+     const metadata = { salonpro_workspace: workspaceId, purpose: 'apple-ttp-review' };
+     // Standard first (like production OAuth); Express if the sandbox platform does not allow it.
+     const created = await stripe.accounts.create({ type: 'standard', country: 'IT', metadata })
+      .catch((e: unknown) => { console.error('ttp-review standard account', e); return stripe.accounts.create({ type: 'express', country: 'IT', metadata, capabilities: { card_payments: { requested: true }, transfers: { requested: true } } }); });
+     checked(await admin.from('cash_stripe_accounts').insert({ workspace_id: workspaceId, account_id: created.id, livemode: false }));
+     const link = await stripe.accountLinks.create({ account: created.id, type: 'account_onboarding', refresh_url: returnUrl!, return_url: returnUrl! });
+     return reply({ url: link.url });
+    } catch (e) {
+     console.error('ttp-review connect', e);
+     // Test-only copy: Stripe's reason is shown so a setup problem can be fixed on the spot.
+     return reply({ error: 'Collegamento Stripe di prova non riuscito: ' + (e instanceof Error ? e.message : 'errore sconosciuto') }, 400);
+    }
    }
 `,
 );
