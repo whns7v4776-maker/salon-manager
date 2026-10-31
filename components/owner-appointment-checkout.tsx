@@ -31,7 +31,7 @@ export function OwnerAppointmentCheckout({appointmentId,workspaceId,onCompleted,
  const startDigital=(next:'checkout'|'terminal')=>void run(async()=>{
   const {data,error:e}=await supabase.rpc('prepare_owner_appointment_checkout_v1',{p_appointment:appointmentId,p_workspace:workspaceId});
   if(e)throw new Error(e.message);
-  if(data.digitalAvailable===false)throw new Error('Acconto e saldo sono separati: gestiscili nella Cassa oppure registra qui il saldo ricevuto con Contanti, POS esterno o Bonifico.');
+  if(data.digitalAvailable===false)throw new Error(Number(data.groupServices)>1?`Questa prenotazione ha ${data.groupServices} servizi da saldare insieme: usa Contanti, POS esterno o Bonifico per incassarli tutti con un solo pagamento.`:'Acconto e saldo sono separati: gestiscili nella Cassa oppure registra qui il saldo ricevuto con Contanti, POS esterno o Bonifico.');
   setPreferred(next);setMovement(data);setDigital(true);
  });
  const night=p.night;
