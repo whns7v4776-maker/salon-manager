@@ -31,5 +31,7 @@ export function getAgendaDateStripMetrics(days: {value:string}[], dayWidth: numb
 }
 
 export function getAgendaDateStripOffset(index: number, dayWidth: number, count: number, railWidth: number, metrics?: ReturnType<typeof getAgendaDateStripMetrics>) {
-  return Math.max(0, Math.min((metrics?.totalWidth ?? count * dayWidth) - railWidth, metrics?.offsets[index] ?? index * dayWidth));
+  // The selected day sits second from the left, so the previous day stays in view.
+  const lead = Math.max(0, index - 1);
+  return Math.max(0, Math.min((metrics?.totalWidth ?? count * dayWidth) - railWidth, metrics?.offsets[lead] ?? lead * dayWidth));
 }

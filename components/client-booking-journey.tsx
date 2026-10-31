@@ -4,6 +4,7 @@ import { Image, Platform, Pressable, ScrollView, TextInput, View, useWindowDimen
 import { ClientBookingText as Text } from './client-booking-text';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAccessAppearance } from './access-premium';
+import { haptic } from '../src/lib/haptics';
 import { SkeletonShimmer } from './ui/skeleton-shimmer';
 import { ClientTimeChoice } from './client-service-choice';
 import { bookingAvailableDates, bookingCalendarCells, bookingMonthKey, bookingMonthShift, bookingNativeDateLayout, bookingTimePeriods } from './client-booking-presentation';
@@ -96,7 +97,7 @@ function JourneyDateOptions(props: ClientBookingJourneyProps) {
       <View accessibilityRole="radiogroup" accessibilityLabel="Date con posti disponibili" style={{ flexDirection: 'row', flexWrap: 'wrap', gap: native ? nativeGrid.gap : large ? 14 : 12 }}>
         {visible.map(day => {
           const selected = props.dateConfirmed && props.date === day.value;
-          return <Pressable key={day.value} accessibilityRole="radio" accessibilityLabel={`${day.label}, posti disponibili`} accessibilityState={{ checked: selected }} onPress={() => props.onDate(day.value)} style={({ pressed }) => ({ width: native ? nativeGrid.cardWidth : large && width >= 1200 ? '32%' : '47%', minWidth: 0, minHeight: native ? 94 : large ? 120 : 100, padding: native ? 9 : large ? 19 : 13, borderRadius: native ? 16 : 18, borderWidth: 1, borderColor: selected ? p.action : p.border, backgroundColor: p.surface, gap: native ? 4 : 8, opacity: pressed ? .75 : 1 })}>
+          return <Pressable key={day.value} accessibilityRole="radio" accessibilityLabel={`${day.label}, posti disponibili`} accessibilityState={{ checked: selected }} onPress={() => { haptic.light().catch(() => null); props.onDate(day.value); }} style={({ pressed }) => ({ width: native ? nativeGrid.cardWidth : large && width >= 1200 ? '32%' : '47%', minWidth: 0, minHeight: native ? 94 : large ? 120 : 100, padding: native ? 9 : large ? 19 : 13, borderRadius: native ? 16 : 18, borderWidth: 1, borderColor: selected ? p.action : p.border, backgroundColor: p.surface, gap: native ? 4 : 8, opacity: pressed ? .75 : 1 })}>
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: native ? 4 : 6 }}><Text style={{ color: native ? p.ink : p.muted, fontSize: native ? 12 : large ? 15 : 11, lineHeight: native ? 18 : large ? 22 : 17, fontWeight: native ? '700' : '400', textTransform: 'capitalize' }}>{day.weekday}</Text>{selected ? <Ionicons name="checkmark-circle" size={native ? 16 : large ? 23 : 19} color={p.action} /> : null}</View>
             <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: native ? 4 : 6 }}><Text style={{ color: p.ink, fontFamily: Platform.OS === 'android' ? 'serif' : 'Georgia', fontSize: native ? 24 : large ? 32 : 26, lineHeight: native ? 27 : large ? 37 : 30 }}>{day.number}</Text><Text style={{ color: p.muted, fontSize: native ? 11 : large ? 15 : 12 }}>{day.month}</Text></View>
             <View style={{ flexDirection: native ? 'column' : 'row', alignItems: native ? 'flex-start' : 'center', gap: native ? 5 : 6, flexWrap: native ? 'nowrap' : 'wrap' }}>
@@ -145,7 +146,7 @@ function JourneyCalendar(props: ClientBookingJourneyProps) {
           const day = cell.day;
           const selected = props.dateConfirmed && props.date === cell.value;
           const disabled = !day || day.disabled;
-          return <Pressable key={cell.value} accessibilityRole="button" accessibilityLabel={day ? `${day.label}, ${day.status}` : `${cell.number}, fuori dalla finestra di prenotazione`} accessibilityState={{ selected, disabled, busy: day?.pending || false }} disabled={disabled} onPress={() => props.onDate(cell.value)}
+          return <Pressable key={cell.value} accessibilityRole="button" accessibilityLabel={day ? `${day.label}, ${day.status}` : `${cell.number}, fuori dalla finestra di prenotazione`} accessibilityState={{ selected, disabled, busy: day?.pending || false }} disabled={disabled} onPress={() => { haptic.light().catch(() => null); props.onDate(cell.value); }}
             style={{ width: '14.285714%', minHeight: large ? 59 : 36, alignItems: 'center', justifyContent: 'center' }}>
             <View style={{ minWidth: large ? 46 : 32, minHeight: large ? 46 : 34, paddingHorizontal: 3, borderRadius: large ? 24 : 18, backgroundColor: selected ? p.action : 'transparent', justifyContent: 'center', alignItems: 'center', opacity: disabled && !selected ? .4 : 1 }}>
               <Text style={{ color: selected ? p.actionText : p.ink, fontSize: large ? 19 : 13, lineHeight: large ? 29 : 20, fontWeight: selected ? '600' : '400', textDecorationLine: day?.status === 'Chiuso' ? 'line-through' : 'none' }}>{cell.number}</Text>

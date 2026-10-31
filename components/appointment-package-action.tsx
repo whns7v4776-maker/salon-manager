@@ -88,7 +88,8 @@ export function AppointmentPackageAction({
     };
   }, [appointmentId, workspaceId, revision]);
   if(loading)return <View accessibilityLabel="Verifica vantaggi" style={{minHeight:48,padding:12,borderRadius:14,borderWidth:1,borderColor:p.line,backgroundColor:p.field}}><Text style={{fontSize:12,lineHeight:20,color:p.muted}}>Verifica pacchetti del cliente…</Text></View>;
-  if (!covered && !options.length && !error) return <View style={{minHeight:48,padding:12,borderRadius:14,borderWidth:1,borderColor:p.line,backgroundColor:p.field}}><Text style={{fontSize:12,lineHeight:20,color:p.muted}}>Nessun pacchetto applicabile a questo servizio.</Text></View>;
+  // Nothing to apply: no empty notice taking space in the appointment sheet.
+  if (!covered && !options.length && !error) return null;
   const apply = async () => {
     if (lock.current || !confirm) return;
     lock.current = true;

@@ -30,7 +30,7 @@ import { OwnerAppointmentCheckout } from '../../components/owner-appointment-che
 import { NativeSheetHandle, NativeDraggableSheet } from '../../components/ui/native-sheet-drag';
 import { FitMessageScroll } from '../../components/ui/fit-message-scroll';
 import { AgendaLiveTimeOverlay } from '../../components/agenda-live-time-overlay';
-import { AgendaSlotSatin,AgendaPauseSurface } from '../../components/agenda-approved-surface';
+import { AgendaSlotSatin,AgendaPauseSurface,AgendaClosedLane } from '../../components/agenda-approved-surface';
 import { AgendaLiveSignalProvider, AgendaLiveGlow, AgendaLiveClockRing, AgendaLiveSlotLabel } from '../../components/agenda-live-glow';
 import { useAppointmentBenefits } from '../../hooks/use-appointment-benefits';
 import { AppointmentBenefitBadges } from '../../components/appointment-benefit-badges';
@@ -47420,6 +47420,18 @@ accessibilityHint={
                                           { width: operatorLaneWidth },
                                         ]}
                                       >
+                                        {(isLaneOperatorUnavailableOnDay ||
+                                          isClosedDay) &&
+                                        !isHistoricalLaneDisabled &&
+                                        !laneStartAppointment &&
+                                        !laneOccupyingAppointment ? (
+                                          <AgendaClosedLane
+                                            night={availabilityPalette.night}
+                                            width={operatorLaneWidth}
+                                            height={agendaDensityRowHeight}
+                                            offset={rowIndex * agendaDensityRowHeight}
+                                          />
+                                        ) : null}
                                         {isConfiguredTimeMarker &&
                                         rowIndex !== 0 &&
                                         !laneOccupyingAppointment &&

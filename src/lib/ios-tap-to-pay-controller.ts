@@ -216,10 +216,18 @@ export class IosTapToPayController {
   pay(movementId:string,onPaid:()=>void) {
     return this.run(async guard=>{
       if(!(await this.prepare(true,guard)))return;
+      // The server prepares the amount while Apple's guide check runs, so the
+      // reader opens one round trip sooner. A closed guide cancels it again.
+      const intent=this.adapter.call('terminal-intent',{movementId});
+      intent.catch(()=>{});
       const shown=await this.setupStep(this.adapter.education(false,this.identity),guard);guard();
-      if(!shown){this.update({message:'Guida chiusa. Nessun pagamento avviato.'});return;}
+      if(!shown){
+        const open=await intent.catch(()=>null);
+        if(open?.clientSecret)await this.adapter.call('terminal-cancel',{movementId}).catch(()=>{});
+        guard();this.update({message:'Guida chiusa. Nessun pagamento avviato.'});return;
+      }
       this.update({outcome:undefined,receipt:undefined,message:'Preparazione dell’importo…'});
-      const reserved=await this.adapter.call('terminal-intent',{movementId});guard();
+      const reserved=await intent;guard();
       if(reserved.status==='paid'){await this.check(movementId,guard);onPaid();return;}
       if(!reserved.clientSecret){await this.check(movementId,guard);return;}
       const retrieved=await this.adapter.retrieve(reserved.clientSecret);guard();

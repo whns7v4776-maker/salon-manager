@@ -45,6 +45,21 @@ const confirmedStatuses = new Map<
     terminal: { enabled?: boolean; locations?: unknown[] } | null;
   }
 >();
+// Lets the quick-checkout readiness check seed this cache, so the checkout
+// opens on already confirmed statuses instead of asking the server again.
+export function rememberCashStripeStatus(
+  workspaceId: string,
+  status: Status,
+  terminal?: { enabled?: boolean; locations?: unknown[] } | null,
+) {
+  confirmedStatuses.set(workspaceId, {
+    status,
+    terminal:
+      terminal === undefined
+        ? confirmedStatuses.get(workspaceId)?.terminal ?? null
+        : terminal,
+  });
+}
 export async function callCashStripe(action: string, movementId?: string) {
   const { data, error } = await supabase.functions.invoke(CASH_STRIPE_FUNCTION, {
     body: { action, movementId },
@@ -142,6 +157,12 @@ export function CashStripePanel({
       if (statusRefreshLock.current) return;
       statusRefreshLock.current = true;
       try {
+        // Both checks start together: the Tap to Pay status no longer waits
+        // for the Stripe status round trip.
+        const terminalRequest = call("terminal-status").then(
+          (value) => ({ ok: true as const, value }),
+          () => ({ ok: false as const, value: null }),
+        );
         const next = await call("status");
         if (!isCurrent()) return;
         setStatus(next);
@@ -151,18 +172,16 @@ export function CashStripePanel({
           terminal: confirmedStatuses.get(salonWorkspace.id)?.terminal ?? null,
         });
         if (next.configured && next.connected) {
-          try {
-            const terminal = await call("terminal-status");
-            if (isCurrent()) {
-              setTerminalStatus(terminal);
-              setTerminalError(false);
-              confirmedStatuses.set(salonWorkspace.id, {
-                status: next,
-                terminal,
-              });
-            }
-          } catch {
+          const terminal = await terminalRequest;
+          if (!terminal.ok) {
             if (isCurrent()) setTerminalError(true);
+          } else if (isCurrent()) {
+            setTerminalStatus(terminal.value);
+            setTerminalError(false);
+            confirmedStatuses.set(salonWorkspace.id, {
+              status: next,
+              terminal: terminal.value,
+            });
           }
         } else {
           setTerminalStatus(null);
@@ -273,7 +292,7 @@ export function CashStripePanel({
                 ? p.action
                 : secondaryFill,
           },
-          (busy || contactlessBusy) && { opacity: 0.5 },
+          (busy || contactlessBusy) && { opacity: 0.6 },
         ]}
       >
         <Text
@@ -508,7 +527,9 @@ export function CashStripePanel({
           nella Cassa.
         </Text>
       )}
-      {checkout?.channel === "terminal" && checkout.status === "open" ? (
+      {/* The contactless checkout already shows its own verify / cancel actions. */}
+      {checkout?.channel === "terminal" && checkout.status === "open" &&
+      !(status?.ready && method === "terminal" && movement) ? (
         <>
           {button("Verifica pagamento", () => operate("check"))}
           {button("Annulla tentativo contactless", () => operate("cancel"))}

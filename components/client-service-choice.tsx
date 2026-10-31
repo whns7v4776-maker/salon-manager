@@ -3,6 +3,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Platform, Pressable, View, useWindowDimensions } from 'react-native';
 import { ClientBookingText as Text } from './client-booking-text';
 import { useAccessAppearance } from './access-premium';
+import { haptic } from '../src/lib/haptics';
 
 export type ClientServiceChoiceProps = {
   name: string; duration: string; price: number; selected: boolean; role?: string; roleColor?: string;
@@ -54,7 +55,7 @@ export function ClientTimeChoice({ label, selected, disabled, hint, width, onPre
   const { width: viewportWidth } = useWindowDimensions();
   const large = Platform.OS === 'web' && viewportWidth >= 1000;
   return <View style={{ width, minWidth: 0 }}>
-    <Pressable accessibilityRole="button" accessibilityLabel={`${label}${hint ? `, ${hint}` : ''}`} accessibilityState={{ selected, disabled }} disabled={disabled} onPress={onPress}
+    <Pressable accessibilityRole="button" accessibilityLabel={`${label}${hint ? `, ${hint}` : ''}`} accessibilityState={{ selected, disabled }} disabled={disabled} onPress={() => { haptic.light().catch(() => null); onPress(); }}
       style={({ pressed }) => ({ minHeight: large ? 60 : 48, paddingVertical: 12, paddingHorizontal: 6, borderRadius: 13, borderWidth: 1, borderColor: selected ? p.action : p.border, backgroundColor: selected ? p.action : p.surface, alignItems: 'center', justifyContent: 'center', gap: 4, opacity: disabled ? .42 : pressed ? .72 : 1 })}>
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5 }}><Text style={{ color: selected ? p.actionText : p.ink, fontSize: large ? 18 : 14, lineHeight: large ? 27 : 22, fontWeight: selected ? '600' : '500' }}>{label}</Text>{selected ? <Ionicons name="checkmark" size={large ? 17 : 13} color={p.actionText} /> : null}</View>
       {hint ? <Text style={{ color: selected ? p.actionText : p.muted, fontSize: large ? 12 : 10, lineHeight: large ? 18 : 15, textAlign: 'center' }}>{hint}</Text> : null}

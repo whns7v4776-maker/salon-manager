@@ -91,8 +91,13 @@ function useTapTheme(){
 }
 function Action({label,disabled,onPress,primary=false}:{label:string;disabled?:boolean;onPress:()=>void;primary?:boolean}) {
   const t=useTapTheme();
-  return <HapticTouchable accessibilityRole="button" disabled={disabled} onPress={onPress} style={[styles.button,{borderWidth:1,borderColor:primary?t.p.action:t.edge,backgroundColor:primary?t.p.action:t.field},disabled&&{opacity:0.5}]}>
-    <Text style={[styles.buttonText,{color:primary?t.p.actionText:t.ink}]}>{label}</Text>
+  // Same warm secondary and red cancel as the checkout sheet: white on the light sheet vanished.
+  const danger=!primary&&label.startsWith('Annulla');
+  const border=primary?t.p.action:danger?(t.n?'#8A4B50':'#D49894'):(t.n?'#5A5F62':'#BFAE92');
+  const fill=primary?t.p.action:danger?(t.n?'#442428':'#F5DDDB'):(t.n?'#363B3E':'#E6DCCB');
+  const ink=primary?t.p.actionText:danger?(t.n?'#FFB5B5':'#A22D2D'):t.ink;
+  return <HapticTouchable accessibilityRole="button" disabled={disabled} onPress={onPress} style={[styles.button,{borderWidth:1,borderColor:border,backgroundColor:fill},disabled&&{opacity:0.6}]}>
+    <Text style={[styles.buttonText,{color:ink}]}>{label}</Text>
   </HapticTouchable>;
 }
 export function IosTapToPaySetup() {

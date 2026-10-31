@@ -1,6 +1,6 @@
 import { useAccessAppearance } from './access-premium';
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Platform, Text, View } from "react-native";
+import { Text, View } from "react-native";
 import { supabase } from "../src/lib/supabase";
 import {
   packageMoney,
@@ -97,7 +97,8 @@ export function LoyaltyCheckoutReminder({
     </HapticTouchable>
   );
   if(loading)return <View style={{minHeight:48,padding:12,borderRadius:14,borderWidth:1,borderColor:p.line,backgroundColor:p.field}}><Text style={{fontSize:12,lineHeight:20,color:p.muted}}>Verifica premi fedeltà…</Text></View>;
-  if (!error && !options?.applied && !options?.rewards.length) return Platform.OS==='web'?null:<View style={{minHeight:48,padding:12,borderRadius:14,borderWidth:1,borderColor:p.line,backgroundColor:p.field}}><Text style={{fontSize:12,lineHeight:20,color:p.muted}}>Nessun premio fedeltà disponibile per questo servizio.</Text></View>;
+  // Nothing to redeem: no empty notice, as on web.
+  if (!error && !options?.applied && !options?.rewards.length) return null;
   return (
     <View
       style={{
