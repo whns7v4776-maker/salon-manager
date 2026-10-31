@@ -107,6 +107,50 @@ const resolveKeyboardHeight = (event?: KeyboardEvent | null) => {
   return metricsHeight > 0 ? metricsHeight : 0;
 };
 
+const whenKeyboardTopKnown = (work: (keyboardTop: number) => void) => {
+  const metrics = (Keyboard as typeof Keyboard & { metrics?: () => { screenY?: number } | undefined }).metrics?.();
+  if (Keyboard.isVisible() && metrics?.screenY) {
+    work(metrics.screenY);
+    return;
+  }
+  // First focus: the keyboard is still on its way, wait for its final position.
+  const subscription = Keyboard.addListener('keyboardWillShow', (event) => {
+    subscription.remove();
+    clearTimeout(timeout);
+    work(event.endCoordinates.screenY);
+  });
+  const timeout = setTimeout(() => subscription.remove(), 800);
+};
+
+// React Native's own scroll-to-keyboard assumes the scroll view starts at the top of the screen:
+// under a fixed header it under-scrolls and the field stays behind the keyboard. Measure the real
+// viewport instead, then keep the field `additionalOffset` above the keyboard.
+const scrollAboveKeyboard = (
+  scrollable: Scrollable,
+  scrollHandle: number,
+  inputHandle: number,
+  additionalOffset: number,
+  animated: boolean,
+  delay: number
+) => {
+  const responder = (scrollable as Scrollable & { getScrollResponder?: () => unknown }).getScrollResponder?.() ?? scrollable;
+  const innerHandle = (responder as { getInnerViewNode?: () => number | null }).getInnerViewNode?.();
+  if (!innerHandle) return false;
+
+  whenKeyboardTopKnown((keyboardTop) => {
+    runAfterLayout(() => {
+      UIManager.measureInWindow(scrollHandle, (_x, viewportY) => {
+        UIManager.measureLayout(inputHandle, innerHandle, () => null, (_left, top, _width, height) => {
+          const target = top + height + additionalOffset - (keyboardTop - viewportY);
+          // A large offset must not push the field itself above the visible area.
+          scrollContainerTo(scrollable, Math.min(target, top - 12), animated);
+        });
+      });
+    }, delay);
+  });
+  return true;
+};
+
 const scrollNodeIntoView = (
   node: unknown,
   scrollRef: ScrollableRef,
@@ -150,6 +194,14 @@ const scrollNodeIntoView = (
   )?.scrollResponderScrollNativeHandleToKeyboard;
 
   if (
+    Platform.OS === 'ios' &&
+    options?.onlyScrollWhenCovered !== true &&
+    scrollAboveKeyboard(scrollable, scrollHandle, inputHandle, additionalKeyboardOffset, animated, delay)
+  ) {
+    return;
+  }
+
+  if (
     Platform.OS !== 'android' &&
     typeof responderScrollToKeyboard === 'function' &&
     options?.onlyScrollWhenCovered !== true
@@ -177,6 +229,14 @@ const scrollNodeIntoView = (
         const overlap = nodeBottom - visibleBottom;
 
         if (overlap <= 0) {
+          return;
+        }
+
+        if (
+          options?.onlyScrollWhenCovered === true &&
+          Platform.OS === 'ios' &&
+          scrollAboveKeyboard(scrollable, scrollHandle, inputHandle, keyboardGap, animated, 0)
+        ) {
           return;
         }
 
