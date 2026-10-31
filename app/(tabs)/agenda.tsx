@@ -34813,7 +34813,9 @@ export default function AgendaScreen() {
         pending={showPendingVisualOverride||appointment.syntheticRequestStatus==='In attesa'}
         sourceBadge={cornerBadgeMode==='hidden'?null:renderWeekAppointmentSourceBadge(appointment,blockHeight<=64,tone.text)} ink={tone.text} accent={tone.accent??tone.border} width={width} height={blockHeight} footer={footer}
         benefits={kinds.length?<AppointmentBenefitBadges kinds={kinds} compact dense/>:null}
-        paid={!!appointment.incassato&&!appointment.nonEffettuato} done={!!appointment.completato&&!appointment.nonEffettuato}/>;
+        paid={!!appointment.incassato&&!appointment.nonEffettuato} done={!!appointment.completato&&!appointment.nonEffettuato}
+        due={!appointment.nonEffettuato&&!showPendingVisualOverride&&appointment.syntheticRequestStatus!=='In attesa'&&
+          getAppointmentDateTime(appointment.data??getTodayDateString(),getAppointmentEndTime(appointment)).getTime()<=Date.now()}/>;
     },[clienti,appointmentBenefits,appointmentGroupDisplayPositionById,getAppointmentBusySegmentStartingAt,getAppointmentDurationMinutes,getAppointmentEndTime,getEffectiveWeekAppointmentSourceBadge,getWeekAppointmentTone,renderWeekAppointmentSourceBadge,weekVisibleColWidth],
   );
   const renderWeekAppointmentContent=renderWeekAppointmentBaseContent;
