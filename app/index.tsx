@@ -285,7 +285,8 @@ function LandingAccessHeader({ audience, ownerMode = 'login', scrollY, collapseD
     const distance = collapseDistance?.value ?? 0;
     const value = distance > 0 ? Math.min(Math.max((scrollY?.value ?? 0) / distance, 0), 1) : 0;
     return {
-      opacity: interpolate(value, [0, 0.6], [1, 0], Extrapolation.CLAMP),
+      // Gone before the shrinking box squeezes the greeting into a tiny line.
+      opacity: interpolate(value, [0, 0.2], [1, 0], Extrapolation.CLAMP),
       maxHeight: interpolate(value, [0, 1], [110, 0], Extrapolation.CLAMP),
     };
   });

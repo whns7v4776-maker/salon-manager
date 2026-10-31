@@ -124,12 +124,13 @@ const whenKeyboardTopKnown = (work: (keyboardTop: number) => void) => {
 
 // React Native's own scroll-to-keyboard assumes the scroll view starts at the top of the screen:
 // under a fixed header it under-scrolls and the field stays behind the keyboard. Measure the real
-// viewport instead, then keep the field `additionalOffset` above the keyboard.
+// viewport and field instead. A field already visible does not move; a covered one rises just
+// enough to sit a short gap above the keyboard (the screens' large topOffset pushed it to the top).
+const KEYBOARD_FIELD_GAP = 20;
 const scrollAboveKeyboard = (
   scrollable: Scrollable,
   scrollHandle: number,
   inputHandle: number,
-  additionalOffset: number,
   animated: boolean,
   delay: number
 ) => {
@@ -140,10 +141,14 @@ const scrollAboveKeyboard = (
   whenKeyboardTopKnown((keyboardTop) => {
     runAfterLayout(() => {
       UIManager.measureInWindow(scrollHandle, (_x, viewportY) => {
-        UIManager.measureLayout(inputHandle, innerHandle, () => null, (_left, top, _width, height) => {
-          const target = top + height + additionalOffset - (keyboardTop - viewportY);
-          // A large offset must not push the field itself above the visible area.
-          scrollContainerTo(scrollable, Math.min(target, top - 12), animated);
+        UIManager.measureInWindow(inputHandle, (_fieldX, fieldY, _fieldWidth, fieldHeight) => {
+          const overlap = fieldY + fieldHeight + KEYBOARD_FIELD_GAP - keyboardTop;
+          if (overlap <= 0) return;
+          UIManager.measureLayout(inputHandle, innerHandle, () => null, (_left, top) => {
+            const currentOffset = top - (fieldY - viewportY);
+            // Never push the field itself above the visible area.
+            scrollContainerTo(scrollable, Math.min(currentOffset + overlap, top - 12), animated);
+          });
         });
       });
     }, delay);
@@ -196,7 +201,7 @@ const scrollNodeIntoView = (
   if (
     Platform.OS === 'ios' &&
     options?.onlyScrollWhenCovered !== true &&
-    scrollAboveKeyboard(scrollable, scrollHandle, inputHandle, additionalKeyboardOffset, animated, delay)
+    scrollAboveKeyboard(scrollable, scrollHandle, inputHandle, animated, delay)
   ) {
     return;
   }
@@ -235,7 +240,7 @@ const scrollNodeIntoView = (
         if (
           options?.onlyScrollWhenCovered === true &&
           Platform.OS === 'ios' &&
-          scrollAboveKeyboard(scrollable, scrollHandle, inputHandle, keyboardGap, animated, 0)
+          scrollAboveKeyboard(scrollable, scrollHandle, inputHandle, animated, 0)
         ) {
           return;
         }
