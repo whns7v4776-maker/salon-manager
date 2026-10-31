@@ -21,7 +21,7 @@ import Animated, {
   useSharedValue,
 } from 'react-native-reanimated';
 import Svg, { Defs, LinearGradient as SvgLinearGradient, Rect, Stop } from 'react-native-svg';
-import { AccessAppearanceProvider, AccessGlassReflection, AccessBackdrop, AccessWordmark, accessPremiumStyles, useAccessAppearance } from '../components/access-premium';
+import { AccessAppearanceProvider, AccessGlassReflection, AccessBackdrop, AccessScrollEdgeFade, AccessWordmark, accessPremiumStyles, useAccessAppearance } from '../components/access-premium';
 import { AccessNavigationBar } from '../components/access-navigation-bar';
 import { AccessSalonBadge } from '../components/ui/access-salon-badge';
 import { PublicSalonName, usePublicSalonAliases } from '../components/ui/public-salon-name';
@@ -391,6 +391,8 @@ function PremiumClientLandingScreen() {
   const clientKeyboardScrollTargetRef = useRef(0);
   const landingScrollYRef = useRef(0);
   const landingHeaderScrollY = useSharedValue(0);
+  // Where the form viewport starts and ends (keyboard included): edges for the native fade.
+  const [landingScrollEdges, setLandingScrollEdges] = useState({ top: 0, bottom: 0 });
   const landingHeaderCollapseDistance = useSharedValue(0);
   const [landingHeaderCollapseRoom, setLandingHeaderCollapseRoom] = useState(0);
   const landingHeaderCollapseRoomRef = useRef(0);
@@ -2813,7 +2815,9 @@ function PremiumClientLandingScreen() {
       onPointerCancel={() => { salonOutsideTapRef.current = null; }}
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 18 : 0}
+      // Negative: the content runs a little under the keyboard, so its rounded top edge covers
+      // the viewport's straight cut instead of leaving a clipped strip above it.
+      keyboardVerticalOffset={Platform.OS === 'ios' ? -28 : 0}
     >
       <AccessBackdrop />
       <AccessNavigationBar onBack={openAudiencePicker} backLabel={`Lato ${showOwnerLanding ? 'salone' : 'cliente'}. Cambia modalità di accesso.`} maxWidth={landingShellMaxWidth} />
@@ -2859,7 +2863,9 @@ function PremiumClientLandingScreen() {
           landingHeaderScrollY.value = event.nativeEvent.contentOffset.y;
         }}
         onLayout={(event) => {
-          landingScrollMetricsRef.current.viewport = event.nativeEvent.layout.height;
+          const { y, height } = event.nativeEvent.layout;
+          landingScrollMetricsRef.current.viewport = height;
+          setLandingScrollEdges(current => current.top === y && current.bottom === y + height ? current : { top: y, bottom: y + height });
           updateLandingHeaderCollapsible();
         }}
         onContentSizeChange={(_width, contentHeight) => {
@@ -4129,6 +4135,7 @@ function PremiumClientLandingScreen() {
           </View>
         </View>
       </ScrollView>
+      {Platform.OS !== 'web' ? <AccessScrollEdgeFade top={landingScrollEdges.top} bottom={landingScrollEdges.bottom} scrollY={landingHeaderScrollY} /> : null}
       <EmailOtpModal
         visible={accessEmailOtpModalVisible && !!accessEmailCompletionSentTo}
         email={accessEmailCompletionSentTo || normalizeEmail(accessEmail)}

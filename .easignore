@@ -46,3 +46,21 @@ output/
 *.tar
 *.tar.gz
 *.zip
+
+# Cartelle di lavoro locali, non fanno parte dell'app
+work/
+artifacts/
+sites/
+admin-dashboard/
+sportpro-control/
+.codex-handoffs/
+.claude/
+modules/*/android/build/
+ios/build/
+android/build/
+android/app/build/
+tmp/
+store-builds/
+app-store-screenshots/
+ios/Pods/
+android/.gradle/

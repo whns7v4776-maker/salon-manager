@@ -31994,7 +31994,7 @@ function ClienteFrontendScreenContent({ nativeInitialTab }: ClienteFrontendScree
       return <PremiumTabTransition entering={undefined} exiting={undefined} transitionKey={renderedTab} transitioning={false} style={[styles.container, styles.frontendClientCurrentPage]}>
         <ClientBookingFrame journey={journeyProps} workspaceId={effectiveWorkspace?.id} salonName={connectedSalonBadgeLabel}
           scrollRef={renderedTab === activeRenderedTab ? scrollRef : undefined} scrollNativeID={isWeb ? FRONTEND_BOOKING_SCROLL_HOST_DOM_ID : undefined}
-          noteEditing={nativeBookingNote.active} noteClearance={nativeBookingNote.clearance} onNoteLayout={nativeBookingNote.reveal}
+          noteEditing={nativeBookingNote.active} onNoteLayout={nativeBookingNote.reveal}
           onScrollY={value => { if (renderedTab === activeRenderedTab) lastFrontendScrollYRef.current = value; }}
           shop={isRegistered && normalizedSelectedSalonCode ? <ClientShop compactEntry headerEntry key={`booking-header-shop-${normalizedSelectedSalonCode}-${profile.email}-${profile.telefono}`} identity={{ salonCode: normalizedSelectedSalonCode, email: profile.email, phone: profile.telefono }} /> : undefined} />
       </PremiumTabTransition>;
@@ -32038,7 +32038,6 @@ function ClienteFrontendScreenContent({ nativeInitialTab }: ClienteFrontendScree
                     !isWeb && {
                       paddingBottom: isFrontendBookingTab ? frontendClientBookingSubmitBottomPadding : CLIENT_NAVIGATION_HEIGHT + Math.max(safeAreaInsets.bottom, 8) + 24,
                     },
-                  !isWeb && isFrontendBookingTab && nativeBookingNote.active && { paddingBottom: frontendClientBookingSubmitBottomPadding + nativeBookingNote.clearance },
                   isWeb && styles.frontendWebScrollContent,
                   isWeb && !isRegistered && styles.frontendAuthWebScrollContent,
                   isWeb &&
@@ -33590,7 +33589,9 @@ function ClienteFrontendScreenContent({ nativeInitialTab }: ClienteFrontendScree
       <KeyboardAvoidingView
         style={styles.container}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 18 : 0}
+        // Negative: the content runs a little under the keyboard, so its rounded top edge covers
+        // the viewport's straight cut instead of leaving a clipped strip above it.
+        keyboardVerticalOffset={Platform.OS === 'ios' ? -28 : 0}
         enabled={Platform.OS === 'ios'}
       >
         {isRegistered ? <AccessBackdrop /> : null}

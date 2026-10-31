@@ -13,6 +13,12 @@
         "RCT_USE_PREBUILT_RNCORE": "0"
       }
     },
+    "development-simulator": {
+      "extends": "development",
+      "ios": {
+        "simulator": true
+      }
+    },
     "preview": {
       "distribution": "internal",
       "env": {

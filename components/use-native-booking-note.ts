@@ -4,7 +4,7 @@ import { Keyboard, Platform, type GestureResponderEvent, type ScrollView, type T
 const NOTE_BELOW_ROW = 56;
 const NOTE_KEYBOARD_GAP = 10;
 
-/** Only the booking note requests extra keyboard clearance and a reversible scroll. */
+/** Only the booking note requests a reversible scroll that keeps it above the keyboard. */
 export function useNativeBookingNote(scroll: RefObject<ScrollView | null>, scrollY: RefObject<number>) {
   const input = useRef<TextInput | null>(null);
   const origin = useRef<number | null>(null);
@@ -12,7 +12,6 @@ export function useNativeBookingNote(scroll: RefObject<ScrollView | null>, scrol
   const bounds = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [active, setActive] = useState(false);
-  const [clearance, setClearance] = useState(0);
   const animatingUntil = useRef(0);
   const settleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reveal = useCallback(() => {
@@ -29,7 +28,12 @@ export function useNativeBookingNote(scroll: RefObject<ScrollView | null>, scrol
       if (input.current !== node || origin.current === null) return;
       bounds.current = { x, y, width, height };
       const top = keyboardTop.current;
-      if (top === null) return;
+      if (top === null) {
+        // Hiding the dock resizes the viewport before the keyboard arrives and iOS can briefly clamp
+        // the offset: hold the page where it was until the keyboard position is known.
+        if (scrollY.current < origin.current - 4) scroll.current?.scrollTo({ y: origin.current, animated: false });
+        return;
+      }
       // The field plus the row right under it sit just above the keyboard.
       const delta = y + height + NOTE_BELOW_ROW - (top - NOTE_KEYBOARD_GAP);
       if (Math.abs(delta) < 4) return;
@@ -48,7 +52,6 @@ export function useNativeBookingNote(scroll: RefObject<ScrollView | null>, scrol
     bounds.current = null;
     keyboardTop.current = null;
     setActive(false);
-    setClearance(0);
     if (timer.current) clearTimeout(timer.current);
     if (settleTimer.current) { clearTimeout(settleTimer.current); settleTimer.current = null; }
     animatingUntil.current = 0;
@@ -63,7 +66,6 @@ export function useNativeBookingNote(scroll: RefObject<ScrollView | null>, scrol
     const showNote = (event: import('react-native').KeyboardEvent) => {
       keyboardTop.current = event.endCoordinates.screenY;
       if (origin.current === null) return;
-      setClearance(event.endCoordinates.height + 32);
       if (timer.current) clearTimeout(timer.current);
       timer.current = setTimeout(() => { timer.current = null; reveal(); }, 80);
     };
@@ -82,7 +84,7 @@ export function useNativeBookingNote(scroll: RefObject<ScrollView | null>, scrol
     input.current = node;
     setActive(true);
     const metrics = Keyboard.metrics();
-    if (metrics) { keyboardTop.current = metrics.screenY; setClearance(metrics.height + 32); }
+    if (metrics) keyboardTop.current = metrics.screenY;
     reveal();
   }, [reveal, scrollY]);
   const onBlur = useCallback(() => {
@@ -102,5 +104,5 @@ export function useNativeBookingNote(scroll: RefObject<ScrollView | null>, scrol
       }
     });
   }, []);
-  return { active, clearance, onFocus, onBlur, onTouchStart, reveal };
+  return { active, onFocus, onBlur, onTouchStart, reveal };
 }

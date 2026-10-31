@@ -24,10 +24,10 @@ export function ClientBookingHeader({ workspaceId, salonName, shop, children }: 
 }
 
 /** Native content continues behind the fixed dock, and stops before the clear navigation area. */
-export function ClientBookingFrame({ journey, workspaceId, salonName, shop, scrollRef, scrollNativeID, onScrollY, noteEditing = false, noteClearance = 0, onNoteLayout }: {
+export function ClientBookingFrame({ journey, workspaceId, salonName, shop, scrollRef, scrollNativeID, onScrollY, noteEditing = false, onNoteLayout }: {
   journey: ClientBookingJourneyProps; workspaceId?: string; salonName: string; shop?: ReactNode;
   scrollRef?: RefObject<ScrollView | null>; scrollNativeID?: string; onScrollY?: (y: number) => void;
-  noteEditing?: boolean; noteClearance?: number; onNoteLayout?: () => void;
+  noteEditing?: boolean; onNoteLayout?: () => void;
 }) {
   const layout = useClientBookingLayout();
   const native = Platform.OS !== 'web';
@@ -70,12 +70,14 @@ export function ClientBookingFrame({ journey, workspaceId, salonName, shop, scro
   return <View {...(Platform.OS === 'web' ? { dataSet: { bookingFrame: 'true' } } : {})} style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: 'hidden', paddingLeft: layout.desktop ? 224 : 0, ...(Platform.OS === 'web' ? { height: layout.height, maxHeight: layout.height } : {}) }}>
     <ClientBookingHeader workspaceId={workspaceId} salonName={salonName} shop={shop}><ClientBookingProgress {...journey} /></ClientBookingHeader>
     <ScrollView key={journey.pages[journey.page].key} ref={activeScrollRef} nativeID={scrollNativeID} {...(Platform.OS === 'web' ? { dataSet: { bookingScroll: 'true' } } : {})}
-      style={{ flex: 1, minHeight: 0, ...(native ? { marginBottom: editingNote ? 0 : layout.navigationSpace + nativeDockCornerClearance, overflow: 'hidden' } : {}) }} contentContainerStyle={{ paddingHorizontal: layout.desktop ? 32 : Math.max(20, layout.insets.left, layout.insets.right), paddingTop: 0, paddingBottom: 24 + (editingNote ? noteClearance : native ? nativeDockHeight : 0) }}
+      // Writing the note hides the dock and its margin: the padding takes their place so the content
+      // never gets shorter, otherwise iOS clamps the offset and the field drops behind the keyboard.
+      style={{ flex: 1, minHeight: 0, ...(native ? { marginBottom: editingNote ? 0 : layout.navigationSpace + nativeDockCornerClearance, overflow: 'hidden' } : {}) }} contentContainerStyle={{ paddingHorizontal: layout.desktop ? 32 : Math.max(20, layout.insets.left, layout.insets.right), paddingTop: 0, paddingBottom: 24 + (native ? nativeDockHeight : 0) + (editingNote ? layout.navigationSpace + nativeDockCornerClearance : 0) }}
       showsVerticalScrollIndicator indicatorStyle="default" keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" contentInsetAdjustmentBehavior="never" automaticallyAdjustKeyboardInsets={false} scrollEventThrottle={16}
       onLayout={event => { viewportHeight.current = event.nativeEvent.layout.height; revealIncluded(includedKey); if (editingNote) onNoteLayout?.(); }}
       onContentSizeChange={() => { if (editingNote) onNoteLayout?.(); }}
       onScroll={event => { scrollPosition.current = event.nativeEvent.contentOffset.y; onScrollY?.(scrollPosition.current); }}>
-      <ClientBookingJourney {...journey} noteEditing={editingNote} hideProgress onIncludedServicesLayout={(y, height) => { includedLayout.current = { key: includedKey, y, height }; revealIncluded(includedKey); }} />
+      <ClientBookingJourney {...journey} hideProgress onIncludedServicesLayout={(y, height) => { includedLayout.current = { key: includedKey, y, height }; revealIncluded(includedKey); }} />
     </ScrollView>
     {!editingNote ? <View onLayout={native ? event => { const height = event.nativeEvent.layout.height; nativeDockHeightRef.current = height; setNativeDockHeight(height); revealIncluded(includedKey); } : undefined}
       style={{ paddingHorizontal: layout.desktop ? 32 : Math.max(12, layout.insets.left, layout.insets.right), paddingTop: 8, paddingBottom: native ? 0 : layout.navigationSpace, ...(native ? { position: 'absolute', left: 0, right: 0, bottom: layout.navigationSpace } : {}) }}><ClientBookingJourneyDock {...journey} inline /></View> : null}
