@@ -537,11 +537,9 @@ export const calculateOwnerUnreadAgendaCount = (
     if (normalizeText(item.operator_change_status) === 'pending') {
       return false;
     }
-    // Pending requests remain actionable until handled. Accepted customer
-    // bookings stay visible only until the salon reads the new booking.
-    return status === 'pending' ||
-      ((status === 'accepted' || status === 'auto_accepted') &&
-        item.viewed_by_salon !== true);
+    // Agenda counts only what still needs a decision. Accepted bookings (manual
+    // or automatic) are news, not work: they stay in the Richieste badge until read.
+    return status === 'pending';
   }).length;
 };
 

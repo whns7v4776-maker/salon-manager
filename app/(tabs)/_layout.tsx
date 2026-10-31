@@ -2683,14 +2683,9 @@ function BottomTabBar({
 
   const localAgendaPendingRequestsCount = ownerTabBadgeDataReady
     ? countOwnerLogicalBookingEvents(
-        [
-          ...ownerLivePendingFrontendRequests,
-          ...ownerUnreadFrontendRequestEvents.filter(
-            (item) =>
-              (item.origine ?? "frontend") === "frontend" &&
-              item.stato === "Accettata",
-          ),
-        ].filter(
+        // Solo ciò che è ancora da approvare: le prenotazioni già accettate
+        // (anche in automatico) restano nel badge di Richieste finché non lette.
+        [...ownerLivePendingFrontendRequests].filter(
           (item) =>
             !isCustomerCancellationRequestEvent(item) &&
             !isAutoacceptVisualTrackedEvent(item) &&

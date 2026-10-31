@@ -157,9 +157,9 @@ const scenarios = [
   ['unpaid stale accepted hold', { payment_hold_state: 'awaiting_payment' }, { requests: 0, agenda: 0 }],
   ['expired hold is not a cancellation', { status: 'cancelled', payment_hold_state: 'expired', cancellation_source: 'cliente' }, { requests: 0, agenda: 0, cancellations: 0, responses: 0 }],
   ['paid manual request', { status: 'pending', payment_hold_state: 'paid' }, { requests: 1, agenda: 1 }],
-  ['paid automatic booking', { payment_hold_state: 'paid' }, { requests: 1, agenda: 1 }],
-  ['accepted customer booking', {}, { requests: 1, agenda: 1 }],
-  ['automatic acceptance alias', { status: 'auto_accepted' }, { requests: 1, agenda: 1 }],
+  ['paid automatic booking', { payment_hold_state: 'paid' }, { requests: 1, agenda: 0 }],
+  ['accepted customer booking', {}, { requests: 1, agenda: 0 }],
+  ['automatic acceptance alias', { status: 'auto_accepted' }, { requests: 1, agenda: 0 }],
   ['read accepted booking', { viewed_by_salon: true }, { requests: 0, agenda: 0 }],
   ['read automatic booking', { status: 'auto_accepted', viewed_by_salon: true }, { requests: 0, agenda: 0 }],
   ['manual pending', { status: 'pending' }, { requests: 1, agenda: 1 }],
@@ -168,15 +168,15 @@ const scenarios = [
   ['accepted with customer-pending operator change', { operator_change_status: 'pending' }, { requests: 0, agenda: 0 }],
   ['backoffice accepted creation', { origin: 'backoffice' }, { requests: 0, agenda: 0 }],
   ['backoffice pending creation', { origin: 'backoffice', status: 'pending' }, { requests: 0, agenda: 0 }],
-  ['legacy absent origin', { origin: null }, { requests: 1, agenda: 1 }],
-  ['null viewed flag is unread', { viewed_by_salon: null }, { requests: 1, agenda: 1 }],
-  ['old unseen accepted remains reachable', { appointment_date: '2026-08-03', created_at: '2026-08-03T08:00:00Z' }, { requests: 1, agenda: 1 }],
+  ['legacy absent origin', { origin: null }, { requests: 1, agenda: 0 }],
+  ['null viewed flag is unread', { viewed_by_salon: null }, { requests: 1, agenda: 0 }],
+  ['old unseen accepted remains reachable', { appointment_date: '2026-08-03', created_at: '2026-08-03T08:00:00Z' }, { requests: 1, agenda: 0 }],
   ['frontend customer cancellation', { status: 'cancelled', cancellation_source: 'cliente' }, { requests: 1, agenda: 0, cancellations: 1 }],
   ['backoffice customer cancellation', { origin: 'backoffice', status: 'cancelled', cancellation_source: 'customer' }, { requests: 1, agenda: 0, cancellations: 1 }],
   ['read cancellation', { status: 'cancelled', cancellation_source: 'cliente', viewed_by_salon: true }, { requests: 0, agenda: 0, cancellations: 0 }],
   ['salon cancellation', { status: 'cancelled', cancellation_source: 'salone' }, { requests: 0, agenda: 0, cancellations: 0 }],
   ['salon rejection', { status: 'rejected' }, { requests: 0, agenda: 0 }],
-  ['accepted operator response', { operator_change_status: 'accepted' }, { requests: 1, agenda: 1, responses: 1 }],
+  ['accepted operator response', { operator_change_status: 'accepted' }, { requests: 1, agenda: 0, responses: 1 }],
   ['backoffice accepted operator response', { origin: 'backoffice', operator_change_status: 'accepted' }, { requests: 1, agenda: 0, responses: 1 }],
   ['rejected operator response', { status: 'cancelled', operator_change_status: 'rejected', cancellation_source: 'salone' }, { requests: 1, agenda: 0, responses: 1 }],
   ['expired operator response', { origin: 'backoffice', status: 'cancelled', operator_change_status: 'expired', cancellation_source: 'salone' }, { requests: 1, agenda: 0, responses: 1 }],
@@ -188,18 +188,19 @@ for (const status of ['pending', 'accepted', 'auto_accepted', 'cancelled']) {
   const phases = [row({ appointment_group_id: 'group-1', status, cancellation_source: 'cliente' }),
     row({ appointment_group_id: 'group-1', status, cancellation_source: 'cliente' }),
     row({ appointment_group_id: 'group-1', status, cancellation_source: 'cliente' })];
-  const expected = { requests: 1, agenda: status === 'cancelled' ? 0 : 1 };
+  // Agenda counts only decisions still open; accepted bookings are Richieste news.
+  const expected = { requests: 1, agenda: status === 'pending' ? 1 : 0 };
   assertCounts(`${status}: three linked phases`, phases, expected);
   phases[0].viewed_by_salon = true;
   assertCounts(`${status}: partly read linked phases`, phases, expected);
   phases.forEach((item) => { item.viewed_by_salon = true; });
   assertCounts(`${status}: all linked phases read`, phases, { requests: 0, agenda: status === 'pending' ? 1 : 0 });
 }
-assertCounts('independent same-slot bookings', [row(), row()], { requests: 2, agenda: 2 });
+assertCounts('independent same-slot bookings', [row(), row()], { requests: 2, agenda: 0 });
 assertCounts('latest accepted replaces stale pending phase', [
   row({ appointment_group_id: 'mixed', status: 'pending', updated_at: '2026-10-08T08:00:00Z' }),
   row({ appointment_group_id: 'mixed', status: 'accepted', updated_at: '2026-10-08T08:01:00Z' }),
-], { requests: 1, agenda: 1 });
+], { requests: 1, agenda: 0 });
 assertCounts('latest salon cancellation removes stale pending phase', [
   row({ appointment_group_id: 'mixed', status: 'pending', updated_at: '2026-10-08T08:00:00Z' }),
   row({ appointment_group_id: 'mixed', status: 'cancelled', cancellation_source: 'salone', updated_at: '2026-10-08T08:01:00Z' }),
@@ -238,7 +239,7 @@ for (const origin of ['frontend', 'backoffice', null]) {
   const identity = { audience: 'owner', workspaceId };
   const before = await app.fetchUnreadBadgeSnapshot(identity);
   assert.equal(before.unreadCountsBySection.prenotazioni, 5);
-  assert.equal(before.unreadCountsBySection.agenda, 2);
+  assert.equal(before.unreadCountsBySection.agenda, 1); // only the pending request: auto-accepted phases are Richieste news
   assert.equal(before.unreadCountsBySection.cancellazioni, 1);
   assert.equal(before.unreadCountsBySection.risposteCambioOperatore, 2);
   assert.equal(before.unreadCountsBySection.clienti, 1);
