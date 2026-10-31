@@ -34,6 +34,9 @@ export function nativeServicesStyles<T extends Record<string,any>>(base:T,p:Retu
   for(const key of ['successDialogTitle','successDialogBody','successDialogEyebrow'])set(key,{color:key==='successDialogBody'?p.muted:p.ink});
   for(const key of ['successDialogButton'])set(key,{backgroundColor:p.action,borderColor:p.action,minHeight:46,borderRadius:12,marginTop:16});
   set('successDialogButtonText',{color:p.actionText});
+  // An off switch on the field colour vanished with its white knob: give the track its own tone.
+  set('serviceOnlineToggle',{backgroundColor:p.night?'#777773':'#AAA7A1'});
+  set('serviceOnlineToggleKnob',{backgroundColor:'#F7F3EB'});
   for(const key of ['successDialogIconWrapService','successDialogIconWrapOperator'])set(key,{backgroundColor:p.night?'#344238':'#E2E9DB'});
   return result;
 }

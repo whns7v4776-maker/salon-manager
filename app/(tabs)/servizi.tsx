@@ -5,6 +5,7 @@ import { PremiumSearchToolbar } from '../../components/ui/premium-search-toolbar
 import { TABLET_MODAL_ORIENTATIONS } from '../../src/lib/tablet-modal-orientations';
 import {NativePremiumScope, NativeReadableText as Text, NativeSectionHeader, NativePremiumIcon as Ionicons} from '../../components/owner-native-premium';
 import { useAccessAppearance } from '../../components/access-premium';
+import { NativeMedal } from '../../components/owner-premium-native-home';
 import {compositionDragOffset,compositionDragTarget,compositionSiblingOffset,moveCompositionItem,type CompositionDragRow} from '../../src/lib/composition-drag-layout';
 import { ServicesNativeComposition } from '../../components/services-native-composition';
 import { NativeServiceEditor, NativeOperatorEditor } from '../../components/services-native-editors';
@@ -1451,6 +1452,13 @@ function ServiceClientBadgeEditor({
   );
 }
 
+// The option cards use the editor's medal so their icon keeps a colour on the light theme,
+// where the native palette flattens the old solid icon boxes to the field colour.
+function ServiceOptionMedal({ icon, night, day }: { icon: React.ComponentProps<typeof NativeMedal>['icon']; night: string; day: string }) {
+  const { palette } = useAccessAppearance();
+  return <NativeMedal icon={icon} size={38} iconSize={17} accent={palette.night ? night : day} />;
+}
+
 function ServiceOnlineAvailabilityEditor({
   value,
   onChange,
@@ -1472,18 +1480,7 @@ function ServiceOnlineAvailabilityEditor({
         !value && styles.serviceOnlineEditorOffline,
       ]}
     >
-      <View
-        style={[
-          styles.serviceOnlineEditorIcon,
-          !value && styles.serviceOnlineEditorIconOffline,
-        ]}
-      >
-        <Ionicons
-          name={value ? 'globe-outline' : 'archive-outline'}
-          size={18}
-          color="#FFFFFF"
-        />
-      </View>
+      <ServiceOptionMedal icon={value ? 'globe-outline' : 'archive-outline'} night={value ? '#86C2BE' : '#C9AA8C'} day={value ? '#3E7C7A' : '#7E6247'} />
       <View style={styles.serviceOnlineEditorCopy}>
         <Text style={styles.serviceOnlineEditorTitle}>Disponibile online</Text>
         <Text style={styles.serviceOnlineEditorSubtitle}>
@@ -1596,9 +1593,7 @@ function ServicePhaseEditor({
   return (
     <View style={[styles.servicePhaseEditor, compact && styles.servicePhaseEditorCompact]}>
       {Platform.OS==='web'?<ServicesOptionRow title="Servizio con tempo di posa" description="Prevede una pausa tra le fasi di lavoro." value={enabled} onChange={onEnabledChange}/>:(<View style={styles.servicePhaseHeader}>
-        <View style={styles.servicePhaseIcon}>
-          <Ionicons name="hourglass-outline" size={18} color="#FFFFFF" />
-        </View>
+        <ServiceOptionMedal icon="hourglass-outline" night="#D6B27A" day="#8C6A35" />
         <View style={styles.servicePhaseHeaderCopy}>
           <Text style={styles.servicePhaseTitle}>Servizio con tempo di posa</Text>
           <Text style={styles.servicePhaseSubtitle}>
@@ -1847,9 +1842,7 @@ function ServiceDependenciesEditor({
       ]}
     >
       {Platform.OS==='web'?<ServicesOptionRow title="Servizi collegati" description="Associa altri servizi alla prenotazione." value={enabled} onChange={onEnabledChange}/>:(<View style={styles.servicePhaseHeader}>
-        <View style={styles.serviceDependenciesIcon}>
-          <Ionicons name="git-branch-outline" size={18} color="#FFFFFF" />
-        </View>
+        <ServiceOptionMedal icon="git-branch-outline" night="#A9ABD9" day="#5B5E9A" />
         <View style={styles.servicePhaseHeaderCopy}>
           <Text style={styles.servicePhaseTitle}>Servizi con dipendenze</Text>
           <Text style={styles.servicePhaseSubtitle}>
