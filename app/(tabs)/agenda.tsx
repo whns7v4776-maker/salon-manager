@@ -48317,7 +48317,7 @@ accessibilityHint={
                                             }
                                             disabled={!laneSalonCanQuickBook}
                                           >
-{!isLunchBreakSlot && (isPastFreeSlot || isClosedDay) && (weekBaseSlotInterval >= 15 || timeToMinutes(slotTime) % 15 === 0) ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaStateLabel label={isClosedDay?'Chiuso':'Passato'} action={laneSalonCanQuickBook}/></View>:null}{isCurrentSlotToday && !isPastFreeSlot && !isClosedDay && !isLunchBreakSlot ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaLiveSlotLabel action={laneSalonCanQuickBook}/></View>:null}
+{!isLunchBreakSlot && (isPastFreeSlot || isClosedDay || isLaneVisuallyDisabled) && (weekBaseSlotInterval >= 15 || timeToMinutes(slotTime) % 15 === 0) ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaStateLabel label={isClosedDay||isLaneVisuallyDisabled?'Chiuso':'Passato'} action={laneSalonCanQuickBook&&!isLaneVisuallyDisabled}/></View>:null}{isCurrentSlotToday && !isPastFreeSlot && !isClosedDay && !isLunchBreakSlot ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaLiveSlotLabel action={laneSalonCanQuickBook}/></View>:null}
                                             {laneDragPreview &&
                                             !laneOccupyingAppointment ? null : laneSalonCanQuickBook &&
                                               !laneQuickBookAvailable &&
@@ -48553,7 +48553,7 @@ null
                                             }
                                           >
                                             {(isPastFreeSlot || isLaneVisuallyDisabled || isClosedDay || isLaneOutsideScheduleSlot || laneCellState === 'outside' || (laneCellState === 'blocked' && !isLunchBreakSlot)) ? <NativeAgendaUnavailable night={availabilityPalette.night} phase={rowIndex + laneIndex}/> : null}
-{!isLunchBreakSlot && (isPastFreeSlot || isClosedDay) && (weekBaseSlotInterval >= 15 || timeToMinutes(slotTime) % 15 === 0) ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaStateLabel label={isClosedDay?'Chiuso':'Passato'} action={laneSalonCanQuickBook}/></View>:null}{isCurrentSlotToday && !isPastFreeSlot && !isClosedDay && !isLunchBreakSlot ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaLiveSlotLabel action={laneSalonCanQuickBook}/></View>:null}
+{!isLunchBreakSlot && (isPastFreeSlot || isClosedDay || isLaneVisuallyDisabled) && (weekBaseSlotInterval >= 15 || timeToMinutes(slotTime) % 15 === 0) ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaStateLabel label={isClosedDay||isLaneVisuallyDisabled?'Chiuso':'Passato'} action={laneSalonCanQuickBook&&!isLaneVisuallyDisabled}/></View>:null}{isCurrentSlotToday && !isPastFreeSlot && !isClosedDay && !isLunchBreakSlot ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaLiveSlotLabel action={laneSalonCanQuickBook}/></View>:null}
                                             {laneDragPreview &&
                                             !laneOccupyingAppointment ? null : laneSalonCanQuickBook &&
                                               !laneQuickBookAvailable &&
