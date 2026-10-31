@@ -6,7 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import React from 'react';
 import { withClientDeadline } from '../src/lib/client-request-deadline';
-import { ActivityIndicator, Alert, AppState, Platform, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, AppState, Linking, Platform, StyleSheet, Text, View } from 'react-native';
 import { IosSimpleTouchable as TouchableOpacity } from "./ui/ios-simple-touchable";
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type {
@@ -17,6 +17,7 @@ import type {
 import { useAppContext } from '../src/context/AppContext';
 import {
   configureRevenueCat,
+  formatStoreTrialPeriod,
   getActiveProEntitlement,
   getRevenueCatAppUserId,
   getRevenueCatCustomerInfo,
@@ -35,10 +36,13 @@ import {
   SALON_PRO_FOUNDER_YEARLY_PRICE_LABEL,
   SALON_PRO_FULL_PRICE_LABEL,
   SALON_PRO_FULL_YEARLY_PRICE_LABEL,
+  SALON_PRO_TESTER_TRIAL_LABEL,
 } from '../src/lib/revenuecat';
 import { supabase } from '../src/lib/supabase';
 
 const salonProLogo = require('../assets/images/salon-pro-logo-ui.png');
+const TESTER_CONTACT_LABEL = 'Instagram @salonpro13';
+const TESTER_CONTACT_URL = 'https://ig.me/m/salonpro13';
 
 const getFounderDisplayPrice = (
   _purchasePackage: PurchasesPackage | null,
@@ -185,6 +189,12 @@ export function OwnerSubscriptionPaywall({ onDevContinue, onActivationTransition
         ? 'activation_required'
         : 'subscription_expired';
   const isWeb = Platform.OS === 'web';
+  const activationMessage =
+    paywallMode !== 'activation_required'
+      ? 'L’abbonamento è stato riattivato.'
+      : founderOfferAvailable
+        ? `Benvenuto tra i saloni tester. Per configurare il salone o chiedere una funzione scrivici su ${TESTER_CONTACT_LABEL}: ti risponde una persona del team. Prezzo, prova e rinnovo sono indicati nello store.`
+        : 'Attivazione confermata. Prezzo, eventuale prova e rinnovo sono indicati nello store.';
 
   const waitForServerActivation = React.useCallback(async () => {
     const maxAttempts = 15;
@@ -237,7 +247,7 @@ export function OwnerSubscriptionPaywall({ onDevContinue, onActivationTransition
         setConfigurationIssue(
           Platform.OS === 'web'
             ? paywallMode === 'activation_required'
-              ? 'Per avviare il mese gratuito, accedi dall’app SalonPro su iPhone o Android con questo stesso account.'
+              ? 'Per avviare la prova gratuita, accedi dall’app SalonPro su iPhone o Android con questo stesso account.'
               : 'Per riattivare SalonPro, accedi dall’app su iPhone o Android con questo stesso account.'
             : 'Gli acquisti automatici sono disponibili nelle app iOS e Android.'
         );
@@ -384,11 +394,7 @@ export function OwnerSubscriptionPaywall({ onDevContinue, onActivationTransition
       const result = await purchaseSalonProPackage(packageToBuy);
       const active = await syncActiveCustomerInfo(result.customerInfo);
       if (active) {
-        await confirmActivation(
-          paywallMode === 'activation_required'
-            ? 'Attivazione confermata. Prezzo, eventuale prova e rinnovo sono indicati nello store.'
-            : 'L’abbonamento è stato riattivato.'
-        );
+        await confirmActivation(activationMessage);
       }
     } catch (error) {
       const maybeCancelled = error as { userCancelled?: boolean; message?: string };
@@ -399,11 +405,7 @@ export function OwnerSubscriptionPaywall({ onDevContinue, onActivationTransition
           if (hasActiveProEntitlement(refreshedCustomerInfo)) {
             const active = await syncActiveCustomerInfo(refreshedCustomerInfo);
             if (active) {
-              await confirmActivation(
-                paywallMode === 'activation_required'
-                  ? 'Attivazione confermata. Prezzo, eventuale prova e rinnovo sono indicati nello store.'
-                  : 'L’abbonamento è stato riattivato.'
-              );
+              await confirmActivation(activationMessage);
               return;
             }
           }
@@ -418,6 +420,12 @@ export function OwnerSubscriptionPaywall({ onDevContinue, onActivationTransition
       onActivationTransition?.(false);
       setBusyAction(null);
     }
+  };
+
+  const openTesterContact = () => {
+    void Linking.openURL(TESTER_CONTACT_URL).catch(() => {
+      setFeedback(`Scrivici su ${TESTER_CONTACT_LABEL}.`);
+    });
   };
 
   const handleRestore = async () => {
@@ -486,10 +494,21 @@ export function OwnerSubscriptionPaywall({ onDevContinue, onActivationTransition
       ? annualPackage
       : monthlyPackage;
   const selectedProductId = selectedPackage?.product.identifier ?? '';
-  const trialEligibleForSelectedPlan =
+  // La durata della prova arriva dal prodotto dello store: cambiarla in App
+  // Store Connect o Play Console aggiorna i testi senza una nuova build.
+  const iosIntroPrice = selectedPackage?.product.introPrice;
+  const androidFreePhase = selectedPackage?.product.defaultOption?.freePhase;
+  const selectedFreeTrialPeriod =
     Platform.OS === 'ios'
-      ? trialEligibility[selectedProductId] === true && selectedPackage?.product.introPrice?.price === 0 && selectedPackage.product.introPrice.period === 'P1M'
-      : selectedPackage?.product.defaultOption?.freePhase?.billingPeriod?.iso8601 === 'P1M';
+      ? trialEligibility[selectedProductId] === true && iosIntroPrice?.price === 0
+        ? formatStoreTrialPeriod(iosIntroPrice.period, iosIntroPrice.cycles)
+        : null
+      : formatStoreTrialPeriod(
+          androidFreePhase?.billingPeriod?.iso8601,
+          androidFreePhase?.billingCycleCount ?? 1
+        );
+  const trialEligibleForSelectedPlan = selectedFreeTrialPeriod !== null;
+  const trialLabel = selectedFreeTrialPeriod ?? SALON_PRO_TESTER_TRIAL_LABEL;
   const canStartFreeTrial =
     paywallMode === 'activation_required' && trialEligibleForSelectedPlan;
   const monthlyPrice = loading && (isWeb || !monthlyPackage)
@@ -515,24 +534,31 @@ export function OwnerSubscriptionPaywall({ onDevContinue, onActivationTransition
   const selectedPeriodLabel = selectedBillingPeriod === 'annual' ? 'annuale' : 'mensile';
   const canUseLocalActivation = __DEV__ && !isWeb && !!onDevContinue;
   const shouldShowConfigurationIssue = configurationIssue && !canUseLocalActivation && !isWeb;
+  const testerProgramOpen = founderOfferAvailable && paywallMode === 'activation_required';
   const titleText =
     paywallMode === 'trial_expired'
-      ? 'Il mese gratuito è terminato'
+      ? 'La prova gratuita è terminata'
       : paywallMode === 'subscription_expired'
         ? 'Abbonamento scaduto'
-        : 'Il tuo salone, organizzato.';
+        : testerProgramOpen
+          ? 'Diventa un salone tester'
+          : 'Il tuo salone, organizzato.';
   const subtitleText =
     paywallMode === 'trial_expired'
       ? 'Per continuare a usare SalonPro, riattiva il piano scelto. I dati del salone restano al sicuro.'
       : paywallMode === 'subscription_expired'
         ? 'L’accesso al gestionale è sospeso. Riattiva l’abbonamento per continuare senza perdere i dati.'
-        : !trialEligibleForSelectedPlan
-          ? 'Scegli il piano più adatto a te. Condizioni confermate nello store.'
-          : 'Un mese gratuito per scoprire SalonPro.';
+        : testerProgramOpen
+          ? trialEligibleForSelectedPlan
+            ? `Usa SalonPro gratis per ${trialLabel} nel tuo salone, con una persona del team che ti segue.`
+            : 'Prezzo di lancio riservato ai primi 100 saloni, con una persona del team che ti segue.'
+          : !trialEligibleForSelectedPlan
+            ? 'Scegli il piano più adatto a te. Condizioni confermate nello store.'
+            : `${trialLabel} gratis per scoprire SalonPro.`;
   const trialPillText =
     paywallMode === 'activation_required'
       ? trialEligibleForSelectedPlan
-        ? 'Un mese gratuito'
+        ? `${trialLabel} gratis`
         : 'Condizioni store'
       : paywallMode === 'trial_expired'
         ? 'Prova terminata'
@@ -540,10 +566,14 @@ export function OwnerSubscriptionPaywall({ onDevContinue, onActivationTransition
   const primaryActionLabel =
     paywallMode === 'activation_required'
       ? canStartFreeTrial
-        ? 'Inizia il mese gratuito'
+        ? `Inizia ${trialLabel} gratis`
         : `Continua con il piano ${selectedPeriodLabel}`
       : `Riattiva SalonPro ${selectedPeriodLabel}`;
-  const priceNote = founderOfferAvailable ? 'Prezzo lancio primi 100' : 'Prezzo standard';
+  const priceNote = founderOfferAvailable ? 'Prezzo di lancio bloccato' : 'Prezzo standard';
+  const selectedPrice = selectedBillingPeriod === 'monthly' ? monthlyPrice : annualPrice;
+  const paymentDisclosureText = canStartFreeTrial
+    ? `Gratis per ${trialLabel}, poi ${selectedPrice}${founderOfferAvailable ? ', prezzo bloccato finché resti abbonato' : ''}. Rinnovo automatico: puoi disdire dallo store fino a 24 ore prima della fine della prova.`
+    : 'Rinnovo automatico. Prezzi e condizioni confermati nello store.';
 
   return (
     <SafeAreaView style={styles.screen}>
@@ -568,7 +598,7 @@ export function OwnerSubscriptionPaywall({ onDevContinue, onActivationTransition
             <View style={styles.brandMetaRow}>
               <View style={styles.founderPill}>
                 <Text style={styles.founderPillText}>
-                  {founderOfferAvailable ? 'Offerta lancio' : 'Prezzo standard'}
+                  {founderOfferAvailable ? 'Prezzo di lancio' : 'Prezzo standard'}
                 </Text>
               </View>
               <View style={styles.trialPill}>
@@ -624,8 +654,7 @@ export function OwnerSubscriptionPaywall({ onDevContinue, onActivationTransition
           )}
 
           {!isWeb && !canUseLocalActivation && <Text style={styles.paymentDisclosure}>
-            {canStartFreeTrial ? `Poi ${selectedBillingPeriod==='monthly'?monthlyPrice:annualPrice}. ` : ''}Rinnovo automatico.
-            {canStartFreeTrial ? ' Prova soggetta a idoneità nello store.' : ' Prezzi e condizioni confermati nello store.'}
+            {paymentDisclosureText}
           </Text>}
           </View>
 
@@ -650,7 +679,7 @@ export function OwnerSubscriptionPaywall({ onDevContinue, onActivationTransition
               {!isWeb && loading && !monthlyPackage ? <SkeletonShimmer accessibilityLabel="Caricamento piano mensile" style={{ height: 40, width: '82%', borderRadius: 10, marginVertical: 8 }} /> : <Text style={[styles.planPrice, selectedBillingPeriod === 'monthly' && styles.planPriceSelected]}>{monthlyPrice}</Text>}
               <Text style={[styles.planNote, selectedBillingPeriod === 'monthly' && styles.planNoteSelected]}>{priceNote}</Text>
               {founderOfferAvailable && standardMonthlyPrice ? (
-                <Text style={[styles.planSubNote, selectedBillingPeriod === 'monthly' && styles.planNoteSelected]}>Fuori promo {standardMonthlyPrice}</Text>
+                <Text style={[styles.planSubNote, selectedBillingPeriod === 'monthly' && styles.planNoteSelected]}>Dopo i primi 100 saloni: {standardMonthlyPrice}</Text>
               ) : null}
             </TouchableOpacity>
 
@@ -701,11 +730,34 @@ export function OwnerSubscriptionPaywall({ onDevContinue, onActivationTransition
                     selectedBillingPeriod === 'annual' && styles.planNoteSelected,
                   ]}
                 >
-                  Fuori promo {standardAnnualPrice}
+                  Dopo i primi 100 saloni: {standardAnnualPrice}
                 </Text>
               ) : null}
             </TouchableOpacity>
           </View>
+
+          {testerProgramOpen ? (
+            <View style={styles.testerCard}>
+              <View style={styles.testerTitleRow}>
+                <Ionicons name="people-outline" size={18} color={paywallInk.action} />
+                <Text style={styles.testerTitle}>Una persona vera ti segue</Text>
+              </View>
+              <Text style={styles.testerNote}>
+                Come salone tester hai un contatto diretto con il team SalonPro: ti aiutiamo a
+                configurare il salone e sviluppiamo le funzioni che servono davvero al tuo lavoro.
+              </Text>
+              <TouchableOpacity
+                accessibilityRole="link"
+                activeOpacity={0.75}
+                disabled={!!busyAction}
+                onPress={openTesterContact}
+                style={styles.testerLink}
+              >
+                <Ionicons name="chatbubble-ellipses-outline" size={16} color={paywallInk.action} />
+                <Text style={styles.testerLinkText}>Scrivici su {TESTER_CONTACT_LABEL}</Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
 
           <View style={styles.bullets}>
             <View style={styles.bulletRow}>
@@ -989,6 +1041,45 @@ const basePaywallStyles = StyleSheet.create({
     color: '#475569',
     fontSize: 11,
     fontWeight: '600',
+  },
+  testerCard: {
+    borderRadius: 16,
+    backgroundColor: '#F1F5FA',
+    borderWidth: 1,
+    borderColor: '#DCE5F0',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 18,
+    gap: 6,
+  },
+  testerTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  testerTitle: {
+    flex: 1,
+    color: '#111827',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  testerNote: {
+    color: '#475569',
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: '500',
+  },
+  testerLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    minHeight: 36,
+    alignSelf: 'flex-start',
+  },
+  testerLinkText: {
+    color: '#19365B',
+    fontSize: 13,
+    fontWeight: '800',
   },
   bullets: {
     gap: 8,

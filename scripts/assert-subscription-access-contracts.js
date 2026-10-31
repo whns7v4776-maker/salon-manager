@@ -143,7 +143,7 @@ requirePattern(
 
 requirePattern(
   paywallSource,
-  /Il mese gratuito è terminato/,
+  /La prova gratuita è terminata/,
   'Expired trials must have a specific non-generic message.',
 );
 requirePattern(
@@ -158,8 +158,8 @@ requirePattern(
 );
 requirePattern(
   paywallSource,
-  /canStartFreeTrial[\s\S]*?Inizia il mese gratuito[\s\S]*?Continua con il piano \$\{selectedPeriodLabel\}/,
-  'The paywall must promise the free month only when the store confirms eligibility.',
+  /canStartFreeTrial[\s\S]*?`Inizia \$\{trialLabel\} gratis`[\s\S]*?Continua con il piano \$\{selectedPeriodLabel\}/,
+  'The paywall must promise the free trial only when the store confirms eligibility.',
 );
 requirePattern(
   paywallSource,
@@ -167,10 +167,10 @@ requirePattern(
   'The Italian paywall must not replace its EUR list price with a foreign TestFlight storefront price.',
 );
 for (const priceLabel of [
+  '19,99 €/mese',
   '24,99 €/mese',
-  '29,99 €/mese',
+  '199,99 €/anno',
   '249,99 €/anno',
-  '299,99 €/anno',
 ]) {
   if (!revenueCatSource.includes(priceLabel)) {
     throw new Error(`Missing Italian EUR subscription label: ${priceLabel}`);
@@ -181,7 +181,7 @@ if (/localizedPrice/.test(paywallSource)) {
 }
 requirePattern(
   paywallSource,
-  /const canStartFreeTrial =[\s\S]*?trialEligibleForSelectedPlan[\s\S]*?trialEligibleForSelectedPlan\s*\? 'Un mese gratuito'\s*: 'Condizioni store'[\s\S]*?canStartFreeTrial\s*\? 'Inizia il mese gratuito'\s*: `Continua con il piano/ ,
+  /const canStartFreeTrial =[\s\S]*?trialEligibleForSelectedPlan[\s\S]*?trialEligibleForSelectedPlan\s*\? `\$\{trialLabel\} gratis`\s*: 'Condizioni store'[\s\S]*?canStartFreeTrial\s*\? `Inizia \$\{trialLabel\} gratis`\s*: `Continua con il piano/ ,
   'Only an eligible plan can promise a free trial; other plans must defer to store terms and show a paid-plan action.',
 );
 if (/onClose\s*=|closeButton|close-outline/.test(paywallSource)) {

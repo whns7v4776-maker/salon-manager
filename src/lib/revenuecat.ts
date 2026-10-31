@@ -17,11 +17,34 @@ const REVENUECAT_PRO_ENTITLEMENT_ALIASES = [
 ];
 export const REVENUECAT_FOUNDER_OFFERING_ID = 'founder';
 export const REVENUECAT_STANDARD_OFFERING_ID = 'default';
-export const SALON_PRO_FULL_PRICE_LABEL = '29,99 €/mese';
-export const SALON_PRO_FOUNDER_PRICE_LABEL = '24,99 €/mese';
-export const SALON_PRO_FULL_YEARLY_PRICE_LABEL = '299,99 €/anno';
-export const SALON_PRO_FOUNDER_YEARLY_PRICE_LABEL = '249,99 €/anno';
+// Listino italiano. I primi 100 saloni paganti (offering `founder`) restano al
+// prezzo di lancio finche mantengono l'abbonamento; dopo, i nuovi saloni vedono
+// l'offering `default`. Devono coincidere con i prezzi configurati negli store.
+export const SALON_PRO_FULL_PRICE_LABEL = '24,99 €/mese';
+export const SALON_PRO_FOUNDER_PRICE_LABEL = '19,99 €/mese';
+export const SALON_PRO_FULL_YEARLY_PRICE_LABEL = '249,99 €/anno';
+export const SALON_PRO_FOUNDER_YEARLY_PRICE_LABEL = '199,99 €/anno';
 export const SALON_PRO_FOUNDER_LIMIT = 100;
+// Durata mostrata quando lo store non espone ancora la prova: il paywall usa
+// sempre la durata reale letta dal prodotto quando e' disponibile.
+export const SALON_PRO_TESTER_TRIAL_LABEL = '2 mesi';
+
+const TRIAL_UNIT_LABELS: Record<string, [string, string]> = {
+  D: ['giorno', 'giorni'],
+  W: ['settimana', 'settimane'],
+  M: ['mese', 'mesi'],
+  Y: ['anno', 'anni'],
+};
+
+/** Converte un periodo ISO 8601 dello store (P2M, P8W, P60D) in "2 mesi". */
+export const formatStoreTrialPeriod = (iso8601?: string | null, cycles = 1) => {
+  const match = /^P(\d+)([DWMY])$/i.exec(String(iso8601 ?? '').trim());
+  if (!match) return null;
+  const count = Number(match[1]) * Math.max(1, Math.trunc(cycles) || 1);
+  const labels = TRIAL_UNIT_LABELS[match[2].toUpperCase()];
+  if (!labels || !Number.isFinite(count) || count <= 0) return null;
+  return `${count} ${count === 1 ? labels[0] : labels[1]}`;
+};
 
 type RevenueCatExtra = {
   revenueCatAppleApiKey?: string;

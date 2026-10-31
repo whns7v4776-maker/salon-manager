@@ -38,6 +38,12 @@ import {
   requestWebNotificationPermission,
 } from '../src/lib/push/web-notifications';
 import { useResponsiveLayout } from '../src/lib/responsive';
+import {
+  SALON_PRO_FOUNDER_PRICE_LABEL,
+  SALON_PRO_FOUNDER_YEARLY_PRICE_LABEL,
+  SALON_PRO_FULL_PRICE_LABEL,
+  SALON_PRO_FULL_YEARLY_PRICE_LABEL,
+} from '../src/lib/revenuecat';
 import { supabase } from '../src/lib/supabase';
 import { useSalonShortCode } from '../src/lib/salon-short-code';
 
@@ -135,17 +141,17 @@ const getSubscriptionSummary = (workspace: {
   }
 
   if (trialActive) {
-    const nextPrice = annualLike
+    const nextPrice = `poi ${annualLike
       ? founderPrice
-        ? 'poi 249,99 €/anno'
-        : 'poi 299,99 €/anno'
+        ? SALON_PRO_FOUNDER_YEARLY_PRICE_LABEL
+        : SALON_PRO_FULL_YEARLY_PRICE_LABEL
       : founderPrice
-        ? 'poi 24,99 €/mese'
-        : 'poi 29,99 €/mese';
+        ? SALON_PRO_FOUNDER_PRICE_LABEL
+        : SALON_PRO_FULL_PRICE_LABEL}`;
 
     return {
-      title: annualLike ? 'Mese di prova annuale attivo' : 'Mese di prova mensile attivo',
-      price: `30 giorni gratis, ${nextPrice}`,
+      title: annualLike ? 'Prova gratuita del piano annuale' : 'Prova gratuita del piano mensile',
+      price: `Gratis fino a fine prova, ${nextPrice}`,
       remaining: formatRemainingDays(currentTrialEndsAt),
       renewal: details?.cancelAtPeriodEnd
         ? `Rinnovo annullato: accesso fino al ${formatShortDate(currentTrialEndsAt)}`
@@ -159,11 +165,11 @@ const getSubscriptionSummary = (workspace: {
     title: annualLike ? `${planLabel} annuale attivo` : `${planLabel} mensile attivo`,
     price: annualLike
       ? founderPrice
-        ? '249,99 €/anno'
-        : '299,99 €/anno'
+        ? `${SALON_PRO_FOUNDER_YEARLY_PRICE_LABEL} · prezzo di lancio bloccato`
+        : SALON_PRO_FULL_YEARLY_PRICE_LABEL
       : founderPrice
-        ? '24,99 €/mese'
-        : '29,99 €/mese',
+        ? `${SALON_PRO_FOUNDER_PRICE_LABEL} · prezzo di lancio bloccato`
+        : SALON_PRO_FULL_PRICE_LABEL,
     remaining: formatRemainingDays(workspace.subscriptionEndsAt),
     renewal: details?.cancelAtPeriodEnd
       ? `Rinnovo annullato: accesso fino al ${formatShortDate(workspace.subscriptionEndsAt)}`
