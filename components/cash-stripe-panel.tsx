@@ -1,3 +1,4 @@
+import { CASH_STRIPE_FUNCTION } from '../src/lib/cash-stripe-function';
 import { NativeMedal } from './owner-premium-native-home';
 import { TABLET_MODAL_ORIENTATIONS } from '../src/lib/tablet-modal-orientations';
 import {NativeReadableText as Text, NativePremiumIcon as Ionicons} from './owner-native-premium';
@@ -45,7 +46,7 @@ const confirmedStatuses = new Map<
   }
 >();
 export async function callCashStripe(action: string, movementId?: string) {
-  const { data, error } = await supabase.functions.invoke("cash-stripe", {
+  const { data, error } = await supabase.functions.invoke(CASH_STRIPE_FUNCTION, {
     body: { action, movementId },
     timeout: 30000,
   });

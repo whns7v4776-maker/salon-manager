@@ -1,3 +1,4 @@
+import { CASH_STRIPE_FUNCTION } from '../src/lib/cash-stripe-function';
 import { TABLET_MODAL_ORIENTATIONS } from '../src/lib/tablet-modal-orientations';
 import {CashNativeWorkspace} from '../components/cash-native-workspace';
 import {useCashRefresh} from '../src/lib/use-cash-refresh';
@@ -366,7 +367,7 @@ function CassaContent({
       const period = periodLabel;
       let stripeReport;
       if (stripeAvailable) {
-        const result = await supabase.functions.invoke('cash-stripe', { body: { action: 'report', from: periodRange ? Math.floor(periodRange.from.getTime()/1000) : 0, until: periodRange ? Math.floor(periodRange.until.getTime()/1000) : Math.floor(Date.now()/1000)+1 } });
+        const result = await supabase.functions.invoke(CASH_STRIPE_FUNCTION, { body: { action: 'report', from: periodRange ? Math.floor(periodRange.from.getTime()/1000) : 0, until: periodRange ? Math.floor(periodRange.until.getTime()/1000) : Math.floor(Date.now()/1000)+1 } });
         if (result.error || result.data?.error) throw new Error('Report Stripe non disponibile');
         stripeReport = result.data;
       }

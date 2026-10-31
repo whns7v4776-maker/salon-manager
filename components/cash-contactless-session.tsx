@@ -1,3 +1,4 @@
+import { CASH_STRIPE_FUNCTION } from '../src/lib/cash-stripe-function';
 import { useAccessAppearance } from './access-premium';
 import React,{useEffect,useRef,useState} from 'react';
 import {ActivityIndicator,AppState,Platform,Text,View} from 'react-native';
@@ -10,7 +11,7 @@ import {showTapToPayEducation} from '../src/lib/tap-to-pay-education';
 import {androidContactlessPrerequisite,androidContactlessError} from '../src/lib/android-contactless-readiness';
 
 async function call(action:string,extra:Record<string,unknown>={}) {
- const {data,error}=await supabase.functions.invoke('cash-stripe',{body:{action,...extra},timeout:30000});
+ const {data,error}=await supabase.functions.invoke(CASH_STRIPE_FUNCTION,{body:{action,...extra},timeout:30000});
  if(error || data?.error) {
   let message=data?.error;
   if(!message && error && 'context' in error) { try {message=(await error.context.json()).error;} catch {} }

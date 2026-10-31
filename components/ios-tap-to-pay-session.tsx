@@ -1,3 +1,4 @@
+import { CASH_STRIPE_FUNCTION } from '../src/lib/cash-stripe-function';
 import { TABLET_MODAL_ORIENTATIONS } from '../src/lib/tablet-modal-orientations';
 import React,{createContext,useCallback,useContext,useEffect,useRef,useState,useSyncExternalStore} from 'react';
 import {ActivityIndicator,Alert,AppState,Modal,ScrollView,Share,StyleSheet,Text,View} from 'react-native';
@@ -13,7 +14,7 @@ import type {ContactlessProps} from './cash-contactless';
 
 const Session=createContext<IosTapToPayController|null>(null);
 async function call(action:string,extra:Record<string,unknown>={}) {
-  return callIosTerminal((body,options)=>supabase.functions.invoke('cash-stripe',{body,...options}),action,extra,action==='terminal-status'?15000:30000);
+  return callIosTerminal((body,options)=>supabase.functions.invoke(CASH_STRIPE_FUNCTION,{body,...options}),action,extra,action==='terminal-status'?15000:30000);
 }
 export function IosTapSessionProvider(props:IosTapProviderProps) {
   const controller=useRef<IosTapToPayController|null>(null);

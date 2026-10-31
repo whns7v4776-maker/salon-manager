@@ -1,3 +1,4 @@
+import { CASH_STRIPE_FUNCTION } from '../src/lib/cash-stripe-function';
 import { useAccessAppearance } from './access-premium';
 import { PremiumFitLabel } from './ui/premium-fit-label';
 import {NativeReadableText as Text, NativePremiumIcon as Ionicons} from './owner-native-premium';
@@ -36,7 +37,7 @@ export function BookingPaymentPolicyEditor({ workspaceId, customerId, active = t
     alive.current = true;
     let stopped = false;
     setChecking(true);
-    void supabase.functions.invoke('cash-stripe', {body:{action:'booking-policy-status'},timeout:15000}).then(({data}) => {
+    void supabase.functions.invoke(CASH_STRIPE_FUNCTION, {body:{action:'booking-policy-status'},timeout:15000}).then(({data}) => {
       if (!stopped) setEnabled(data?.enabled === true);
     }).catch(() => {}).finally(() => { if (!stopped) setChecking(false); });
     return () => {stopped = true; alive.current = false;};
@@ -60,7 +61,7 @@ export function BookingPaymentPolicyEditor({ workspaceId, customerId, active = t
     catch (e) { setError((e as Error).message); return; }
     savingRef.current=true; setBusy(true);
     try {
-      const { data, error: failure } = await supabase.functions.invoke('cash-stripe', {
+      const { data, error: failure } = await supabase.functions.invoke(CASH_STRIPE_FUNCTION, {
         body: { action: 'booking-policy-save', customerId: customerId ?? null, ...value, expectedRevision: saved.revision }, timeout: 30000,
       });
       let message = data?.error;
