@@ -16893,7 +16893,7 @@ export default function ServiziScreen() {
               </HapticTouchable>
             </View>
 
-            <ScrollView
+            <ScrollView automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
               style={styles.androidEditModalScroll}
               contentContainerStyle={styles.androidEditModalContent}
               keyboardShouldPersistTaps="handled"
@@ -17616,7 +17616,7 @@ export default function ServiziScreen() {
               </HapticTouchable>
             </View>
 
-            <ScrollView
+            <ScrollView automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
               style={styles.androidEditModalScroll}
               contentContainerStyle={styles.androidEditModalContent}
               keyboardShouldPersistTaps="handled"

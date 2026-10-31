@@ -26031,7 +26031,7 @@ export default function AgendaScreen() {
                                           },
                                         ]}
                                       >
-                                        <ScrollView
+                                        <ScrollView automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
                                           showsVerticalScrollIndicator
                                           keyboardShouldPersistTaps="always"
                                           nestedScrollEnabled
@@ -51759,7 +51759,7 @@ null
               </HapticTouchable>
             </View>
 
-            <ScrollView
+            <ScrollView automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
               style={styles.weekPhaseOrganizerScroll}
               contentContainerStyle={styles.weekPhaseOrganizerContent}
               showsVerticalScrollIndicator={false}
@@ -56007,7 +56007,7 @@ null
               </HapticTouchable>
             </View>
 
-            <ScrollView
+            <ScrollView automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
               key={`week-appointment-details-${weekAppointmentDetails?.id ?? 'none'}-${
                 weekAppointmentPendingRequest ? 'pending' : 'resolved'
               }`}
@@ -57008,7 +57008,7 @@ null
                     </Text>
                   </View>
                 </View>
-                <ScrollView
+                <ScrollView automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
                   style={[
                     styles.quickBookingConfirmationMessageScroll,
                     !IS_WEB &&
@@ -57240,7 +57240,7 @@ null
             onPress={() => setWeekManualAcceptChoiceOpen(false)}
           />
           {weekManualAcceptanceConfig ? (
-            <ScrollView
+            <ScrollView automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
               style={[
                 styles.weekAppointmentDetailsCard,
                 styles.weekAppointmentDetailsViewportCard,
@@ -57692,7 +57692,7 @@ null
               </HapticTouchable>
             </View>
 
-            <ScrollView
+            <ScrollView automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
               style={styles.weekAppointmentEditScroll}
               contentContainerStyle={styles.weekAppointmentEditScrollContent}
               showsVerticalScrollIndicator
@@ -58195,7 +58195,7 @@ null
                 </HapticTouchable>
               </View>
 
-              <ScrollView
+              <ScrollView automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
                 ref={servicePickerScrollRef}
                 showsVerticalScrollIndicator={false}
                 contentContainerStyle={styles.quickBookingContent}
@@ -59212,7 +59212,7 @@ null
           >
             <DockedSheetSurface testID="agenda-operator-block" onClose={closeOperatorLaneBlock} style={styles.operatorLaneBlockCard}>
               <NativeSheetHandle style={styles.operatorLaneBlockHandle} />
-              <ScrollView
+              <ScrollView automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
                 contentContainerStyle={styles.operatorLaneBlockContent}
                 keyboardShouldPersistTaps="handled"
                 showsVerticalScrollIndicator={false}
@@ -59680,7 +59680,7 @@ null
                   </Text>
                 </View>
               </View>
-              <ScrollView
+              <ScrollView automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
                 key={`${webWeekDragConfirmation?.title ?? 'spostamento'}-${
                   webWeekDragConfirmation?.message.length ?? 0
                 }`}

@@ -62,7 +62,7 @@ export function CustomerDirectoryBoard<T extends {id:string;full_name:string;pho
      <View style={{padding:20,flexDirection:'row',alignItems:'center',gap:14,borderBottomWidth:1,borderBottomColor:p.line}}><Text style={{flex:1,fontFamily:'Georgia',fontSize:25,color:p.ink}}>Rubrica clienti</Text>{command('Chiudi','close',()=>setWindowOpen(false))}</View>
      <PremiumSearchToolbar><View style={{margin:16,marginBottom:8,paddingHorizontal:12,flexDirection:'row',alignItems:'center',gap:8,borderRadius:13,backgroundColor:p.field,borderWidth:1,borderColor:p.border}}><Ionicons name="search-outline" size={18} color={p.muted}/><TextInput accessibilityLabel="Cerca nella finestra clienti" value={query} onChangeText={setQuery} placeholder="Cerca cliente, telefono o email…" placeholderTextColor={p.muted} style={{flex:1,minWidth:0,paddingVertical:13,fontSize:14,color:p.ink}}/>{query?command('Svuota','close',()=>setQuery('')):null}</View></PremiumSearchToolbar>
      <View style={{paddingHorizontal:16}}>{columns}</View>
-     <ScrollView accessibilityLabel="Rubrica clienti a tutta altezza" style={{flex:1,minHeight:0}} contentContainerStyle={{paddingHorizontal:16,paddingBottom:16}}>{filtered.length?rows(filtered,true):<Text style={{padding:20,color:p.muted}}>Nessun cliente trovato.</Text>}</ScrollView>
+     <ScrollView automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'} accessibilityLabel="Rubrica clienti a tutta altezza" style={{flex:1,minHeight:0}} contentContainerStyle={{paddingHorizontal:16,paddingBottom:16}}>{filtered.length?rows(filtered,true):<Text style={{padding:20,color:p.muted}}>Nessun cliente trovato.</Text>}</ScrollView>
     </View>
    </View>
   </Modal>

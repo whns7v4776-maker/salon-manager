@@ -46,7 +46,7 @@ export function SalonActivityPicker({ value, options, disabled, onChange }: {
           <DockedSheetSurface {...(Platform.OS !== 'web' ? {onClose: () => setOpen(false)} : {})} style={styles.sheet} accessibilityViewIsModal>
             <Text style={styles.title}>La tua attività</Text>
             <Text style={styles.caption}>Scegli tra i mestieri configurati o inserisci una nuova categoria del salone.</Text>
-            <ScrollView keyboardShouldPersistTaps="handled">
+            <ScrollView automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'} keyboardShouldPersistTaps="handled">
               {creating ? (
                 <TextInput value={draft} onChangeText={setDraft} autoFocus maxLength={80}
                   accessibilityLabel="Nome nuova attività" placeholder="Nome attività" placeholderTextColor="#64748B"

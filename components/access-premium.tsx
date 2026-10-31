@@ -4,7 +4,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import React, { useCallback, useContext, useEffect, useId, useMemo, useRef, useState } from 'react';
-import { Platform, Pressable, StyleSheet, Text, useColorScheme, View, type ViewStyle } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, useColorScheme, useWindowDimensions, View, type ViewStyle } from 'react-native';
 import Svg, { Defs, FeColorMatrix, Filter, Image as SvgImage, LinearGradient, Path, Rect, Stop } from 'react-native-svg';
 import Animated, { interpolate, useAnimatedStyle, type SharedValue } from 'react-native-reanimated';
 
@@ -79,25 +79,29 @@ export function AccessBackdrop() {
  *  Must sit in the same box as AccessBackdrop so the image crop lines up. */
 export function AccessScrollEdgeFade({ top, bottom, scrollY, size = 28 }: { top: number; bottom: number; scrollY: SharedValue<number>; size?: number }) {
   const { palette: p } = useAccessAppearance();
-  const [box, setBox] = useState({ width: 0, height: 0 });
+  const screen = useWindowDimensions();
+  const host = useRef<View>(null);
+  const [origin, setOrigin] = useState<{ x: number; y: number } | null>(null);
   // At rest the first card sits just below the header: fade in only once it scrolls under it.
   const topStyle = useAnimatedStyle(() => ({ opacity: interpolate(scrollY.value, [0, 14], [0, 1], 'clamp') }));
   const source = p.night ? require('../assets/images/access-night-satin-v1.png') : require('../assets/images/access-day-satin-v1.png');
-  // Thin bands of the very same expo-image crop as AccessBackdrop, each a little more transparent:
-  // an SVG copy of the satin did not match it and left a hard cut with two side edges on the cards.
-  const steps = 14, band = size / steps;
+  // The host can sit in a narrower box than the screen: draw in window coordinates, full width,
+  // so each band shows exactly the AccessBackdrop crop behind it (full-screen expo-image, cover).
+  // Thin bands, each a little more transparent, make the fade without an SVG mask.
+  const steps = 24, band = size / steps;
   const strip = (y: number, fadeDown: boolean) => Array.from({ length: steps }, (_, index) => {
     const bandTop = y + index * band;
     const opacity = fadeDown ? 1 - (index + .5) / steps : (index + .5) / steps;
-    return <View key={index} style={{ position: 'absolute', left: 0, right: 0, top: bandTop - y, height: band + .5, overflow: 'hidden', opacity }}>
-      <Image source={source} contentFit="cover" contentPosition="center" style={{ position: 'absolute', left: 0, top: -bandTop, width: box.width, height: box.height }} />
+    return <View key={index} style={{ position: 'absolute', left: 0, right: 0, top: index * band, height: band + .5, overflow: 'hidden', opacity }}>
+      <Image source={source} contentFit="cover" contentPosition="center" style={{ position: 'absolute', left: 0, top: -bandTop, width: screen.width, height: screen.height }} />
     </View>;
   });
-  return <View pointerEvents="none" accessible={false} style={StyleSheet.absoluteFill} onLayout={e => setBox({ width: e.nativeEvent.layout.width, height: e.nativeEvent.layout.height })}>
-    {box.width > 0 && bottom > top + size * 2 ? <>
-      <Animated.View style={[{ position: 'absolute', left: 0, right: 0, top, height: size }, topStyle]}>{strip(top, true)}</Animated.View>
-      <View style={{ position: 'absolute', left: 0, right: 0, top: bottom - size, height: size }}>{strip(bottom - size, false)}</View>
-    </> : null}
+  const measure = () => host.current?.measureInWindow((x, y) => setOrigin(current => current && current.x === x && current.y === y ? current : { x, y }));
+  return <View ref={host} collapsable={false} pointerEvents="none" accessible={false} style={StyleSheet.absoluteFill} onLayout={measure}>
+    {origin && bottom > top + size * 2 ? <View style={{ position: 'absolute', left: -origin.x, top: -origin.y, width: screen.width, height: screen.height }}>
+      <Animated.View style={[{ position: 'absolute', left: 0, right: 0, top: origin.y + top, height: size }, topStyle]}>{strip(origin.y + top, true)}</Animated.View>
+      <View style={{ position: 'absolute', left: 0, right: 0, top: origin.y + bottom - size, height: size }}>{strip(origin.y + bottom - size, false)}</View>
+    </View> : null}
   </View>;
 }
 
@@ -233,12 +237,16 @@ export function accessPremiumStyles<T extends Record<string, object>>(base: T, p
     ...(Platform.OS === 'web' ? { boxShadow: 'none' } : {}),
   });
   // Shared presentation for the access-only Face ID control and disclosures.
+  // Face ID stands out as a sage-green glass, the same on the salon and client sides.
+  const faceIdGlass = p.night
+    ? { backgroundColor: 'rgba(122,186,154,.24)', borderColor: 'rgba(160,214,186,.42)' }
+    : { backgroundColor: 'rgba(186,222,200,.78)', borderColor: 'rgba(104,160,128,.42)' };
   patch(['biometricButton', 'embeddedBiometricButton', 'quickAccessBiometricButton'], {
-    backgroundColor: p.field, borderColor: p.border, borderWidth: 1, borderRadius: 13,
+    ...faceIdGlass, borderWidth: 1, borderRadius: 13,
     minHeight: 46, height: undefined, paddingVertical: 7, paddingHorizontal: 12,
     marginTop: 4, marginBottom: 10, shadowOpacity: 0, elevation: 0,
   });
-  patch(['biometricButtonDisabled', 'quickAccessBiometricButtonDisabled'], { backgroundColor: p.field, borderColor: p.line, opacity: 0.6 });
+  patch(['biometricButtonDisabled', 'quickAccessBiometricButtonDisabled'], { ...faceIdGlass, opacity: 0.6 });
   patch(['biometricIconBadge', 'quickAccessBiometricIconBadge', 'biometricIconBadgeDisabled', 'quickAccessBiometricIconBadgeDisabled'], {
     width: 26, height: 26, marginLeft: 0, backgroundColor: 'transparent', borderWidth: 0, shadowOpacity: 0, elevation: 0,
   });

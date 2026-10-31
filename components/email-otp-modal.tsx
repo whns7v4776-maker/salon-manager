@@ -285,7 +285,7 @@ export function EmailOtpModal({
       >
         <Pressable style={StyleSheet.absoluteFill} onPress={() => undefined} />
         {useNativeCompactLayout ? (
-          <ScrollView
+          <ScrollView automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
             style={themedStyles.nativeCompactScroll}
             contentContainerStyle={themedStyles.nativeCompactScrollContent}
             keyboardShouldPersistTaps="handled"

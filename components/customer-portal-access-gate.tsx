@@ -107,7 +107,7 @@ function AccessChallenge({ challenge }: { challenge: PortalAccessChallenge }) {
     <Modal transparent visible={!otpOpen} animationType="fade" onRequestClose={cancel}>
       <KeyboardAvoidingView style={styles.backdrop} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <View style={styles.card} accessibilityViewIsModal>
-          <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
+          <ScrollView automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
             <AppWordmark maxWidth={270} compact showAtmosphere={false} />
             <Text style={styles.title}>{activate ? 'Proteggi il tuo account' : 'Conferma il tuo accesso'}</Text>
             <Text style={styles.body}>{activate ? 'Verifica la tua email e scegli una password per continuare con il profilo che usi già. Appuntamenti e vantaggi restano al loro posto.' : 'Inserisci la password che usi già per riaprire in sicurezza i tuoi dati.'}</Text>

@@ -4277,7 +4277,7 @@ export default function ClientiScreen() {
                     <Text style={styles.webManagementTitle}>{item.full_name}</Text>
                     <HapticTouchable accessibilityLabel="Chiudi gestione cliente" onPress={() => setOpenWebClientActionsId(null)} style={styles.webManagementClose}><Text style={{fontSize:12,color:customerPalette.ink}}>Chiudi</Text><Ionicons name="close" size={17} color={styles.__premiumIcon.color} /></HapticTouchable>
                   </View>
-                  <ScrollView keyboardShouldPersistTaps="handled">{renderManagementActions()}</ScrollView>
+                  <ScrollView automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'} keyboardShouldPersistTaps="handled">{renderManagementActions()}</ScrollView>
                 </Pressable>
               </View>
             </Modal>
@@ -5028,7 +5028,7 @@ export default function ClientiScreen() {
           <View style={[styles.onlinePolicySheet, customerSheetDockStyle]}>
             <NativeSheetHandle style={styles.dialogHandle} />
             <CustomerPopupHeader title="Pagamento" subtitle={paymentPolicyClient?.full_name} icon="wallet-outline" onClose={() => setPaymentPolicyClient(null)} />
-            <ScrollView ref={paymentPolicyScrollRef} keyboardShouldPersistTaps="handled" style={{ flexShrink: 1 }}>
+            <ScrollView automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'} ref={paymentPolicyScrollRef} keyboardShouldPersistTaps="handled" style={{ flexShrink: 1 }}>
               {paymentPolicyClient ? <BookingPaymentPolicyEditor standalone key={`${salonWorkspace.id}-${paymentPolicyClient.id}`} workspaceId={salonWorkspace.id} customerId={paymentPolicyClient.id} /> : null}
             </ScrollView>
           </View>
@@ -5039,7 +5039,7 @@ export default function ClientiScreen() {
         <CustomerSheetFrame onClose={closeClientDetails}>
           <View style={[customerSheetDockStyle,{width:'100%',maxWidth:600,backgroundColor:customerPalette.night?'#202425':'#F5F1EB',borderRadius:24,borderWidth:1,borderColor:customerPalette.border,overflow:'hidden'}]}>
             <CustomerPopupHeader title="Scheda cliente" icon="person-outline" onClose={closeClientDetails}/>
-            <ScrollView contentContainerStyle={{padding:20}}>{(()=>{const customer=clienti.find(c=>c.id===clientDetailsId);return customer?renderClienteCard(customer,true,closeClientDetails,'detail'):null;})()}</ScrollView>
+            <ScrollView automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'} contentContainerStyle={{padding:20}}>{(()=>{const customer=clienti.find(c=>c.id===clientDetailsId);return customer?renderClienteCard(customer,true,closeClientDetails,'detail'):null;})()}</ScrollView>
           </View>
         </CustomerSheetFrame>
       </Modal>
@@ -5103,7 +5103,7 @@ export default function ClientiScreen() {
             <CustomerServiceSearch key={salonWorkspace.id} groups={durationServiceGroups}
               stateStore={customerServiceSearchStateRef} persistenceKey={salonWorkspace.id}>
               {(filteredGroups, timingScrollRef) => (
-            <ScrollView
+            <ScrollView automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
               ref={timingScrollRef}
               keyboardShouldPersistTaps="handled"
               keyboardDismissMode={Platform.OS === "web" ? "on-drag" : "none"}
@@ -5411,7 +5411,7 @@ export default function ClientiScreen() {
                 </HapticTouchable>
               ))}
             </View>
-            <ScrollView
+            <ScrollView automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
               ref={onlinePolicyScrollRef}
               style={styles.onlinePolicyScroll}
               contentContainerStyle={styles.onlinePolicyScrollContent}
@@ -5843,7 +5843,7 @@ export default function ClientiScreen() {
               </View>
               <CustomerPopupClose onPress={() => setCustomerNoteClient(null)} />
             </View>
-            <ScrollView style={styles.customerNoteModalBody}>
+            <ScrollView automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'} style={styles.customerNoteModalBody}>
               <Text style={styles.customerNoteModalLabel}>Note interne</Text>
               <Text style={styles.customerNoteModalText}>
                 {customerNoteClient?.note?.trim() || 'Nessuna nota registrata per questo cliente.'}

@@ -289,10 +289,6 @@ function LandingAccessHeader({ audience, ownerMode = 'login', scrollY, collapseD
       maxHeight: interpolate(value, [0, 1], [110, 0], Extrapolation.CLAMP),
     };
   });
-  const fadeHeight = 26;
-  const fadeAnimatedStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(scrollY?.value ?? 0, [0, 14], [0, 1], Extrapolation.CLAMP),
-  }));
   return (
     <View style={[styles.accessAreaHeader, Platform.OS === 'web' && {marginBottom:0}]}>
       <Animated.View style={[brandRowStyle, { overflow: 'visible' }, brandAnimatedStyle]}>
@@ -311,20 +307,6 @@ function LandingAccessHeader({ audience, ownerMode = 'login', scrollY, collapseD
       {audience === 'owner' ? <Text style={{ color: palette.muted, fontSize: 14, marginTop: 6 }}>{ownerMode === 'register' ? 'Inizia con i dati del tuo salone' : 'Accedi al tuo salone'}</Text> : null}
       </Animated.View>
       </>
-      {Platform.OS !== 'web' ? (
-        // Native has no CSS mask: a soft veil lets the cards fade under the header.
-        <Animated.View pointerEvents="none" style={[{ position: 'absolute', left: 0, right: 0, bottom: -fadeHeight, height: fadeHeight }, fadeAnimatedStyle]}>
-        <Svg width="100%" height={fadeHeight}>
-          <Defs>
-            <SvgLinearGradient id="accessHeaderFade" x1="0" y1="0" x2="0" y2="1">
-              <Stop offset="0" stopColor={palette.canvas} stopOpacity={palette.night ? 0.92 : 0.86} />
-              <Stop offset="1" stopColor={palette.canvas} stopOpacity={0} />
-            </SvgLinearGradient>
-          </Defs>
-          <Rect x="0" y="0" width="100%" height={fadeHeight} fill="url(#accessHeaderFade)" />
-        </Svg>
-        </Animated.View>
-      ) : null}
     </View>
   );
 }

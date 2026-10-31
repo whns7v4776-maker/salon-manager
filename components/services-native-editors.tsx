@@ -43,7 +43,8 @@ function NativeEditorFrame({ title, onClose, embedded, children, footer }: React
   if (embedded) return <View style={{ gap: 16 }}>{children}{footer}</View>;
   return <View style={{ flex: 1, minHeight: 0 }}>
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 18, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: p.line }}><NativeMedal icon={/operatore/i.test(title) ? 'person-outline' : 'cut-outline'} size={42} iconSize={19} accent={p.night ? '#D6B27A' : '#8C6A35'} /><Text accessibilityRole="header" style={{ flex: 1, color: p.ink, fontSize: 24, lineHeight: 31, fontFamily: nativeSerif }}>{title}</Text><Pressable accessibilityRole="button" accessibilityLabel={`Chiudi ${title}`} onPress={onClose} style={{ width: 40, height: 40, borderRadius: 13, alignItems: 'center', justifyContent: 'center', backgroundColor: p.field, borderWidth: 1, borderColor: p.border }}><Ionicons name="close-outline" size={22} color={p.ink} /></Pressable></View>
-    <ScrollView keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" contentContainerStyle={{ padding: 18, gap: 14 }}>{children}</ScrollView>
+    {/* iOS scrolls the focused field just above the keyboard, with the keyboard's own animation. */}
+    <ScrollView automaticallyAdjustKeyboardInsets keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" contentContainerStyle={{ padding: 18, gap: 14 }}>{children}</ScrollView>
     <View style={{ paddingHorizontal: 18, paddingTop: 12, paddingBottom: 12 + insets.bottom, borderTopWidth: 1, borderTopColor: p.line }}>{footer}</View>
   </View>;
 }
