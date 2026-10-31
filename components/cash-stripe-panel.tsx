@@ -239,9 +239,12 @@ export function CashStripePanel({
   useEffect(() => {
     onAvailabilityChange?.(status?.configured === true);
   }, [status?.configured, onAvailabilityChange]);
-  const button = (text: string, action: () => void) => {
-    const primary = web && text === "Crea QR e link",
-      danger = web && text.startsWith("Annulla");
+  const button = (text: string, action: () => void, emphasis = false) => {
+    const primary = (web && text === "Crea QR e link") || (!web && (emphasis || text === "Crea QR e link")),
+      danger = text.startsWith("Annulla");
+    // App: the old light-blue fill vanished on the light sheet. Same palette as web, with a warm
+    // tinted secondary that stays readable on the sheet in both themes.
+    const secondaryFill = web ? p.field : p.night ? "rgba(255,255,255,.08)" : "rgba(122,100,70,.11)";
     return (
       <HapticTouchable
         accessibilityRole="button"
@@ -249,10 +252,8 @@ export function CashStripePanel({
         onPress={action}
         style={[
           styles.button,
-          web && {
-            alignSelf: "flex-start",
-            paddingHorizontal: 17,
-            paddingVertical: 12,
+          {
+            ...(web ? { alignSelf: "flex-start" as const, paddingHorizontal: 17, paddingVertical: 12, borderRadius: 11 } : { minHeight: 48, justifyContent: "center" as const }),
             borderWidth: 1,
             borderColor: danger
               ? p.night
@@ -260,15 +261,14 @@ export function CashStripePanel({
                 : "#D49894"
               : primary
                 ? p.action
-                : p.border,
+                : p.night ? p.border : "rgba(122,100,70,.28)",
             backgroundColor: danger
               ? p.night
                 ? "#442428"
                 : "#F5DDDB"
               : primary
                 ? p.action
-                : p.field,
-            borderRadius: 11,
+                : secondaryFill,
           },
           (busy || contactlessBusy) && { opacity: 0.5 },
         ]}
@@ -276,9 +276,8 @@ export function CashStripePanel({
         <Text
           style={[
             styles.buttonText,
-            web && {
-              fontSize: 14,
-              fontWeight: "500",
+            {
+              ...(web ? { fontSize: 14, fontWeight: "500" as const } : { fontSize: 15, fontWeight: "600" as const }),
               color: danger
                 ? p.night
                   ? "#FFB5B5"
@@ -526,6 +525,8 @@ export function CashStripePanel({
             : "Torna all’appuntamento"
           : "Chiudi",
         onClose,
+        // Once paid, closing is the next step: make it the clear action.
+        checkout?.status === "paid",
       )}
     </View>
   );
