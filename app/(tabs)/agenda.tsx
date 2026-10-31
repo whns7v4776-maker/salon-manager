@@ -46937,10 +46937,10 @@ accessibilityHint={
                           cellState !== 'outside' &&
                           cellState !== 'blocked' &&
                           cellState !== 'occupied';
+                        // Il salone può sempre aggiungere un appuntamento dimenticato, anche passato
+                        // o in corso ("Aggiungi al passato"): come sul web, ora anche in app.
                         const canSalonQuickBook =
-                          canQuickBook ||
-                          ((IS_WEB || (!isPastFreeSlot && !isCurrentSlotToday)) &&
-                            cellState !== 'occupied');
+                          canQuickBook || cellState !== 'occupied';
                         const appointmentStart =
                           getWeekRenderAppointmentStartingAt(
                             day.value,
@@ -47308,7 +47308,6 @@ accessibilityHint={
                                         : true);
                                     const laneSalonCanQuickBook =
                                       !isHistoricalLaneDisabled &&
-                                      (IS_WEB || (!isPastFreeSlot && !isCurrentSlotToday)) &&
                                       !laneOccupyingAppointment;
                                     const laneDragPreview =
                                       weekSwapPreview?.targetDate ===
