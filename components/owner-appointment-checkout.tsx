@@ -35,12 +35,12 @@ export function OwnerAppointmentCheckout({appointmentId,workspaceId,onCompleted,
   setPreferred(next);setMovement(data);setDigital(true);
  });
  const night=p.night;
- const tile=(key:string,icon:React.ComponentProps<typeof Ionicons>['name'],accent:[string,string],label:string,onPress:()=>void,primary=false)=>(
+ const tile=(key:string,icon:React.ComponentProps<typeof Ionicons>['name'],accent:[string,string],label:string,onPress:()=>void,primary=false,symbol?:'wave.3.right.circle')=>(
   <HapticTouchable key={key} accessibilityRole="button" accessibilityLabel={label} disabled={busy} onPress={onPress}
    style={{flexGrow:1,flexBasis:'46%',minWidth:0,minHeight:58,flexDirection:'row',alignItems:'center',gap:10,paddingVertical:10,paddingHorizontal:12,borderRadius:14,borderWidth:1,
     borderColor:primary?(night?'#9C8461':'#7A6446'):(night?p.border:'rgba(122,100,70,.24)'),
     backgroundColor:primary?(night?'rgba(156,132,97,.16)':'rgba(122,100,70,.09)'):(night?'rgba(255,255,255,.04)':'#FFFFFF'),opacity:busy?.6:1}}>
-   <NativeMedal icon={icon} size={34} iconSize={15} accent={accent[night?0:1]}/>
+   <NativeMedal icon={icon} symbol={symbol} size={34} iconSize={15} accent={accent[night?0:1]}/>
    <Text numberOfLines={2} style={{flex:1,minWidth:0,fontSize:14,lineHeight:18,fontWeight:'600',color:p.ink}}>{label}</Text>
   </HapticTouchable>
  );
@@ -53,7 +53,7 @@ export function OwnerAppointmentCheckout({appointmentId,workspaceId,onCompleted,
     <View style={{flex:1,minWidth:0}}><Text style={{fontSize:16,fontWeight:'600',color:p.ink}}>{busy?'Preparazione…':'Incassa e completa'}</Text><Text style={{fontSize:12,lineHeight:17,color:p.muted}}>Tocca come paga il cliente.</Text></View>
    </View>
    <View style={{flexDirection:'row',flexWrap:'wrap',gap:8}}>
-    {tapToPayAvailable?tile('terminal','phone-portrait-outline',['#9DBAD6','#4D6E8F'],'Tap to Pay su iPhone',()=>startDigital('terminal'),true):null}
+    {tapToPayAvailable?tile('terminal','phone-portrait-outline',['#9DBAD6','#4D6E8F'],'Tap to Pay su iPhone',()=>startDigital('terminal'),true,'wave.3.right.circle'):null}
     {tile('checkout','qr-code-outline',['#A9ABD9','#5B5E9A'],'QR / link',()=>startDigital('checkout'),!tapToPayAvailable)}
     {tile('cash','cash-outline',['#86C2BE','#3E7C7A'],'Contanti',()=>confirm('cash','Contanti'))}
     {tile('card','card-outline',['#BFA6D4','#7A5C8E'],'POS esterno',()=>confirm('card','POS esterno'))}

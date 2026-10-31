@@ -111,7 +111,7 @@ export function IosTapToPaySetup() {
   const t=useTapTheme();
   return <View style={[styles.setup,{backgroundColor:t.surface,borderWidth:1,borderColor:t.edge}]}>
     <View style={{flexDirection:'row',alignItems:'center',gap:12}}>
-      <NativeMedal icon="phone-portrait-outline" size={44} iconSize={20} accent={t.n?'#9DBAD6':'#4D6E8F'}/>
+      <NativeMedal icon="phone-portrait-outline" symbol="wave.3.right.circle" size={44} iconSize={20} accent={t.n?'#9DBAD6':'#4D6E8F'}/>
       <View style={{flex:1,minWidth:0,gap:2}}>
         <Text style={[styles.title,{color:t.ink}]}>Tap to Pay su iPhone</Text>
         <Text style={[styles.text,{color:t.muted}]}>Carte contactless e wallet direttamente sul telefono.</Text>
@@ -133,7 +133,7 @@ export function IosTapToPaySetup() {
         <View accessibilityViewIsModal style={[styles.helpSheet,{backgroundColor:t.n?'#202426':'#F5F2EC',borderWidth:1,borderColor:t.edge}]}>
           <View style={styles.helpHeader}>
             <View style={{flexDirection:'row',alignItems:'center',gap:12,flex:1,minWidth:0}}>
-              <NativeMedal icon="phone-portrait-outline" size={40} iconSize={18} accent={t.n?'#9DBAD6':'#4D6E8F'}/>
+              <NativeMedal icon="phone-portrait-outline" symbol="wave.3.right.circle" size={40} iconSize={18} accent={t.n?'#9DBAD6':'#4D6E8F'}/>
               <Text accessibilityRole="header" style={{flex:1,fontSize:20,fontFamily:'Georgia',color:t.ink}}>Come usare Tap to Pay</Text>
             </View>
             <HapticTouchable accessibilityRole="button" accessibilityLabel="Chiudi" onPress={()=>setHelpOpen(false)} style={{width:40,height:40,borderRadius:20,borderWidth:1,borderColor:t.edge,backgroundColor:t.field,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:22,lineHeight:24,color:t.ink}}>×</Text></HapticTouchable>

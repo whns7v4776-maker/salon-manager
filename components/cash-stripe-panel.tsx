@@ -110,6 +110,7 @@ export function CashStripePanel({
   const [contactlessBusy, setContactlessBusy] = useState(false);
   const [method, setMethod] = useState<"checkout" | "terminal">("checkout");
   const lock = useRef(false);
+  const canSelectTapToPayRef = useRef(false);
   const paymentRequestVersion = useRef(0);
   const [error, setError] = useState("");
   const [linkCopied, setLinkCopied] = useState(false);
@@ -188,7 +189,7 @@ export function CashStripePanel({
     setCheckout(null);
     setError("");
     setLinkCopied(false);
-    setMethod("checkout");
+    setMethod(preferredMethod !== "checkout" && canSelectTapToPayRef.current ? "terminal" : "checkout");
     const movementId = movement?.id;
     if (!movementId) return;
     let stopped = false;
@@ -202,6 +203,8 @@ export function CashStripePanel({
         ) {
           setCheckout(r);
           if (r.channel === "terminal") setMethod("terminal");
+          // An open QR / link stays in front so it can be verified or cancelled.
+          else if (r.url) setMethod("checkout");
         }
       })
       .catch(() => {});
@@ -244,7 +247,7 @@ export function CashStripePanel({
       danger = text.startsWith("Annulla");
     // App: the old light-blue fill vanished on the light sheet. Same palette as web, with a warm
     // tinted secondary that stays readable on the sheet in both themes.
-    const secondaryFill = web ? p.field : p.night ? "rgba(255,255,255,.08)" : "rgba(122,100,70,.11)";
+    const secondaryFill = web ? p.field : p.night ? "#363B3E" : "#E6DCCB";
     return (
       <HapticTouchable
         accessibilityRole="button"
@@ -261,7 +264,7 @@ export function CashStripePanel({
                 : "#D49894"
               : primary
                 ? p.action
-                : p.night ? p.border : "rgba(122,100,70,.28)",
+                : p.night ? "#5A5F62" : "#BFAE92",
             backgroundColor: danger
               ? p.night
                 ? "#442428"
@@ -308,11 +311,13 @@ export function CashStripePanel({
     !terminalError &&
     terminalStatus?.enabled === true &&
     !!terminalStatus.locations?.length;
+  canSelectTapToPayRef.current = canSelectTapToPay;
   const paymentMethods: ("checkout" | "terminal")[] = canSelectTapToPay
-    ? ["checkout", "terminal"]
+    ? ["terminal", "checkout"]
     : ["checkout"];
+  // Apple requires Tap to Pay first among payment options: it is also the default once available.
   useEffect(() => {
-    if (preferredMethod === "terminal" && canSelectTapToPay) setMethod("terminal");
+    if ((preferredMethod === "terminal" || !preferredMethod) && canSelectTapToPay) setMethod("terminal");
   }, [preferredMethod, canSelectTapToPay]);
   const tapToPayUnavailable = preferredMethod === "terminal" && status !== null && !canSelectTapToPay;
   const qrAutoStarted = useRef(false);
@@ -416,7 +421,7 @@ export function CashStripePanel({
                   },
                 ]}
               >
-                {value === "checkout" ? "QR / link" : "Tap to Pay"}
+                {value === "checkout" ? "QR / link" : "Tap to Pay su iPhone"}
               </Text>
             </HapticTouchable>
           ))}
@@ -682,6 +687,7 @@ export function CashStripePanel({
                           window.location.assign(r.url);
                         else await Linking.openURL(r.url);
                       }),
+                    true,
                   )
                 : null}
             </>
@@ -695,6 +701,7 @@ export function CashStripePanel({
                     if (Platform.OS === "web") window.location.assign(r.url);
                     else await Linking.openURL(r.url);
                   }),
+                true,
               )
             : null}
           {status?.ready && onSelectMovement ? (

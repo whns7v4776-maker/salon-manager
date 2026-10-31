@@ -165,7 +165,7 @@ export class IosTapToPayController {
     if(initialized.error)throw Error(initialized.error.message);
     const support=await this.setupStep(this.adapter.supported(),guard,Math.min(this.setupTimeout,15000)); guard();
     if(support.error || !support.readerSupportResult) {
-      this.update({message:'Tap to Pay non disponibile su questo iPhone. Verifica iOS e compatibilità; puoi usare QR o link.'}); return false;
+      this.update({message:'Per usare Tap to Pay aggiorna l’iPhone all’ultima versione di iOS (Impostazioni → Generali → Aggiornamento software). Se è già aggiornato, questo iPhone non è compatibile: puoi usare QR o link.'}); return false;
     }
     // With false, Apple/Stripe either confirms existing merchant acceptance or
     // rejects the connection. A stored local flag never substitutes for it.

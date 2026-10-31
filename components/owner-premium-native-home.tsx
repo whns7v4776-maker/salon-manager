@@ -3,6 +3,7 @@ import { OwnerBrandMark } from './salon-brand-mark';
 import React, { memo, useEffect, useState } from 'react';
 import { Platform, Pressable, StatusBar, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import Svg, { Circle, Defs, Ellipse, LinearGradient, Path, RadialGradient, Stop } from 'react-native-svg';
 import { SalonCodeBadge } from './ui/salon-code-badge';
 import { HapticTouchable } from './ui/haptic-touchable';
@@ -31,7 +32,7 @@ const HOME_ACCENTS:Record<string,[string,string]>={
 };
 export function homeAccent(icon:string,night:boolean){const a=HOME_ACCENTS[icon];return a?(night?a[0]:a[1]):undefined;}
 /** `accent` (6-digit hex) gives a section its own muted colour: tinted disc, matching ring and icon. */
-export function NativeMedal({icon,size=40,tint,iconSize,accent}:{icon:React.ComponentProps<typeof Ionicons>['name'];size?:number;tint?:string;iconSize?:number;accent?:string}){
+export function NativeMedal({icon,size=40,tint,iconSize,accent,symbol}:{icon:React.ComponentProps<typeof Ionicons>['name'];size?:number;tint?:string;iconSize?:number;accent?:string;symbol?:SymbolViewProps['name']}){
  const {palette:p}=useAccessAppearance();
  const id=React.useId().replace(/:/g,'');
  // Enamel medallion: radial body in the section colour, gradient rim (light top, colour bottom),
@@ -62,7 +63,8 @@ export function NativeMedal({icon,size=40,tint,iconSize,accent}:{icon:React.Comp
    {/* Soft inner shade at the base gives the enamel volume. */}
    <Ellipse cx={r} cy={size*.86} rx={size*.30} ry={size*.10} fill={hue} fillOpacity={n?.16:.10}/>
   </Svg>
-  <Ionicons name={icon} size={iconSize??Math.round(size*.48)} color={accent??p.ink}/>
+  {/* iOS SF Symbol when one is required (Tap to Pay: wave.3.right.circle); Ionicons elsewhere. */}
+  {symbol&&Platform.OS==='ios'?<SymbolView name={symbol} tintColor={accent??p.ink} resizeMode="scaleAspectFit" style={{width:iconSize??Math.round(size*.48),height:iconSize??Math.round(size*.48)}}/>:<Ionicons name={icon} size={iconSize??Math.round(size*.48)} color={accent??p.ink}/>}
  </View>;
 }
 function Glass({children,tint,style}:{children:React.ReactNode;tint?:string;style?:any}){
