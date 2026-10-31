@@ -20,6 +20,11 @@ for (const name of [
   'CASH_STRIPE_PUBLIC_ENABLED', 'CASH_STRIPE_TEST_WORKSPACE_IDS', 'CASH_STRIPE_TERMINAL_ENABLED',
 ]) swap(`'${name}'`, `'TTP_REVIEW_${name}'`);
 swap('/functions/v1/cash-stripe`', '/functions/v1/cash-stripe-ttp-review`');
+// Reuse the Stripe sandbox key already stored on the server (set in September for the sandbox),
+// so nobody has to copy a secret key by hand. The test-key gate below still applies.
+swap("Deno.env.get('TTP_REVIEW_CASH_STRIPE_SECRET_KEY')", "(Deno.env.get('TTP_REVIEW_CASH_STRIPE_SECRET_KEY') || Deno.env.get('CASH_STRIPE_SANDBOX_KEY'))");
+// The Connect client ID is only needed to link a brand-new salon (video 1); status and Terminal work without it.
+swap("Deno.env.get('TTP_REVIEW_CASH_STRIPE_CONNECT_CLIENT_ID')", "(Deno.env.get('TTP_REVIEW_CASH_STRIPE_CONNECT_CLIENT_ID') || 'ca_ttp_review_oauth_not_configured')");
 // No implicit tester default: the allow-list must be set explicitly on the server.
 swap("|| 'd84f3211-d20f-45a3-9d7f-f551400690fd'", "|| ''");
 

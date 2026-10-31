@@ -21,8 +21,8 @@ const page = (message: string) => {
 const url = Deno.env.get('SUPABASE_URL')!;
 const admin = createClient(url, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, { auth: { persistSession: false } });
 const base = `${url}/functions/v1/cash-stripe-ttp-review`;
-const secret = Deno.env.get('TTP_REVIEW_CASH_STRIPE_SECRET_KEY');
-const clientId = Deno.env.get('TTP_REVIEW_CASH_STRIPE_CONNECT_CLIENT_ID');
+const secret = (Deno.env.get('TTP_REVIEW_CASH_STRIPE_SECRET_KEY') || Deno.env.get('CASH_STRIPE_SANDBOX_KEY'));
+const clientId = (Deno.env.get('TTP_REVIEW_CASH_STRIPE_CONNECT_CLIENT_ID') || 'ca_ttp_review_oauth_not_configured');
 const webhookSecret = Deno.env.get('TTP_REVIEW_CASH_STRIPE_WEBHOOK_SECRET');
 const stripe = secret ? new Stripe(secret, { httpClient: Stripe.createFetchHttpClient(), maxNetworkRetries: 0 }) : null;
 const live = secret?.startsWith('sk_live_') ?? false;
