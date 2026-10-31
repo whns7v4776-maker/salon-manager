@@ -76758,10 +76758,11 @@ const baseAgendaStyles = StyleSheet.create({
     marginTop: 14,
     marginBottom: 18,
   },
+  // Shrinking squeezed the message to two clipped lines: size it to the text, scroll only past the cap.
   webWeekDragConfirmationMessageScrollNative: {
     minHeight: 0,
-    maxHeight: 230,
-    flexShrink: 1,
+    maxHeight: 340,
+    flexShrink: 0,
   },
   webWeekDragConfirmationMessageContent: {
     alignItems: 'center',
