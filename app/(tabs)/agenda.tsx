@@ -28,6 +28,7 @@ import { QuickCustomerModalPortal } from '../../components/quick-customer-modal-
 import { OwnerCompletionReview } from '../../components/owner-completion-review';
 import { OwnerAppointmentCheckout } from '../../components/owner-appointment-checkout';
 import { NativeSheetHandle, NativeDraggableSheet } from '../../components/ui/native-sheet-drag';
+import { FitMessageScroll } from '../../components/ui/fit-message-scroll';
 import { AgendaLiveTimeOverlay } from '../../components/agenda-live-time-overlay';
 import { AgendaSlotSatin,AgendaPauseSurface } from '../../components/agenda-approved-surface';
 import { AgendaLiveSignalProvider, AgendaLiveGlow, AgendaLiveClockRing, AgendaLiveSlotLabel } from '../../components/agenda-live-glow';
@@ -55704,7 +55705,7 @@ null
                               </Text>
                             </View>
                           </View>
-                          <ScrollView
+                          <FitMessageScroll
                             style={[
                               styles.quickBookingConfirmationMessageScroll,
                               !IS_WEB &&
@@ -55719,7 +55720,7 @@ null
                             <Text style={styles.webWeekDragConfirmationMessage}>
                               {webWeekDragConfirmation.message}
                             </Text>
-                          </ScrollView>
+                          </FitMessageScroll>
                           <View
                             style={[
                               styles.webWeekDragConfirmationActions,
@@ -57007,7 +57008,7 @@ null
                     </Text>
                   </View>
                 </View>
-                <ScrollView automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
+                <FitMessageScroll automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
                   style={[
                     styles.quickBookingConfirmationMessageScroll,
                     !IS_WEB &&
@@ -57022,7 +57023,7 @@ null
                   <Text style={styles.webWeekDragConfirmationMessage}>
                     {webWeekDragConfirmation.message}
                   </Text>
-                </ScrollView>
+                </FitMessageScroll>
                 <View
                   style={[
                     styles.webWeekDragConfirmationActions,
@@ -59679,7 +59680,7 @@ null
                   </Text>
                 </View>
               </View>
-              <ScrollView automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
+              <FitMessageScroll automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
                 key={`${webWeekDragConfirmation?.title ?? 'spostamento'}-${
                   webWeekDragConfirmation?.message.length ?? 0
                 }`}
@@ -59695,7 +59696,7 @@ null
                 <Text style={styles.webWeekDragConfirmationMessage}>
                   {webWeekDragConfirmation?.message ?? ''}
                 </Text>
-              </ScrollView>
+              </FitMessageScroll>
               <View
                 style={[
                   styles.webWeekDragConfirmationActions,
