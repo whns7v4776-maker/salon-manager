@@ -4940,7 +4940,7 @@ export default function ClientiScreen() {
               <View style={{gap:Platform.OS==='web'?14:12,marginBottom:16,...(Platform.OS!=='web'?{marginTop:-9}:{})}}>
                   <View style={{height:64,flexDirection:'row',alignItems:'center',justifyContent:'space-between',...(Platform.OS === 'web' || responsive.sidebar ? {display:'none' as const}: {})}}>
                     <OwnerBrandMark compact />
-                    <HapticTouchable accessibilityRole="button" accessibilityLabel={customerPalette.night?'Attiva tema chiaro':'Attiva tema scuro'} onPress={toggleCustomerTheme} style={{width:36,height:36,borderRadius:18,alignItems:'center',justifyContent:'center',borderWidth:1,borderColor:customerPalette.border,backgroundColor:customerPalette.field}}>
+                    <HapticTouchable hapticType="none" accessibilityRole="button" accessibilityLabel={customerPalette.night?'Attiva tema chiaro':'Attiva tema scuro'} onPress={toggleCustomerTheme} style={{width:36,height:36,borderRadius:18,alignItems:'center',justifyContent:'center',borderWidth:1,borderColor:customerPalette.border,backgroundColor:customerPalette.field}}>
                       <Ionicons name={customerPalette.night?'sunny-outline':'moon-outline'} size={19} color={customerPalette.ink}/>
                     </HapticTouchable>
                   </View>

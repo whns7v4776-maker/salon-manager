@@ -195,7 +195,8 @@ export function createAgendaPremiumStyles<T extends Record<string,any>>(base:T,t
  patch('weekPlannerCell',{borderBottomWidth:StyleSheet.hairlineWidth,borderBottomColor:p.night?'rgba(237,230,215,.035)':'rgba(55,51,43,.045)'});
  for(const key of ['weekPlannerOperatorLaneCell','weekPlannerDayColumn'])patch(key,{borderRightWidth:StyleSheet.hairlineWidth,borderRightColor:p.night?'rgba(237,230,215,.10)':'rgba(55,51,43,.09)'});
  // Pauses retain their scheduling state while sharing the transparent grid surface.
- for(const key of ['weekPlannerCellLunchBreak','weekPlannerLunchBreakLabelWrapForced'])patch(key,{backgroundColor:'transparent',borderColor:p.line,shadowOpacity:0,elevation:0,...(web?{boxShadow:'none',backgroundImage:'none'}:{})});
+ // Pause rows lose their seams: the rounded pause block draws its own edge.
+ for(const key of ['weekPlannerCellLunchBreak','weekPlannerLunchBreakLabelWrapForced'])patch(key,{backgroundColor:'transparent',borderColor:'transparent',shadowOpacity:0,elevation:0,...(web?{boxShadow:'none',backgroundImage:'none'}:{})});
  patch('weekPlannerCellTextLunchBreak',{color:p.night?'#E5CBA4':'#69502F',fontWeight:'700',fontSize:10,lineHeight:14});
  patch('weekPlannerLunchBreakAction',{opacity:1});
  patch('weekPlannerLunchBreakLabelWrap',{width:'100%',height:'100%',alignItems:'center',justifyContent:'center'});

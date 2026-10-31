@@ -1,6 +1,7 @@
 import {Appearance,day,night,type Palette,type AppearanceMode,type AppearanceChangeListener} from './access-appearance-context';
 import {PremiumWebInteractions} from './ui/premium-web-interactions';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { haptic } from '../src/lib/haptics';
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import React, { useCallback, useContext, useEffect, useId, useMemo, useRef, useState } from 'react';
@@ -36,7 +37,7 @@ export function AccessAppearanceProvider({ children }: { children: React.ReactNo
       document.documentElement.setAttribute('data-premium-appearance', isNight ? 'night' : 'day');
     }
   }, [isNight]);
-  const value = useMemo(() => ({ palette: isNight ? night : day, mode: (override === null ? 'system' : override ? 'night' : 'day') as AppearanceMode, subscribeModeChanges, setMode: (mode: AppearanceMode, options?: { localOnly?: boolean }) => { touched.current = true; sessionNightOverride = mode === 'system' ? null : mode === 'night'; setOverride(sessionNightOverride); void AsyncStorage.setItem('salonpro_premium_access_appearance', mode).catch(() => undefined); if (!options?.localOnly) changeListeners.current.forEach(listener => listener(mode)); }, toggle: () => { touched.current = true; sessionNightOverride = !isNight; setOverride(!isNight); void AsyncStorage.setItem('salonpro_premium_access_appearance', !isNight ? 'night' : 'day').catch(() => undefined); changeListeners.current.forEach(listener => listener(!isNight ? 'night' : 'day')); } }), [isNight, override, subscribeModeChanges]);
+  const value = useMemo(() => ({ palette: isNight ? night : day, mode: (override === null ? 'system' : override ? 'night' : 'day') as AppearanceMode, subscribeModeChanges, setMode: (mode: AppearanceMode, options?: { localOnly?: boolean }) => { touched.current = true; sessionNightOverride = mode === 'system' ? null : mode === 'night'; setOverride(sessionNightOverride); void AsyncStorage.setItem('salonpro_premium_access_appearance', mode).catch(() => undefined); if (!options?.localOnly) changeListeners.current.forEach(listener => listener(mode)); }, toggle: () => { void haptic.light().catch(() => null); touched.current = true; sessionNightOverride = !isNight; setOverride(!isNight); void AsyncStorage.setItem('salonpro_premium_access_appearance', !isNight ? 'night' : 'day').catch(() => undefined); changeListeners.current.forEach(listener => listener(!isNight ? 'night' : 'day')); } }), [isNight, override, subscribeModeChanges]);
   return <Appearance.Provider value={value}><PremiumWebInteractions night={isNight}/>{children}</Appearance.Provider>;
 }
 export const useAccessAppearance = () => useContext(Appearance);

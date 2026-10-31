@@ -7,7 +7,9 @@ export async function waitForTapResult<T>(pending: Promise<T>, timeout: number, 
     return await Promise.race([
       pending,
       new Promise<never>((_, reject) => {
-        timer = setTimeout(() => { onTimeout?.(); reject(Error(message)); }, timeout);
+        // A failing cleanup (e.g. aborting a request on a dev binary without the
+        // networking emitter) must never crash the app: the timeout still rejects.
+        timer = setTimeout(() => { try { onTimeout?.(); } catch {} reject(Error(message)); }, timeout);
       }),
     ]);
   } finally {

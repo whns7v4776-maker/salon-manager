@@ -67,10 +67,16 @@ export function QuickSlotServiceContent({
       })}
     </View>
     <View style={s.priceRow}>
-      {hasDiscount && <Text style={s.original}>€ {original.toFixed(2)}</Text>}
+      {/* Old price above the new one, crossed by a fine bronze rule instead of a raw strike-through. */}
+      {hasDiscount && <View style={{width:'100%',alignItems:'center'}} accessibilityLabel={`Prezzo pieno € ${original.toFixed(2)}`}>
+        <View>
+          <Text style={[s.original,{textDecorationLine:'none',color:palette.muted,letterSpacing:.3}]}>€ {original.toFixed(2)}</Text>
+          <View style={{position:'absolute',left:-3,right:-3,top:'52%',height:1.25,borderRadius:1,backgroundColor:palette.night?'rgba(216,194,155,.85)':'rgba(143,109,59,.8)',transform:[{rotate:'-7deg'}]}}/>
+        </View>
+      </View>}
       <Text style={s.price}>€ {(customerPrice ?? service.prezzo).toFixed(2)}</Text>
       {customerPrice !== undefined && <View style={s.customerPriceBadge}><Text style={s.customerPriceText}>Prezzo cliente</Text></View>}
-      {hasDiscount && <View style={[s.discount, !promotionActive && s.discountInactive]}><Text style={[s.discountText, !promotionActive && s.discountTextInactive]}>{promotionState}</Text></View>}
+      {hasDiscount && <View style={[s.discount, promotionActive ? {backgroundColor:palette.night?'rgba(196,138,98,.18)':'rgba(166,98,62,.10)',borderColor:palette.night?'rgba(220,160,118,.5)':'rgba(166,98,62,.35)'} : {backgroundColor:'transparent',borderColor:palette.line}]}><Text style={[s.discountText, {color:promotionActive?(palette.night?'#E8B48E':'#9A5A36'):palette.muted,fontWeight:'600',letterSpacing:.4}]}>{promotionState}</Text></View>}
     </View>
   </View>;
 }
@@ -96,7 +102,7 @@ const baseStyles = StyleSheet.create({
   customerPriceBadge: { maxWidth: '100%', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 7, borderWidth: StyleSheet.hairlineWidth, borderColor: '#B8CDE5', backgroundColor: '#EAF2FC' },
   customerPriceText: { fontSize: 10, lineHeight: 13, fontWeight: '600', color: '#294B70', textAlign: 'center' },
   original: { fontSize: 11.5, lineHeight: 16, color: '#64748B', textDecorationLine: 'line-through' },
-  discount: { paddingHorizontal: 6, paddingVertical: 3, borderRadius: 6, backgroundColor: '#FFE4E6' },
+  discount: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999, borderWidth: StyleSheet.hairlineWidth, backgroundColor: '#FFE4E6' },
   discountText: { fontSize: 11, lineHeight: 14, fontWeight: '700', color: '#BE123C' },
   discountInactive: { backgroundColor: '#F1F5F9' },
   discountTextInactive: { color: '#64748B' },

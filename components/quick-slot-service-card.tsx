@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ActionSheetIOS, Alert, Modal, Platform, Pressable, Text, View, useWindowDimensions } from 'react-native';
+import { ActionSheetIOS, Alert, Modal, Platform, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
 import { Ionicons } from '@expo/vector-icons';
 import Animated, { useAnimatedStyle, useSharedValue, withSequence, withTiming } from 'react-native-reanimated';
 import { HapticTouchable } from './ui/haptic-touchable';
@@ -9,6 +10,7 @@ import { createAgendaPremiumStyles } from './agenda-premium-style';
 import { haptic } from '../src/lib/haptics';
 import { NativeMedal } from './owner-premium-native-home';
 import { getServiceAccentByMeta } from '../src/lib/service-accents';
+import { getRoleIcon } from '../src/lib/role-icons';
 
 type Props = React.ComponentProps<typeof HapticTouchable> & {
   serviceName: string;
@@ -61,7 +63,7 @@ export function QuickSlotServiceCard({ serviceName, serviceRole, selection, acti
   const nativeActions = Platform.OS !== 'web' && !!actions;
   return <><Animated.View style={[{ width: '100%' }, feedbackStyle]}>
     <HapticTouchable {...props}
-      style={[style,{borderColor:palette.line}]}
+      style={[style,{borderColor:palette.line,shadowColor:palette.night?'#000000':'#4A3A24',shadowOpacity:palette.night?.34:.10,shadowRadius:10,shadowOffset:{width:0,height:5},elevation:3}]}
       hapticType={Platform.OS === 'web' ? props.hapticType : 'none'}
       onPressIn={Platform.OS === 'web' ? props.onPressIn : () => {
         if (!props.disabled) void haptic.light();
@@ -72,9 +74,10 @@ export function QuickSlotServiceCard({ serviceName, serviceRole, selection, acti
       accessibilityRole="button"
       accessibilityHint={nativeActions ? 'Tieni premuto per modificare o eliminare il componente' : undefined}
     >
+      <CardSheen night={palette.night} radius={Number(StyleSheet.flatten(style)?.borderRadius ?? 16)} />
       <View style={s.serviceHeader} pointerEvents="box-none">
         {/* Enamel medallion in the role colour, as on the other premium screens. */}
-        <NativeMedal icon="cut-outline" size={Platform.OS === 'web' ? 32 : 28} iconSize={Platform.OS === 'web' ? 15 : 13} accent={getServiceAccentByMeta({ roleName: serviceRole ?? '' }).border} />
+        <NativeMedal {...getRoleIcon(serviceRole)} size={Platform.OS === 'web' ? 32 : 28} iconSize={Platform.OS === 'web' ? 15 : 13} accent={getServiceAccentByMeta({ roleName: serviceRole ?? '' }).border} />
         <View style={s.serviceHeaderEnd} pointerEvents="box-none">
         {Platform.OS === 'web' && actions ? <View ref={menuAnchor} collapsable={false}>
           <HapticTouchable
@@ -107,4 +110,23 @@ export function QuickSlotServiceCard({ serviceName, serviceRole, selection, acti
       </View>
     </Modal> : null}
   </>;
+}
+
+// Soft light from the top and a darker base: the card reads as a raised surface, not a flat tile.
+function CardSheen({ night, radius }: { night: boolean; radius: number }) {
+  const id = `sheen-${React.useId().replace(/:/g, '')}`;
+  const [size, setSize] = useState({ width: 0, height: 0 });
+  return <View pointerEvents="none" accessible={false} onLayout={event => { const { width, height } = event.nativeEvent.layout; setSize(prev => Math.abs(prev.width - width) < 1 && Math.abs(prev.height - height) < 1 ? prev : { width, height }); }} style={[StyleSheet.absoluteFillObject, { borderRadius: radius, overflow: 'hidden' }]}>
+    {size.width > 0 ? <Svg width={size.width} height={size.height}>
+      <Defs>
+        <LinearGradient id={id} x1="0" y1="0" x2="0" y2="1">
+          <Stop offset="0" stopColor="#FFFFFF" stopOpacity={night ? 0.07 : 0.75} />
+          <Stop offset="0.45" stopColor="#FFFFFF" stopOpacity={night ? 0.02 : 0.18} />
+          <Stop offset="1" stopColor={night ? '#000000' : '#8F6D3B'} stopOpacity={night ? 0.22 : 0.07} />
+        </LinearGradient>
+      </Defs>
+      <Rect width="100%" height="100%" fill={`url(#${id})`} />
+      <Rect x={radius} y={0.5} width={Math.max(0, size.width - radius * 2)} height={1} fill="#FFFFFF" opacity={night ? 0.10 : 0.9} />
+    </Svg> : null}
+  </View>;
 }
