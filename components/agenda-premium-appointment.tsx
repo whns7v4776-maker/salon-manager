@@ -4,11 +4,13 @@ import {Ionicons} from '@expo/vector-icons';
 import {getAgendaAppointmentBadgeTone} from '../src/lib/service-accents';
 import {agendaCompactFields} from '../src/lib/agenda-compact-fields';
 
-type Props={client:string;service:string;time:string;duration:number;phase:string;origin:string;operator:string;pending:boolean;ink:string;accent:string;width:number;height:number;footer:number;benefits?:React.ReactNode;sourceBadge?:React.ReactNode};
+type Props={client:string;service:string;time:string;duration:number;phase:string;origin:string;operator:string;pending:boolean;ink:string;accent:string;width:number;height:number;footer:number;benefits?:React.ReactNode;sourceBadge?:React.ReactNode;
+ /** Outcome of the whole booking: shown on every phase of a phased service. */
+ paid?:boolean;done?:boolean};
 const linesFor=(text:string,width:number,size:number)=>Math.max(1,Math.ceil(text.length*size*.53/Math.max(20,width)));
 
 /** Clock geometry belongs to the grid. This component only fills its measured body. */
-export function AgendaPremiumAppointmentContent({client,service,time,duration,phase,origin,operator,pending,ink,accent,width:estimatedWidth,height,footer,benefits,sourceBadge}:Props){
+export function AgendaPremiumAppointmentContent({client,service,time,duration,phase,origin,operator,pending,ink,accent,width:estimatedWidth,height,footer,benefits,sourceBadge,paid=false,done=false}:Props){
  const available=Math.max(0,height-footer),shortCard=duration>0&&duration<=15&&available<=32;
  const [measuredWidth,setMeasuredWidth]=React.useState(0);
  const measure=React.useCallback((event:{nativeEvent:{layout:{width:number}}})=>{
@@ -25,7 +27,12 @@ export function AgendaPremiumAppointmentContent({client,service,time,duration,ph
  const badgeTone=getAgendaAppointmentBadgeTone(ink);
  const compactBadges=height<=64,badgeSize=compactBadges?18:20;
  const phaseBadgeWidth=phasePosition?Math.max(compactBadges?24:30,Math.ceil(phasePosition.length*(compactBadges?9:10)*.6)+8):0;
- const cornerWidth=(sourceBadge?badgeSize:0)+phaseBadgeWidth+(sourceBadge&&phasePosition?4:0);
+ // Incassato vince su Completato: un incasso pieno completa anche il servizio.
+ const outcome=paid?'Incassato':done?'Completato':'';
+ const outcomeTone=paid?{bg:'#3E7C7A',fg:'#FFFFFF'}:{bg:'#8C6A35',fg:'#FFFFFF'};
+ const outcomeBadge=outcome?<View accessibilityLabel={outcome} style={{width:badgeSize,height:badgeSize,borderRadius:badgeSize/2,backgroundColor:outcomeTone.bg,alignItems:'center',justifyContent:'center',borderWidth:1.5,borderColor:'rgba(255,255,255,.85)'}}><Ionicons name={paid?'cash-outline':'checkmark'} size={compactBadges?10:11} color={outcomeTone.fg}/></View>:null;
+ const cornerCount=(sourceBadge?1:0)+(phasePosition?1:0)+(outcome?1:0);
+ const cornerWidth=(sourceBadge?badgeSize:0)+(outcome?badgeSize:0)+phaseBadgeWidth+Math.max(0,cornerCount-1)*4;
  const cornerInFooter=compactBadges&&footer>=20;
  const inline=agendaCompactFields({width:width-26-(cornerInFooter?6:cornerWidth+8),bodyHeight:available,duration,client,service,time,phase:phaseLabel,operator,pending});
  const padding=inline?0:available<42?0:available<85?3:web?9:6;
@@ -51,13 +58,13 @@ export function AgendaPremiumAppointmentContent({client,service,time,duration,ph
  const largerNameWidth=[...client].reduce((sum,char)=>sum+16*(/\s/.test(char)?.35:/[ilIjtfr.,:;!'|]/.test(char)?.38:/[MWmw@%&]/.test(char)?1:/[A-ZÀ-Ý]/.test(char)?.79:char.codePointAt(0)!>0x2E7F?1.1:.65),8);
  const growName=web&&!inline&&!compactBadges&&width>=220&&available>=64&&largerNameWidth<=nameRoom&&remaining-(showOrigin?22:0)>=5;
  const nameFont=growName?16:font,nameLineHeight=growName?20:font+3;
- const label=[time,client,service,`${duration} minuti`,phase,origin,operator,pending?'Da confermare':''].filter(Boolean).join(', ');
+ const label=[time,client,service,`${duration} minuti`,phase,origin,operator,pending?'Da confermare':'',outcome].filter(Boolean).join(', ');
  return <View onLayout={shortCard||web?measure:undefined} pointerEvents="none" accessible accessibilityLabel={label} {...(web?{title:label} as any:{})} style={{position:'absolute',top:0,bottom:0,left:0,width:'100%',padding, paddingLeft:leftPadding,justifyContent:'flex-start',gap}}>
   <View style={{position:'absolute',left:0,top:0,bottom:0,width:5,borderTopLeftRadius:9,borderBottomLeftRadius:9,backgroundColor:accent}}/>
   {available>=26||inline?<View style={{position:'absolute',left:width<160?10:14,top:inline?(available-10)/2:padding+12,width:7,gap:2}}>{[0,1,2].map(row=><View key={row} style={{flexDirection:'row',gap:2}}>{[0,1].map(col=><View key={col} style={{width:2,height:2,borderRadius:1,backgroundColor:ink,opacity:.65}}/>)}</View>)}</View>:null}
   {cornerWidth>0?<View {...(web?{dataSet:{agendaAppointmentBadges:'true'}}:{})} style={{position:'absolute',top:cornerInFooter?height-badgeSize-3:4,right:4,flexDirection:'row',alignItems:'center',gap:4}}>
    {phasePosition?<View accessibilityLabel={`Fase ${phasePosition}`} style={{height:badgeSize,minWidth:phaseBadgeWidth,paddingHorizontal:4,borderRadius:badgeSize/2,borderWidth:0,backgroundColor:badgeTone.backgroundColor,alignItems:'center',justifyContent:'center'}}><Text style={{color:badgeTone.color,fontSize:compactBadges?9:10,lineHeight:12,fontWeight:'600',fontVariant:['tabular-nums']}}>{phasePosition}</Text></View>:null}
-   {sourceBadge}
+   {outcomeBadge}{sourceBadge}
   </View>:null}
   {inline?<View {...(web?{dataSet:{agendaCompactAppointment:'true'}}:{})} style={{height:available,flexDirection:'row',alignItems:'center',gap:6,paddingRight:cornerInFooter?6:cornerWidth+8}}>
    <Text numberOfLines={1} style={{color:ink,fontSize:inline.detailSize,lineHeight:inline.lineHeight,fontVariant:['tabular-nums'],opacity:.8,flexShrink:0}}>{inline.time}</Text>
@@ -72,7 +79,7 @@ export function AgendaPremiumAppointmentContent({client,service,time,duration,ph
   {showService?<View style={{flexDirection:'row',alignItems:'center',gap:7}}><Text style={{color:ink,fontSize:web?13:12,lineHeight:web?16:15,flexShrink:1,minWidth:0}}>{service}</Text>{showInlineProcessing?<Text style={{color:ink,fontSize:11,lineHeight:14,fontWeight:'500',opacity:.8,flexShrink:0}}>{processingLabel}</Text>:null}</View>:null}
   {showPhase?<View style={{alignSelf:'flex-start',borderRadius:6,paddingHorizontal:5,paddingVertical:1,backgroundColor:'rgba(255,255,255,.16)'}}><Text style={{color:ink,fontSize:11,lineHeight:14,fontWeight:'600'}}>{phaseLabel}</Text></View>:null}
   {showDuration?<Text style={{color:ink,fontSize:11,lineHeight:14,opacity:.8}}>{duration} min</Text>:null}
-  {showOrigin?<View style={{flexDirection:'row',flexWrap:'wrap',alignItems:'center',gap:5,marginTop:3}}><Ionicons name={pending?'time-outline':origin==='Cliente'?'person-outline':origin==='Salone'?'storefront-outline':'person-circle-outline'} size={13} color={ink}/><Text style={{color:ink,fontSize:10,lineHeight:14,opacity:.8}}>{pending?'Da confermare':origin}{operator?` · ${operator}`:''}</Text>{benefits}</View>:null}
+  {showOrigin?<View style={{flexDirection:'row',flexWrap:'wrap',alignItems:'center',gap:5,marginTop:3}}>{outcome?<View style={{flexDirection:'row',alignItems:'center',gap:4,paddingHorizontal:7,paddingVertical:2,borderRadius:999,backgroundColor:outcomeTone.bg}}><Ionicons name={paid?'checkmark-done':'checkmark'} size={11} color={outcomeTone.fg}/><Text style={{color:outcomeTone.fg,fontSize:10,lineHeight:13,fontWeight:'600'}}>{outcome}</Text></View>:<><Ionicons name={pending?'time-outline':origin==='Cliente'?'person-outline':origin==='Salone'?'storefront-outline':'person-circle-outline'} size={13} color={ink}/><Text style={{color:ink,fontSize:10,lineHeight:14,opacity:.8}}>{pending?'Da confermare':origin}{operator?` · ${operator}`:''}</Text></>}{benefits}</View>:null}
   </>}
  </View>;
 }

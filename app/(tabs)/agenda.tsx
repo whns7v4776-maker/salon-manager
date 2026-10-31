@@ -34812,7 +34812,8 @@ export default function AgendaScreen() {
         origin={origin} operator={contentMode==='lane'?'':appointment.operatoreNome?.trim()||''}
         pending={showPendingVisualOverride||appointment.syntheticRequestStatus==='In attesa'}
         sourceBadge={cornerBadgeMode==='hidden'?null:renderWeekAppointmentSourceBadge(appointment,blockHeight<=64,tone.text)} ink={tone.text} accent={tone.accent??tone.border} width={width} height={blockHeight} footer={footer}
-        benefits={kinds.length?<AppointmentBenefitBadges kinds={kinds} compact dense/>:null}/>;
+        benefits={kinds.length?<AppointmentBenefitBadges kinds={kinds} compact dense/>:null}
+        paid={!!appointment.incassato&&!appointment.nonEffettuato} done={!!appointment.completato&&!appointment.nonEffettuato}/>;
     },[clienti,appointmentBenefits,appointmentGroupDisplayPositionById,getAppointmentBusySegmentStartingAt,getAppointmentDurationMinutes,getAppointmentEndTime,getEffectiveWeekAppointmentSourceBadge,getWeekAppointmentTone,renderWeekAppointmentSourceBadge,weekVisibleColWidth],
   );
   const renderWeekAppointmentContent=renderWeekAppointmentBaseContent;
@@ -56413,11 +56414,7 @@ null
                 <View style={styles.weekPendingRequestActions}>
                   <View style={styles.weekPendingRequestDecisionHeader}>
                     <View style={styles.weekPendingRequestDecisionIcon}>
-                      <Ionicons
-                        name="sparkles-outline"
-                        size={16}
-                        color="#1D4ED8"
-                      />
+                      <NativeMedal icon="sparkles-outline" size={40} iconSize={18} accent={availabilityPalette.night ? '#D6B27A' : '#8C6A35'} />
                     </View>
                     <View style={styles.weekPendingRequestDecisionCopy}>
                       <Text style={styles.weekPendingRequestDecisionTitle}>
@@ -56534,7 +56531,7 @@ null
                       <Ionicons
                         name="chevron-forward"
                         size={18}
-                        color="#2563EB"
+                        color={availabilityPalette.muted}
                         style={styles.weekAppointmentCenteredChevron}
                       />
                     </HapticTouchable>
@@ -56559,7 +56556,7 @@ null
                     <Ionicons
                       name="close-circle-outline"
                       size={17}
-                      color="#BE123C"
+                      color={availabilityPalette.night ? '#E8B4AE' : '#A35A52'}
                     />
                     <Text style={styles.weekPendingRequestRejectActionText}>
                       {weekPendingAction === 'Rifiutata'

@@ -102,6 +102,23 @@ export function createAgendaPremiumStyles<T extends Record<string,any>>(base:T,t
  patch('daySectionCard',{backgroundColor:p.surface,borderWidth:1,borderColor:p.border,borderRadius:20,padding:16});
  patch('daySectionTitle',{fontFamily:Platform.OS==='android'?'serif':'Georgia',fontWeight:'400',fontSize:20,lineHeight:26});
  patch('daySectionSubtitle',{fontSize:12,lineHeight:17,fontWeight:'400',color:p.muted});
+ // Gestisci la richiesta: stessa grammatica del popup (vetro, medaglione, azione principale, rifiuto sobrio).
+ patch('weekPendingRequestActions',{gap:10,padding:14,borderRadius:18,borderColor:p.night?p.border:'rgba(122,100,70,.2)',backgroundColor:p.night?'rgba(38,41,43,.92)':'rgba(255,253,250,.9)'});
+ patch('weekPendingRequestDecisionHeader',{gap:12,paddingHorizontal:0,paddingBottom:2});
+ patch('weekPendingRequestDecisionIcon',{width:'auto',height:'auto',borderWidth:0,backgroundColor:'transparent'});
+ patch('weekPendingRequestDecisionTitle',{color:p.ink,fontSize:15,lineHeight:20,fontWeight:'600'});
+ patch('weekPendingRequestDecisionHint',{color:p.muted,fontSize:12,lineHeight:17,fontWeight:'400'});
+ patch('weekPendingRequestPrimaryAction',{minHeight:56,borderRadius:14,backgroundColor:p.action,shadowOpacity:0,elevation:0});
+ patch('weekPendingRequestPrimaryActionText',{color:p.actionText,fontWeight:'600'});
+ patch('weekPendingRequestPrimaryActionHint',{color:p.actionText,opacity:.75,fontSize:12,fontWeight:'400'});
+ patch('weekPendingRequestAdvancedAction',{borderRadius:14,borderColor:p.night?p.border:'rgba(122,100,70,.24)',backgroundColor:p.night?'rgba(255,255,255,.04)':'#FFFFFF'});
+ patch('weekPendingRequestAdvancedActionText',{color:p.ink,fontWeight:'600'});
+ patch('weekPendingRequestRejectAction',{minHeight:46,borderRadius:14,borderWidth:1,borderColor:p.night?'rgba(217,154,146,.4)':'rgba(163,90,82,.3)',backgroundColor:'transparent'});
+ patch('weekPendingRequestRejectActionText',{color:p.night?'#E8B4AE':'#A35A52',fontWeight:'600'});
+ patch('weekAppointmentDetailsPendingHintWrap',{borderRadius:12,borderWidth:1,borderColor:p.night?'rgba(214,178,122,.35)':'rgba(140,106,53,.28)',backgroundColor:p.night?'rgba(214,178,122,.08)':'rgba(140,106,53,.06)'});
+ patch('weekAppointmentDetailsPendingHintText',{color:p.ink,fontWeight:'500'});
+ // Il +N delle richieste va nell'angolo sinistro: a destra c'è l'avatar della provenienza (cliente/salone).
+ patch('weekPendingRequestBadge',{right:undefined,left:-8});
  patch('timelineCard',{backgroundColor:p.field,borderRadius:16,borderWidth:1,borderColor:p.line,paddingHorizontal:14,paddingVertical:14,...(web?{boxShadow:'none'}:{})});
  patch('timelineCardCompact',{borderRadius:16,paddingHorizontal:12,paddingVertical:12});
  patch('timelineCardTopSheen',{opacity:0});patch('timelineCardInnerStroke',{opacity:0});
