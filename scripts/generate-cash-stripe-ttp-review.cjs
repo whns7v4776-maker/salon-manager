@@ -28,6 +28,25 @@ swap("Deno.env.get('TTP_REVIEW_CASH_STRIPE_CONNECT_CLIENT_ID')", "(Deno.env.get(
 // No implicit tester default: the allow-list must be set explicitly on the server.
 swap("|| 'd84f3211-d20f-45a3-9d7f-f551400690fd'", "|| ''");
 
+// Video 1 (a brand-new salon): while TTP_REVIEW_OPEN_TO_NEW_SALONS=true any salon may use this
+// TEST-only copy, so a salon registered on camera needs no allow-list change. Turn it off afterwards.
+swap("const checked = ", "const openToNewSalons = Deno.env.get('TTP_REVIEW_OPEN_TO_NEW_SALONS') === 'true';\nconst checked = ");
+swap("if (!publicEnabled && !rolloutWorkspaces.includes(workspaceId))", "if (!openToNewSalons && !publicEnabled && !rolloutWorkspaces.includes(workspaceId))");
+swap("if (!live && !testWorkspaces.includes(workspaceId))", "if (!openToNewSalons && !live && !testWorkspaces.includes(workspaceId))");
+// Without a test Connect client ID, a new salon gets a Stripe TEST account and Stripe's hosted
+// onboarding (KYC) directly, instead of the OAuth page.
+swap(
+  "   if (account) return reply({ error: 'Stripe è già collegato. Verifica il collegamento.' });\n",
+  `   if (account) return reply({ error: 'Stripe è già collegato. Verifica il collegamento.' });
+   if (!Deno.env.get('TTP_REVIEW_CASH_STRIPE_CONNECT_CLIENT_ID')) {
+    const created = await stripe.accounts.create({ type: 'standard', country: 'IT', metadata: { salonpro_workspace: workspaceId, purpose: 'apple-ttp-review' } });
+    checked(await admin.from('cash_stripe_accounts').insert({ workspace_id: workspaceId, account_id: created.id, livemode: false }));
+    const link = await stripe.accountLinks.create({ account: created.id, type: 'account_onboarding', refresh_url: returnUrl!, return_url: returnUrl! });
+    return reply({ url: link.url });
+   }
+`,
+);
+
 // Hard gates at the top of every request.
 swap(
   " if (request.method === 'OPTIONS') return new Response('ok', { headers: cors });\n",

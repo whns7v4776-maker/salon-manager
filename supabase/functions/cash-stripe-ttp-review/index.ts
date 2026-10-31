@@ -32,6 +32,7 @@ const bookingWorkspaceAllowed = (workspaceId: string) => {
  const test = (Deno.env.get('TTP_REVIEW_CASH_STRIPE_TEST_WORKSPACE_IDS') || '').split(',').map(id => id.trim());
  return (Deno.env.get('TTP_REVIEW_CASH_STRIPE_PUBLIC_ENABLED') === 'true' || rollout.includes(workspaceId)) && (live || test.includes(workspaceId));
 };
+const openToNewSalons = Deno.env.get('TTP_REVIEW_OPEN_TO_NEW_SALONS') === 'true';
 const checked = <T,>(r: { data: T; error: unknown }): T => { if (r.error) throw new Error('database'); return r.data; };
 
 async function reconcile(session: Stripe.Checkout.Session, account: string) {
@@ -184,9 +185,9 @@ Deno.serve(async request => {
   // Temporary rollout gate. Remove only after live payment acceptance checks.
   const rolloutWorkspaces = (Deno.env.get('TTP_REVIEW_CASH_STRIPE_ROLLOUT_WORKSPACE_IDS') || '').split(',').map(id => id.trim());
   const publicEnabled = Deno.env.get('TTP_REVIEW_CASH_STRIPE_PUBLIC_ENABLED') === 'true';
-  if (!publicEnabled && !rolloutWorkspaces.includes(workspaceId)) return reply({ configured: false, error: body.action === 'status' ? undefined : 'Pagamenti non disponibili per questo salone.' });
+  if (!openToNewSalons && !publicEnabled && !rolloutWorkspaces.includes(workspaceId)) return reply({ configured: false, error: body.action === 'status' ? undefined : 'Pagamenti non disponibili per questo salone.' });
   const testWorkspaces = (Deno.env.get('TTP_REVIEW_CASH_STRIPE_TEST_WORKSPACE_IDS') || '').split(',').map(id => id.trim());
-  if (!live && !testWorkspaces.includes(workspaceId)) return reply({ configured: false, error: body.action === 'status' ? undefined : 'I pagamenti di prova sono disponibili solo nel salone di collaudo.' });
+  if (!openToNewSalons && !live && !testWorkspaces.includes(workspaceId)) return reply({ configured: false, error: body.action === 'status' ? undefined : 'I pagamenti di prova sono disponibili solo nel salone di collaudo.' });
   if (!stripe || !clientId || !webhookSecret || !returnUrl?.startsWith('https://')) return reply({ configured: false, error: body.action === 'status' ? undefined : 'Stripe non è ancora configurato per SalonPro.' });
   const account = checked(await admin.from('cash_stripe_accounts').select('*').eq('workspace_id', workspaceId).eq('livemode', live).maybeSingle());
   if (body.action === 'booking-policy-status') return reply({enabled:bookingPaymentsEnabled});
@@ -219,6 +220,12 @@ Deno.serve(async request => {
   }
   if (body.action === 'connect') {
    if (account) return reply({ error: 'Stripe è già collegato. Verifica il collegamento.' });
+   if (!Deno.env.get('TTP_REVIEW_CASH_STRIPE_CONNECT_CLIENT_ID')) {
+    const created = await stripe.accounts.create({ type: 'standard', country: 'IT', metadata: { salonpro_workspace: workspaceId, purpose: 'apple-ttp-review' } });
+    checked(await admin.from('cash_stripe_accounts').insert({ workspace_id: workspaceId, account_id: created.id, livemode: false }));
+    const link = await stripe.accountLinks.create({ account: created.id, type: 'account_onboarding', refresh_url: returnUrl!, return_url: returnUrl! });
+    return reply({ url: link.url });
+   }
    const state = crypto.randomUUID() + crypto.randomUUID();
    checked(await admin.from('cash_stripe_oauth').insert({ state, workspace_id: workspaceId }));
    const target = new URL('https://connect.stripe.com/oauth/authorize');
