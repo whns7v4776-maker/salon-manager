@@ -56018,6 +56018,8 @@ null
                 styles.weekAppointmentDetailsScrollContent,
                 weekAppointmentPendingRequest &&
                   styles.weekAppointmentDetailsPendingScrollContent,
+                // Senza il pulsante in fondo il contenuto scorre fino al bordo: lascia spazio alla barra Home.
+                !IS_WEB && { paddingBottom: 40 },
               ]}
               showsVerticalScrollIndicator
               persistentScrollbar={IS_ANDROID}
@@ -56781,82 +56783,53 @@ null
                 </HapticTouchable>
               ) : null}
 
-              <View {...(IS_WEB?{dataSet:{agendaCheckoutSection:'true'}}:{})} style={{flexDirection:'row',flexWrap:'wrap',alignItems:'flex-start',gap:10,marginBottom:12}}>
-              {weekAppointmentDetails && !weekAppointmentPendingRequest && !isSyntheticWeekAppointmentId(weekAppointmentDetails.id) ? <AppointmentComplimentaryAction inline save={setOwnerAppointmentComplimentaryForSalon} appointmentId={weekAppointmentDetails.id} workspaceId={salonWorkspace.id} /> : null}
+              {IS_WEB && weekAppointmentCheckoutActions ? <View {...{dataSet:{agendaCheckoutSection:'true'}}} style={{flexDirection:'row',flexWrap:'wrap',alignItems:'flex-start',gap:10,marginBottom:12}}>{weekAppointmentCheckoutActions}</View> : null}
 
-              {IS_WEB ? weekAppointmentCheckoutActions : null}
-
-              </View>
-
-              {weekAppointmentDetails && !weekAppointmentPendingRequest && !isSyntheticWeekAppointmentId(weekAppointmentDetails.id) && !weekAppointmentDetails.nonEffettuato && (weekAppointmentDetails.data ?? todayDate) <= todayDate ? (
-                <HapticTouchable onPress={()=>completaAppuntamento(weekAppointmentDetails.id)} disabled={weekAppointmentDetails.completato || completionPendingId!==null} style={[styles.darkButton,styles.appointmentCompletionButton,weekAppointmentDetails.completato && styles.appointmentCompletionButtonDone,{flex:0,marginVertical:10,justifyContent:'flex-start',paddingHorizontal:12,backgroundColor:availabilityPalette.field,borderColor:availabilityPalette.line,shadowOpacity:0,elevation:0}]}>
-                  <View style={{width:30,alignItems:"center"}}><Ionicons name="checkmark-circle-outline" size={19} color={availabilityPalette.ink}/></View><Text style={[styles.darkButtonText,styles.appointmentActionText,{color:availabilityPalette.ink,textAlign:'left',flex:1,fontWeight:'600'}]}>{completionPendingId ? 'Salvataggio…' : weekAppointmentDetails.completato ? 'Servizio completato' : 'Segna servizio completato'}</Text>
-                </HapticTouchable>
-              ) : null}
-
-              {weekAppointmentDetails &&
-              weekAppointmentDetailsIsPast &&
-              !weekAppointmentPendingRequest &&
-              !isSyntheticWeekAppointmentId(weekAppointmentDetails.id) ? (
-                weekAppointmentDetails.nonEffettuato ? (
-                  <View style={styles.weekAppointmentNoShowStatus}>
-                    <Ionicons
-                      name="shield-checkmark-outline"
-                      size={19}
-                      color={availabilityPalette.ink}
-                    />
-                    <View style={styles.weekAppointmentNoShowStatusCopy}>
-                      <Text style={styles.weekAppointmentNoShowStatusTitle}>
-                        Non effettuato
-                      </Text>
-                      <Text style={styles.weekAppointmentNoShowStatusHint}>
-                        Conservato nello storico e non contabilizzato.
-                      </Text>
+              {(() => {
+                // Azioni della prenotazione in un'unica card: righe con medaglione e divisori,
+                // come Cassa e Impostazioni (prima erano quattro card staccate).
+                const details = weekAppointmentDetails;
+                if (!details || weekAppointmentPendingRequest || isSyntheticWeekAppointmentId(details.id)) return null;
+                const night = availabilityPalette.night;
+                const tone = (pair: [string, string]) => pair[night ? 0 : 1];
+                const anyPending = weekAppointmentDeletePendingId !== null || completionPendingId !== null || weekAppointmentNoShowPendingId !== null;
+                const row = (key: string, icon: React.ComponentProps<typeof Ionicons>['name'], accent: [string, string], title: string, hint: string | null, onPress: (() => void) | null, disabled = false, chevron = false, danger = false) => (
+                  <HapticTouchable key={key} accessibilityRole="button" accessibilityLabel={title} disabled={disabled || !onPress} onPress={onPress ?? undefined}
+                    hapticType="none" pressInHapticType="medium" activeOpacity={1}
+                    style={{ flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 60, paddingVertical: 12, paddingHorizontal: 14, opacity: disabled ? 0.55 : 1 }}>
+                    <NativeMedal icon={icon} size={36} iconSize={16} accent={tone(accent)} />
+                    <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+                      <Text style={{ fontSize: 15, lineHeight: 20, fontWeight: '600', color: danger ? (night ? '#EDABB6' : '#9F1239') : availabilityPalette.ink }}>{title}</Text>
+                      {hint ? <Text style={{ fontSize: 12, lineHeight: 17, color: availabilityPalette.muted }}>{hint}</Text> : null}
                     </View>
-                  </View>
-                ) : !weekAppointmentDetails.completato &&
-                  !weekAppointmentDetails.incassato ? (
-                  <HapticTouchable
-                    style={[
-                      styles.weekAppointmentNoShowButton,
-                      weekAppointmentNoShowPendingId !== null &&
-                        styles.weekAppointmentDetailsActionButtonDisabled,
-                    ]}
-                    onPress={() =>
-                      requestWeekAppointmentNoShow(weekAppointmentDetails)
-                    }
-                    hapticType="none"
-                    pressInHapticType="medium"
-                    activeOpacity={1}
-                    disabled={weekAppointmentNoShowPendingId !== null}
-                  >
-                    <View style={{width:30,alignItems:'center'}}><Ionicons name="close-circle-outline" size={19} color={availabilityPalette.night ? '#EDABB6' : '#9F1239'}/></View>
-                    <View style={styles.weekAppointmentNoShowButtonCopy}>
-                      <Text style={styles.weekAppointmentNoShowButtonTitle}>
-                        {weekAppointmentNoShowPendingId ===
-                        weekAppointmentDetails.id
-                          ? 'Salvataggio...'
-                          : 'Segna non effettuato'}
-                      </Text>
-                      <Text style={styles.weekAppointmentNoShowButtonHint}>
-                        Mantiene lo storico ed esclude ogni incasso
-                      </Text>
-                    </View>
+                    {chevron ? <Ionicons name="chevron-forward" size={16} color={availabilityPalette.muted} /> : null}
                   </HapticTouchable>
-                ) : null
-              ) : null}
-
-              {weekAppointmentDetails && weekAppointmentDetailsTemporalState !== 'future' &&
-                !weekAppointmentPendingRequest && !isSyntheticWeekAppointmentId(weekAppointmentDetails.id) && canMoveActiveWeekAppointment(weekAppointmentDetails) ? (
-                <HapticTouchable accessibilityRole="button" accessibilityLabel="Sposta appuntamento"
-                  disabled={weekAppointmentDeletePendingId !== null || completionPendingId !== null || weekAppointmentNoShowPendingId !== null}
-                  onPress={() => editWeekAppointmentFromDetails()}
-                  style={[styles.weekAppointmentNoShowButton,{backgroundColor:availabilityPalette.field,borderColor:availabilityPalette.line}]}>
-                  <View style={{width:30,alignItems:'center'}}><Ionicons name="calendar-outline" size={19} color={availabilityPalette.ink}/></View>
-                  <View style={styles.weekAppointmentNoShowButtonCopy}><Text style={[styles.weekAppointmentNoShowButtonTitle,{color:availabilityPalette.ink}]}>Sposta appuntamento</Text><Text style={styles.weekAppointmentNoShowButtonHint}>Scegli un altro orario o operatore</Text></View>
-                  <Ionicons name="chevron-forward" size={16} color={availabilityPalette.muted}/>
-                </HapticTouchable>
-              ) : null}
+                );
+                const rows: React.ReactNode[] = [];
+                rows.push(<AppointmentComplimentaryAction key="gift" listRow save={setOwnerAppointmentComplimentaryForSalon} appointmentId={details.id} workspaceId={salonWorkspace.id} />);
+                if (!details.nonEffettuato && (details.data ?? todayDate) <= todayDate) {
+                  rows.push(row('done', details.completato ? 'checkmark-circle' : 'checkmark-circle-outline', ['#86C2BE', '#3E7C7A'],
+                    completionPendingId ? 'Salvataggio…' : details.completato ? 'Servizio completato' : 'Segna servizio completato', null,
+                    () => completaAppuntamento(details.id), details.completato || completionPendingId !== null));
+                }
+                if (weekAppointmentDetailsIsPast) {
+                  if (details.nonEffettuato) {
+                    rows.push(row('noshow-state', 'shield-checkmark-outline', ['#9DBAD6', '#4D6E8F'], 'Non effettuato', 'Conservato nello storico e non contabilizzato.', null));
+                  } else if (!details.completato && !details.incassato) {
+                    rows.push(row('noshow', 'close-circle-outline', ['#D99A92', '#A35A52'],
+                      weekAppointmentNoShowPendingId === details.id ? 'Salvataggio...' : 'Segna non effettuato', 'Mantiene lo storico ed esclude ogni incasso',
+                      () => requestWeekAppointmentNoShow(details), weekAppointmentNoShowPendingId !== null));
+                  }
+                }
+                if (weekAppointmentDetailsTemporalState !== 'future' && canMoveActiveWeekAppointment(details)) {
+                  rows.push(row('move', 'calendar-outline', ['#A9ABD9', '#5B5E9A'], 'Sposta appuntamento', 'Scegli un altro orario o operatore', () => editWeekAppointmentFromDetails(), anyPending, true));
+                }
+                return (
+                  <View style={{ borderRadius: 18, borderWidth: 1, borderColor: night ? availabilityPalette.border : 'rgba(122,100,70,.2)', backgroundColor: night ? 'rgba(38,41,43,.92)' : 'rgba(255,253,250,.9)', overflow: 'hidden', marginVertical: 10 }}>
+                    {rows.map((node, index) => <View key={index} style={{ borderTopWidth: index ? 1 : 0, borderTopColor: availabilityPalette.line }}>{node}</View>)}
+                  </View>
+                );
+              })()}
 
               {weekAppointmentDetails && weekAppointmentDetailsTemporalState === 'ongoing' &&
                 !weekAppointmentPendingRequest && !isSyntheticWeekAppointmentId(weekAppointmentDetails.id) &&
@@ -56984,19 +56957,7 @@ null
               ) : null}
               </> : null}
             </ScrollView>
-
-            <HapticTouchable
-              style={styles.weekAppointmentDetailsPrimaryButton}
-              onPress={closeWeekAppointmentDetails}
-              hapticType="none"
-              pressInHapticType="medium"
-              activeOpacity={1}
-              disabled={!IS_WEB && weekPendingAction !== null}
-            >
-              <Text style={styles.weekAppointmentDetailsPrimaryButtonText}>
-                Chiudi
-              </Text>
-            </HapticTouchable>
+            {/* Niente "Chiudi" in fondo: si chiude con la X o abbassando la tendina, e il contenuto arriva fino in basso. */}
           </DockedSheetSurface>
 
           {webWeekDragConfirmation ? (

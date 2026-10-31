@@ -70,11 +70,17 @@ export function CashStripePanel({
   active = true,
   modalOnly = false,
   inlineCheckout = false,
+  preferredMethod,
+  autoStart = false,
   onAvailabilityChange,
   pendingMovements = [],
   onSelectMovement,
 }: {
   inlineCheckout?: boolean;
+  /** Method already chosen by the merchant (appointment checkout): no second choice. */
+  preferredMethod?: "checkout" | "terminal";
+  /** Create the QR / open the reader as soon as Stripe is ready. */
+  autoStart?: boolean;
   modalOnly?: boolean;
   pendingMovements?: { id: string; importo: number; descrizione: string }[];
   onSelectMovement?: (movement: { id: string; importo: number }) => void;
@@ -306,6 +312,17 @@ export function CashStripePanel({
   const paymentMethods: ("checkout" | "terminal")[] = canSelectTapToPay
     ? ["checkout", "terminal"]
     : ["checkout"];
+  useEffect(() => {
+    if (preferredMethod === "terminal" && canSelectTapToPay) setMethod("terminal");
+  }, [preferredMethod, canSelectTapToPay]);
+  const tapToPayUnavailable = preferredMethod === "terminal" && status !== null && !canSelectTapToPay;
+  const qrAutoStarted = useRef(false);
+  useEffect(() => {
+    if (!autoStart || preferredMethod !== "checkout" || qrAutoStarted.current) return;
+    if (!movement || !status?.ready || checkout || busy) return;
+    qrAutoStarted.current = true;
+    operate("checkout");
+  }, [autoStart, preferredMethod, movement?.id, status?.ready, checkout, busy]);
   const checkoutBody = (
     <View
       {...(web ? { dataSet: { cashStripeCheckout: "true" } } : {})}
@@ -350,7 +367,12 @@ export function CashStripePanel({
         Scegli come incassare. Cassa e Agenda si aggiornano dopo la conferma di
         Stripe.
       </Text>
-      {checkout?.status !== "paid" && (!web || paymentMethods.length > 1) ? (
+      {tapToPayUnavailable ? (
+        <Text style={styles.text}>
+          Tap to Pay non è ancora attivo su questo iPhone: completalo in Cassa → Pagamenti digitali. Intanto puoi usare QR / link.
+        </Text>
+      ) : null}
+      {!preferredMethod && checkout?.status !== "paid" && (!web || paymentMethods.length > 1) ? (
         <View style={{ flexDirection: "row", gap: 8 }}>
           {paymentMethods.map((value) => (
             <HapticTouchable
@@ -466,6 +488,7 @@ export function CashStripePanel({
         method === "terminal" && movement ? (
           <CashContactless
             movementId={movement.id}
+            autoStart={autoStart && preferredMethod === "terminal"}
             disabled={busy}
             onBusyChange={setContactlessBusy}
             onPaid={() => operate("check")}

@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Alert, Platform, Text, View } from 'react-native';
+import { Alert, NativeModules, Platform, Text, View } from 'react-native';
+import Constants from 'expo-constants';
+import { NativeMedal } from './owner-premium-native-home';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../src/lib/supabase';
 import { HapticTouchable } from './ui/haptic-touchable';
@@ -8,10 +10,9 @@ import { useAccessAppearance } from './access-premium';
 
 export function OwnerAppointmentCheckout({appointmentId,workspaceId,onCompleted,onCheckoutActiveChange}:{appointmentId:string;workspaceId:string;onCompleted:()=>void;onCheckoutActiveChange?:(active:boolean)=>void}) {
  const {palette:p}=useAccessAppearance();
- const checkoutInk=p.actionText;
- const checkoutWash=p.action;
- const [open,setOpen]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState('');
- const [movement,setMovement]=useState<{id:string;importo:number}|null>(null),[digital,setDigital]=useState(false);
+ const [busy,setBusy]=useState(false),[error,setError]=useState('');
+ const [movement,setMovement]=useState<{id:string;importo:number}|null>(null),[digital,setDigital]=useState(false),[preferred,setPreferred]=useState<'checkout'|'terminal'>('checkout');
+ const tapToPayAvailable=Platform.OS==='ios'&&Constants.expoConfig?.extra?.terminalBuildEnabled===true&&!!NativeModules.StripeTerminalReactNative;
  useEffect(()=>{onCheckoutActiveChange?.(digital&&!!movement);return()=>onCheckoutActiveChange?.(false);},[digital,movement?.id,onCheckoutActiveChange]);
  const lock=useRef(false);
  const run=async(job:()=>Promise<void>)=>{if(lock.current)return;lock.current=true;setBusy(true);setError('');try{await job();}catch(e){setError(e instanceof Error?e.message:'Operazione non riuscita.');}finally{lock.current=false;setBusy(false);}};
@@ -20,7 +21,6 @@ export function OwnerAppointmentCheckout({appointmentId,workspaceId,onCompleted,
   if(e)throw new Error(e.message);
   const result=await supabase.rpc('collect_owner_appointment_checkout_v1',{p_movement:data.id,p_workspace:workspaceId,p_method:method});
   if(result.error)throw new Error(result.error.message);
-  setOpen(false);
   // Refresh the authoritative appointment outcome without marking a partially paid group completed.
   onCompleted();
  });
@@ -28,10 +28,39 @@ export function OwnerAppointmentCheckout({appointmentId,workspaceId,onCompleted,
   const message=`Confermi di aver ricevuto il pagamento ${label.toLowerCase()}? Il servizio viene completato quando il saldo è interamente pagato.`;
   if(Platform.OS==='web'){if(window.confirm(message))collect(method);}else Alert.alert('Incassa e completa',message,[{text:'Annulla',style:'cancel'},{text:'Conferma pagamento',onPress:()=>collect(method)}]);
  };
+ const startDigital=(next:'checkout'|'terminal')=>void run(async()=>{
+  const {data,error:e}=await supabase.rpc('prepare_owner_appointment_checkout_v1',{p_appointment:appointmentId,p_workspace:workspaceId});
+  if(e)throw new Error(e.message);
+  if(data.digitalAvailable===false)throw new Error('Acconto e saldo sono separati: gestiscili nella Cassa oppure registra qui il saldo ricevuto con Contanti, POS esterno o Bonifico.');
+  setPreferred(next);setMovement(data);setDigital(true);
+ });
+ const night=p.night;
+ const tile=(key:string,icon:React.ComponentProps<typeof Ionicons>['name'],accent:[string,string],label:string,onPress:()=>void,primary=false)=>(
+  <HapticTouchable key={key} accessibilityRole="button" accessibilityLabel={label} disabled={busy} onPress={onPress}
+   style={{flexGrow:1,flexBasis:'46%',minWidth:0,minHeight:58,flexDirection:'row',alignItems:'center',gap:10,paddingVertical:10,paddingHorizontal:12,borderRadius:14,borderWidth:1,
+    borderColor:primary?(night?'#9C8461':'#7A6446'):(night?p.border:'rgba(122,100,70,.24)'),
+    backgroundColor:primary?(night?'rgba(156,132,97,.16)':'rgba(122,100,70,.09)'):(night?'rgba(255,255,255,.04)':'#FFFFFF'),opacity:busy?.6:1}}>
+   <NativeMedal icon={icon} size={34} iconSize={15} accent={accent[night?0:1]}/>
+   <Text numberOfLines={2} style={{flex:1,minWidth:0,fontSize:14,lineHeight:18,fontWeight:'600',color:p.ink}}>{label}</Text>
+  </HapticTouchable>
+ );
+ // One-tap checkout: every way to get paid is visible at once. Tap to Pay opens the reader,
+ // QR / link creates the code, cash/POS/transfer ask a single confirmation.
  return <View style={{gap:10}}>
-  <HapticTouchable accessibilityRole="button" disabled={busy} onPress={()=>setOpen(v=>!v)} style={{paddingHorizontal:16,paddingVertical:9,minHeight:40,borderRadius:12,backgroundColor:checkoutWash,borderWidth:1,borderColor:p.action,flexDirection:'row',justifyContent:'center',alignItems:'center',gap:8}}><Ionicons name="wallet-outline" size={19} color={checkoutInk}/><Text style={{color:checkoutInk,fontWeight:'600',fontSize:13,lineHeight:19}}>{busy?'Salvataggio…':'Incassa e completa'}</Text></HapticTouchable>
-  {open?<View style={{padding:14,borderRadius:16,backgroundColor:p.field,borderWidth:1,borderColor:p.line,gap:9}}><Text style={{fontSize:13,color:p.muted}}>Seleziona il pagamento già ricevuto.</Text>{[['cash','Contanti'],['card','POS esterno'],['bank_transfer','Bonifico']].map(([method,label])=><HapticTouchable key={method} accessibilityRole="button" disabled={busy} onPress={()=>confirm(method,label)} style={{padding:12,backgroundColor:p.field,borderWidth:1,borderColor:p.border,borderRadius:12}}><Text style={{fontSize:14,fontWeight:'600',color:p.ink}}>{label}</Text></HapticTouchable>)}{<HapticTouchable disabled={busy} onPress={()=>void run(async()=>{const {data,error:e}=await supabase.rpc('prepare_owner_appointment_checkout_v1',{p_appointment:appointmentId,p_workspace:workspaceId});if(e)throw new Error(e.message);if(data.digitalAvailable===false)throw new Error('Acconto e saldo sono separati: gestiscili nella Cassa oppure registra qui il saldo ricevuto con Contanti, POS esterno o Bonifico.');setMovement(data);setDigital(true);})} style={{padding:12,backgroundColor:p.field,borderWidth:1,borderColor:p.border,borderRadius:12}}><Text style={{fontSize:14,fontWeight:'600',color:p.ink}}>QR, link o Tap to Pay</Text></HapticTouchable>}</View>:null}
-  {error?<Text accessibilityRole="alert" style={{color:'#B42332',fontSize:13}}>{error}</Text>:null}
-  {digital&&movement?<CashStripePanel modalOnly inlineCheckout movement={movement} onClose={()=>{setDigital(false);setMovement(null);onCompleted();}}/>:null}
+  {!(digital&&movement)?<View style={{padding:14,gap:12,borderRadius:18,borderWidth:1,borderColor:night?p.border:'rgba(122,100,70,.2)',backgroundColor:night?'rgba(38,41,43,.92)':'rgba(250,247,241,.96)'}}>
+   <View style={{flexDirection:'row',alignItems:'center',gap:10}}>
+    <NativeMedal icon="wallet-outline" size={38} iconSize={17} accent={night?'#D6B27A':'#8C6A35'}/>
+    <View style={{flex:1,minWidth:0}}><Text style={{fontSize:16,fontWeight:'600',color:p.ink}}>{busy?'Preparazione…':'Incassa e completa'}</Text><Text style={{fontSize:12,lineHeight:17,color:p.muted}}>Tocca come paga il cliente.</Text></View>
+   </View>
+   <View style={{flexDirection:'row',flexWrap:'wrap',gap:8}}>
+    {tapToPayAvailable?tile('terminal','phone-portrait-outline',['#9DBAD6','#4D6E8F'],'Tap to Pay su iPhone',()=>startDigital('terminal'),true):null}
+    {tile('checkout','qr-code-outline',['#A9ABD9','#5B5E9A'],'QR / link',()=>startDigital('checkout'),!tapToPayAvailable)}
+    {tile('cash','cash-outline',['#86C2BE','#3E7C7A'],'Contanti',()=>confirm('cash','Contanti'))}
+    {tile('card','card-outline',['#BFA6D4','#7A5C8E'],'POS esterno',()=>confirm('card','POS esterno'))}
+    {tile('bank','business-outline',['#C9AA8C','#7E6247'],'Bonifico',()=>confirm('bank_transfer','Bonifico'))}
+   </View>
+  </View>:null}
+  {error?<Text accessibilityRole="alert" style={{color:night?'#F0B5BA':'#963F4A',fontSize:13}}>{error}</Text>:null}
+  {digital&&movement?<CashStripePanel modalOnly inlineCheckout preferredMethod={preferred} autoStart movement={movement} onClose={()=>{setDigital(false);setMovement(null);onCompleted();}}/>:null}
  </View>;
 }

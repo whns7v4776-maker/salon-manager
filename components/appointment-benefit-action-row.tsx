@@ -1,3 +1,4 @@
+import { NativeMedal } from './owner-premium-native-home';
 import React from 'react';
 import { Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -5,7 +6,9 @@ import { useAccessAppearance } from './access-premium';
 import { HapticTouchable } from './ui/haptic-touchable';
 
 /** Compact secondary action; the entire row is the touch target. */
-export function AppointmentBenefitActionRow({ title, caption, icon, tone, actionLabel, disabled, accessibilityLabel, onPress }: {
+export function AppointmentBenefitActionRow({ title, caption, icon, tone, actionLabel, disabled, accessibilityLabel, onPress, listRow = false }: {
+  /** Row inside a grouped card: no own border or fill, enamel medallion. */
+  listRow?: boolean;
   title: string;
   caption?: string;
   icon: React.ComponentProps<typeof Ionicons>['name'];
@@ -25,11 +28,11 @@ export function AppointmentBenefitActionRow({ title, caption, icon, tone, action
       accessibilityState={{ disabled }}
       disabled={disabled}
       onPress={onPress}
-      style={{ width: '100%', minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 9, paddingHorizontal: 12, borderRadius: 14, borderWidth: 1, borderColor: p.line, backgroundColor: p.field, opacity: disabled ? 0.55 : 1 }}
+      style={listRow ? { width: '100%', minHeight: 60, flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, paddingHorizontal: 14, opacity: disabled ? 0.55 : 1 } : { width: '100%', minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 9, paddingHorizontal: 12, borderRadius: 14, borderWidth: 1, borderColor: p.line, backgroundColor: p.field, opacity: disabled ? 0.55 : 1 }}
     >
-      <View style={{ width: 30, height: 30, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: wash }}>
+      {listRow ? <NativeMedal icon={icon} size={36} iconSize={16} accent={tone === 'rose' ? (p.night ? '#D69AB0' : '#9A4F67') : (p.night ? '#D6B27A' : '#8C6A35')} /> : <View style={{ width: 30, height: 30, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: wash }}>
         <Ionicons name={icon} size={18} color={accent} />
-      </View>
+      </View>}
       <View style={{ flex: 1, minWidth: 0, gap: 1 }}>
         {caption ? <Text style={{ color: p.muted, fontSize: 11, lineHeight: 15, fontWeight: '500' }}>{caption}</Text> : null}
         <Text style={{ color: p.ink, fontSize: 14, lineHeight: 20, fontWeight: '600', flexShrink: 1 }}>{title}</Text>

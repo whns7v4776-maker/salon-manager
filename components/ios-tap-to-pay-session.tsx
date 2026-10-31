@@ -131,7 +131,7 @@ export function IosTapToPaySetup() {
     </Modal>
   </View>;
 }
-export function IosTapToPayCheckout({movementId,disabled,onPaid,onBusyChange}:ContactlessProps) {
+export function IosTapToPayCheckout({movementId,disabled,onPaid,onBusyChange,autoStart}:ContactlessProps) {
   const {controller,state}=useSession();
   const paidRef=useRef(onPaid);paidRef.current=onPaid;
   const movementRef=useRef(movementId);movementRef.current=movementId;
@@ -143,6 +143,14 @@ export function IosTapToPayCheckout({movementId,disabled,onPaid,onBusyChange}:Co
     });return()=>listener.remove();
   },[movementId,controller]);
   const run=(job:()=>Promise<unknown>)=>void job().catch(()=>{});
+  // One-tap checkout: the merchant already chose Tap to Pay, so open the reader once.
+  const autoStarted=useRef(false);
+  useEffect(()=>{
+    if(!autoStart||autoStarted.current||disabled||state.busy||state.recovering)return;
+    if(state.movementId===movementId&&state.outcome==='paid')return;
+    autoStarted.current=true;
+    run(()=>controller.pay(movementId,onPaid));
+  },[autoStart,disabled,state.busy,state.recovering,state.movementId,state.outcome,movementId,controller,onPaid]);
   return <View style={{gap:10}}>
     {state.busy?<ActivityIndicator color="#244B85" accessibilityLabel="Configurazione o pagamento in corso"/>:null}
     <Text accessibilityLiveRegion="polite" style={styles.text}>{state.message}</Text>
