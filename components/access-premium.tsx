@@ -5,7 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import React, { useCallback, useContext, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Platform, Pressable, StyleSheet, Text, useColorScheme, View, type ViewStyle } from 'react-native';
-import Svg, { Defs, FeColorMatrix, Filter, Image as SvgImage, LinearGradient, Mask, Path, Rect, Stop } from 'react-native-svg';
+import Svg, { Defs, FeColorMatrix, Filter, Image as SvgImage, LinearGradient, Path, Rect, Stop } from 'react-native-svg';
 import Animated, { interpolate, useAnimatedStyle, type SharedValue } from 'react-native-reanimated';
 
 let sessionNightOverride: boolean | null = null;
@@ -77,30 +77,26 @@ export function AccessBackdrop() {
 /** Native stand-in for the web scroll mask: thin strips of the same satin fade the cards out where
  *  the scroll viewport cuts them (under the header, above the keyboard) instead of a hard edge.
  *  Must sit in the same box as AccessBackdrop so the image crop lines up. */
-export function AccessScrollEdgeFade({ top, bottom, scrollY, size = 24 }: { top: number; bottom: number; scrollY: SharedValue<number>; size?: number }) {
+export function AccessScrollEdgeFade({ top, bottom, scrollY, size = 28 }: { top: number; bottom: number; scrollY: SharedValue<number>; size?: number }) {
   const { palette: p } = useAccessAppearance();
   const [box, setBox] = useState({ width: 0, height: 0 });
-  const id = `edge-${useId().replace(/[^a-zA-Z0-9]/g, '')}`;
   // At rest the first card sits just below the header: fade in only once it scrolls under it.
   const topStyle = useAnimatedStyle(() => ({ opacity: interpolate(scrollY.value, [0, 14], [0, 1], 'clamp') }));
   const source = p.night ? require('../assets/images/access-night-satin-v1.png') : require('../assets/images/access-day-satin-v1.png');
-  const strip = (y: number, fadeDown: boolean, key: string) => <Svg width={box.width} height={box.height} style={{ position: 'absolute', left: 0, top: -y }}>
-    <Defs>
-      <LinearGradient id={`${id}-${key}-g`} gradientUnits="userSpaceOnUse" x1="0" y1={y} x2="0" y2={y + size}>
-        <Stop stopColor="#FFFFFF" stopOpacity={fadeDown ? 1 : 0} />
-        <Stop offset="0.5" stopColor="#FFFFFF" stopOpacity={0.6} />
-        <Stop offset="1" stopColor="#FFFFFF" stopOpacity={fadeDown ? 0 : 1} />
-      </LinearGradient>
-      <Mask id={`${id}-${key}-m`} maskUnits="userSpaceOnUse" x="0" y={y} width={box.width} height={size}>
-        <Rect x="0" y={y} width={box.width} height={size} fill={`url(#${id}-${key}-g)`} />
-      </Mask>
-    </Defs>
-    <SvgImage href={source} x="0" y="0" width={box.width} height={box.height} preserveAspectRatio="xMidYMid slice" mask={`url(#${id}-${key}-m)`} />
-  </Svg>;
+  // Thin bands of the very same expo-image crop as AccessBackdrop, each a little more transparent:
+  // an SVG copy of the satin did not match it and left a hard cut with two side edges on the cards.
+  const steps = 14, band = size / steps;
+  const strip = (y: number, fadeDown: boolean) => Array.from({ length: steps }, (_, index) => {
+    const bandTop = y + index * band;
+    const opacity = fadeDown ? 1 - (index + .5) / steps : (index + .5) / steps;
+    return <View key={index} style={{ position: 'absolute', left: 0, right: 0, top: bandTop - y, height: band + .5, overflow: 'hidden', opacity }}>
+      <Image source={source} contentFit="cover" contentPosition="center" style={{ position: 'absolute', left: 0, top: -bandTop, width: box.width, height: box.height }} />
+    </View>;
+  });
   return <View pointerEvents="none" accessible={false} style={StyleSheet.absoluteFill} onLayout={e => setBox({ width: e.nativeEvent.layout.width, height: e.nativeEvent.layout.height })}>
     {box.width > 0 && bottom > top + size * 2 ? <>
-      <Animated.View style={[{ position: 'absolute', left: 0, right: 0, top, height: size, overflow: 'hidden' }, topStyle]}>{strip(top, true, 't')}</Animated.View>
-      <View style={{ position: 'absolute', left: 0, right: 0, top: bottom - size, height: size, overflow: 'hidden' }}>{strip(bottom - size, false, 'b')}</View>
+      <Animated.View style={[{ position: 'absolute', left: 0, right: 0, top, height: size }, topStyle]}>{strip(top, true)}</Animated.View>
+      <View style={{ position: 'absolute', left: 0, right: 0, top: bottom - size, height: size }}>{strip(bottom - size, false)}</View>
     </> : null}
   </View>;
 }
