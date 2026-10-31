@@ -232,7 +232,9 @@ Deno.serve(async request => {
     } catch (e) {
      console.error('ttp-review connect', e);
      // Test-only copy: Stripe's reason is shown so a setup problem can be fixed on the spot.
-     return reply({ error: 'Collegamento Stripe di prova non riuscito: ' + (e instanceof Error ? e.message : 'errore sconosciuto') }, 400);
+     // Name the sandbox the server key belongs to, so the right one gets the dashboard setting.
+     const platform = await stripe.accounts.retrieve().then((a: any) => (a.settings?.dashboard?.display_name || a.business_profile?.name || 'senza nome') + ' (' + a.id + ')').catch(() => 'non identificata');
+     return reply({ error: 'Sandbox Stripe usata: ' + platform + '. Collegamento di prova non riuscito: ' + (e instanceof Error ? e.message : 'errore sconosciuto') }, 400);
     }
    }
    const state = crypto.randomUUID() + crypto.randomUUID();
