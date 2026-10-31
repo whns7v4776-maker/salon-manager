@@ -1,5 +1,5 @@
 import { TABLET_MODAL_ORIENTATIONS } from '../src/lib/tablet-modal-orientations';
-import React, {useRef,useState} from 'react';
+import React, {useEffect,useRef,useState} from 'react';
 import {Modal,Platform,ScrollView,Text,View,useWindowDimensions} from 'react-native';
 import {Ionicons} from '@expo/vector-icons';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
@@ -26,11 +26,17 @@ export function OwnerCompletionReview({items,visible=true,onClose,onComplete,onD
   lock.current=true;setBusy(true);setMessage('');
   let saved=0;const failed:string[]=[];let error='';
   try{
-   for(const id of valid){try{const result=await onComplete(id);if(result.ok)saved++;else{failed.push(id);error=result.error||'Salvataggio non verificato.';}}catch{failed.push(id);error='Connessione interrotta. Riprova i servizi rimasti.';}}
+   // Each completion is its own server call: run them side by side (a few at a time) instead of
+   // waiting for every reply in turn, which made "segna tutti" crawl on long lists.
+   const queue=[...valid];
+   const worker=async()=>{for(let id=queue.shift();id;id=queue.shift()){try{const result=await onComplete(id);if(result.ok)saved++;else{failed.push(id);error=result.error||'Salvataggio non verificato.';}}catch{failed.push(id);error='Connessione interrotta. Riprova i servizi rimasti.';}}};
+   await Promise.all(Array.from({length:Math.min(6,queue.length)},worker));
    setSelected(failed);setMessage(`${saved} ${saved===1?'servizio completato':'servizi completati'}.${failed.length?` ${failed.length} da riprovare: ${error}`:''}`);
   }finally{lock.current=false;setBusy(false);}
  };
  const close=()=>{if(!lock.current)onClose();};
+ // Nothing left to verify: the review has done its job, close it on its own.
+ useEffect(()=>{if(visible&&!busy&&items.length===0)onClose();},[visible,busy,items.length,onClose]);
  return <Modal supportedOrientations={TABLET_MODAL_ORIENTATIONS} visible={visible} transparent animationType="fade" onRequestClose={close}>
   <View style={{flex:1,backgroundColor:p.night?'rgba(0,0,0,.48)':'rgba(46,42,35,.27)',justifyContent:web?'center':'flex-end',alignItems:'center',padding:web?(compact?12:24):0,...(web?{backdropFilter:'blur(10px)'} as any:{})}}>
    <NativeDraggableSheet testID="agenda-completion-review" onClose={close} dismissDisabled={busy} style={{width:'100%',maxWidth:640,maxHeight:Math.max(240,height-(web?48:insets.top+16)),backgroundColor:panel,borderRadius:24,overflow:'hidden',borderWidth:1,borderColor:p.border,...(web?{boxShadow:'0 22px 80px rgba(0,0,0,.20),inset 0 1px 0 rgba(255,255,255,.16)'} as any:{})}}>
