@@ -17488,6 +17488,9 @@ export default function ServiziScreen() {
             }}
           </NativeEditTextDraftBoundary>
         ) : null}
+        {/* iOS cannot present a sibling modal over this sheet: a save warning opened outside it stayed
+            invisible and «Salva servizio» looked dead. Keep the notice inside the sheet while it is open. */}
+        {androidServiceEditModalVisible ? renderCreationNotice() : null}
       <NumberPickerModal
         embedded
         visible={serviceNumberPickerTarget === 'phaseInitial'}
@@ -18135,7 +18138,7 @@ export default function ServiziScreen() {
           </Animated.View>
         </View>
       ) : null}
-      {!nativeCreationPanel ? renderCreationNotice() : null}
+      {!nativeCreationPanel && !androidServiceEditModalVisible ? renderCreationNotice() : null}
       <Modal supportedOrientations={TABLET_MODAL_ORIENTATIONS}
         visible={confirmDialog.visible}
         onShow={resetServiceSwipeAfterPopupShown}
