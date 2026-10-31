@@ -55947,6 +55947,8 @@ null
           }
         }} : {})}
             testID="agenda-appointment-details"
+            includeBottomSafeArea={false}
+            bottomSafeAreaSpacing={0}
             style={[
               styles.weekAppointmentDetailsCard,
               styles.weekAppointmentDetailsViewportCard,
