@@ -8,7 +8,7 @@ import {StripeTerminalProvider,useStripeTerminal} from '@stripe/stripe-terminal-
 import * as Location from 'expo-location';
 import {supabase} from '../src/lib/supabase';
 import {IosTapToPayController} from '../src/lib/ios-tap-to-pay-controller';
-import {showTapToPayEducation} from '../src/lib/tap-to-pay-education';
+import {showAppleTapToPayEducation, showTapToPayEducation} from '../src/lib/tap-to-pay-education';
 import {callIosTerminal} from '../src/lib/ios-terminal-request';
 import {HapticTouchable} from './ui/haptic-touchable';
 import type {IosTapProviderProps} from './ios-tap-to-pay-provider';
@@ -124,7 +124,8 @@ export function IosTapToPaySetup() {
     {state.locations.length>1?state.locations.map(location=><Action key={location.id} disabled={state.busy||state.recovering} label={`${state.selected===location.id?'✓ ':''}${location.name}`} onPress={()=>void controller.select(location.id).catch(()=>{})}/>):null}
     <View style={styles.actions}>
       <View style={{flex:1}}><Action disabled={state.busy||state.recovering} label={state.ready?'Verifica telefono':'Attiva Tap to Pay'} primary onPress={()=>void activate()}/></View>
-      <View style={{flex:1}}><Action label="Come si usa" onPress={()=>setHelpOpen(true)}/></View>
+      {/* Apple's official guide first (required for review); our own steps only if it is unavailable. */}
+      <View style={{flex:1}}><Action label="Come si usa" onPress={()=>{void showAppleTapToPayEducation().then(shown=>{if(!shown&&mounted.current)setHelpOpen(true);});}}/></View>
     </View>
     <Text style={[styles.note,{color:t.muted}]}>L’attivazione e i termini Apple spettano al titolare del salone. Il pagamento parte solo scegliendo un incasso.</Text>
     <Modal supportedOrientations={TABLET_MODAL_ORIENTATIONS} visible={helpOpen} transparent animationType="fade" onRequestClose={()=>setHelpOpen(false)}>

@@ -21,3 +21,9 @@ export async function showTapToPayEducation(force = false, identity = ''): Promi
   if (accepted) await AsyncStorage.setItem(key, 'seen').catch(() => {});
   return accepted;
 }
+
+/** Opens Apple's official merchant education (ProximityReaderDiscovery). False when unavailable. */
+export async function showAppleTapToPayEducation(): Promise<boolean> {
+  if (Platform.OS !== 'ios' || !nativeEducation) return false;
+  return nativeEducation.showHowToTap().catch(() => false);
+}
