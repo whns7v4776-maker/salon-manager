@@ -51,17 +51,24 @@ export async function reconcileTerminal(admin: any, intent: Stripe.PaymentIntent
  }
 }
 
-export async function terminalAction({admin,stripe,account,workspaceId,body,live,enabled}:any) {
+// allowTest is set only by the Apple review copy (cash-stripe-ttp-review, TEST keys): production passes nothing.
+export async function terminalAction({admin,stripe,account,workspaceId,body,live,enabled,allowTest=false}:any) {
+ const modeOk = live || allowTest === true;
  const options = {stripeAccount:account.account_id};
  if (body.action === 'terminal-status') {
-  if (!enabled || !live) return {enabled:false,reason:'Contactless in preparazione: manca il collaudo della nuova app.'};
+  if (!enabled || !modeOk) return {enabled:false,reason:'Contactless in preparazione: manca il collaudo della nuova app.'};
   const a = await stripe.accounts.retrieve(account.account_id);
   if (!a.charges_enabled || a.country !== 'IT') return {enabled:false,reason:'Completa l’attivazione Stripe del salone in Italia.'};
-  const locations = await stripe.terminal.locations.list({limit:100},options);
+  let locations = await stripe.terminal.locations.list({limit:100},options);
+  // Review copy only: a TEST account without an Italian location gets one, so the reader can connect.
+  if (allowTest === true && !live && !locations.data.some((l:any)=>l.address?.country==='IT')) {
+   await stripe.terminal.locations.create({display_name:'SalonPro · sede di prova',address:{line1:'Via di prova 1',city:'Milano',postal_code:'20121',country:'IT'}},options);
+   locations = await stripe.terminal.locations.list({limit:100},options);
+  }
   return {enabled:true,locations:locations.data.filter((l:any)=>l.address?.country==='IT').map((l:any)=>({id:l.id,name:l.display_name}))};
  }
  // The gate blocks new collection, never recovery/cancellation of an existing payment.
- if (!['terminal-check','terminal-cancel'].includes(body.action) && (!enabled || !live)) throw Error('Contactless non ancora abilitato: usa QR / link o POS esterno.');
+ if (!['terminal-check','terminal-cancel'].includes(body.action) && (!enabled || !modeOk)) throw Error('Contactless non ancora abilitato: usa QR / link o POS esterno.');
  if (body.action === 'terminal-token') {
   const location = await stripe.terminal.locations.retrieve(body.locationId,options);
   if (location.deleted || location.address?.country !== 'IT') throw Error('Sede Stripe non valida.');
