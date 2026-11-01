@@ -230,6 +230,14 @@ export function OwnerAccessScreen({
   const registerPasswordRef = useRef<TextInput | null>(null);
   const registerPasswordConfirmRef = useRef<TextInput | null>(null);
   const [activeMode, setActiveMode] = useState<'login' | 'register'>('login');
+  // Android: the tall bottom room is only for the keyboard; with it closed the page ends after the footer.
+  const [androidKeyboardOpen, setAndroidKeyboardOpen] = useState(false);
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const shown = Keyboard.addListener('keyboardDidShow', () => setAndroidKeyboardOpen(true));
+    const hidden = Keyboard.addListener('keyboardDidHide', () => setAndroidKeyboardOpen(false));
+    return () => { shown.remove(); hidden.remove(); };
+  }, []);
   useEffect(() => { onPresentationModeChange?.(activeMode); }, [activeMode, onPresentationModeChange]);
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
@@ -2578,6 +2586,7 @@ export function OwnerAccessScreen({
             style={embedded ? styles.embeddedScrollView : undefined}
             contentContainerStyle={[
               styles.scrollContent,
+              Platform.OS === 'android' && !androidKeyboardOpen && styles.scrollContentAndroidIdle,
               embedded && styles.embeddedScrollContent,
               registerPasswordFocused && styles.scrollContentPasswordFocused,
             ]}
@@ -2732,6 +2741,9 @@ const baseStyles = StyleSheet.create(withAndroidStyleSafety({
     paddingTop: 56,
     paddingBottom: Platform.OS === 'ios' ? 260 : 220,
     alignItems: 'center',
+  },
+  scrollContentAndroidIdle: {
+    paddingBottom: 32,
   },
   embeddedScrollContent: {
     flexGrow: 0,

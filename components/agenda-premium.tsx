@@ -1,6 +1,6 @@
 import {AgendaSlotFeedbackContext} from './agenda-slot-feedback';
 import { OwnerBrandMark } from './salon-brand-mark';
-import {NativeAgendaCaption,NativeAgendaOperatorHeading} from './agenda-native-labels';
+import {NativeAgendaCaption,NativeAgendaOperatorHeading,NativeAgendaStatePill} from './agenda-native-labels';
 import {AgendaOperatorSurface,AgendaStateRule} from './agenda-approved-surface';
 import {WebHorizontalScrollRail} from './ui/web-horizontal-scroll-rail';
 import React from 'react';
@@ -23,6 +23,9 @@ export function AgendaPremiumBlockedSlotLabel({label,textStyle}:{label:string;te
 export function AgendaStateLabel({label,textStyle,action=false}:{label:string;textStyle?:StyleProp<TextStyle>;action?:boolean}){
  const p=useSolidAgendaPalette();
  const pressed=React.useContext(AgendaSlotFeedbackContext);
+ if(!web)return <View pointerEvents="none" style={{width:'100%',height:'100%',alignItems:'center',justifyContent:'center',paddingHorizontal:4}}>
+  <NativeAgendaStatePill label={label} icon={label==='Passato'?undefined:'lock-closed-outline'} night={p.night} color={p.muted}/>
+ </View>;
  return <View pointerEvents="none" style={{width:'100%',height:'100%',flexDirection:'row',alignItems:'center',justifyContent:'center',gap:web?12:6,paddingHorizontal:web?14:4}}>
   <View style={{flex:1,alignItems:'flex-end',opacity:pressed?0:1}}><AgendaStateRule night={p.night} hideOnAction={action}/></View>
   <View {...(web?{dataSet:{agendaBlockedLabel:action?'true':'false'}}:{})} style={{position:'relative',alignItems:'center',maxWidth:'72%',flexShrink:1}}>

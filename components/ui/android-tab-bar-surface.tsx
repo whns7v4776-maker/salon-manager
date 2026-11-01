@@ -29,9 +29,9 @@ export function AndroidTabBarSurface({
     >
       <Defs>
         <LinearGradient id={gradientId} x1="0%" y1="0%" x2="0%" y2="100%">
-          <Stop offset="0" stopColor={tint} stopOpacity={selected ? 0.20 : premium ? 0.30 : customer ? 0.80 : 0.74} />
-          <Stop offset="0.45" stopColor={tint} stopOpacity={selected ? 0.10 : premium ? 0.25 : customer ? 0.84 : 0.78} />
-          <Stop offset="1" stopColor={tint} stopOpacity={selected ? 0.06 : premium ? 0.20 : customer ? 0.87 : 0.82} />
+          <Stop offset="0" stopColor={tint} stopOpacity={selected ? 0.20 : premium ? 0.97 : customer ? 0.80 : 0.74} />
+          <Stop offset="0.45" stopColor={tint} stopOpacity={selected ? 0.10 : premium ? 0.98 : customer ? 0.84 : 0.78} />
+          <Stop offset="1" stopColor={tint} stopOpacity={selected ? 0.06 : premium ? 0.98 : customer ? 0.87 : 0.82} />
         </LinearGradient>
       </Defs>
       <Rect

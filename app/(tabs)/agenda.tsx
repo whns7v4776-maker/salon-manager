@@ -31,6 +31,7 @@ import { NativeSheetHandle, NativeDraggableSheet } from '../../components/ui/nat
 import { FitMessageScroll } from '../../components/ui/fit-message-scroll';
 import { AgendaLiveTimeOverlay } from '../../components/agenda-live-time-overlay';
 import { AgendaSlotSatin,AgendaPauseSurface,AgendaClosedLane } from '../../components/agenda-approved-surface';
+import { NativeAgendaStatePill } from '../../components/agenda-native-labels';
 import { getRoleIcon } from '../../src/lib/role-icons';
 import { AgendaLiveSignalProvider, AgendaLiveGlow, AgendaLiveClockRing, AgendaLiveSlotLabel } from '../../components/agenda-live-glow';
 import { useAppointmentBenefits } from '../../hooks/use-appointment-benefits';
@@ -19042,6 +19043,15 @@ export default function AgendaScreen() {
       const night = availabilityPalette.night;
       const ink = night ? '#E5CBA4' : '#6B5230';
       const radius = 14;
+      if (!IS_WEB) {
+        // App: the pause lives inside the slots like "Chiuso": an edge-to-edge warm wash, its capsule in the first slot.
+        const pauseRange = [runStart, Math.min(runEnd, 24 * 60 - 1)].map(value => value % 60 === 0 ? String(value / 60) : minutesToTime(value)).join('–');
+        const edge = night ? 'rgba(211,178,126,.16)' : 'rgba(165,129,76,.16)';
+        return <View pointerEvents="none" style={{width:'100%',height:'100%',alignItems:'center',justifyContent:'center',paddingHorizontal:4}}>
+          <View style={{position:'absolute',left:0,right:0,top:0,bottom:0,backgroundColor:night?'rgba(211,178,126,.10)':'rgba(222,196,152,.24)',borderLeftWidth:StyleSheet.hairlineWidth,borderRightWidth:StyleSheet.hairlineWidth,borderColor:edge}}/>
+          {first ? <NativeAgendaStatePill label={`Pausa ${pauseRange}`} icon="cafe-outline" night={night} color={ink}/> : null}
+        </View>;
+      }
       return <View pointerEvents="none" style={{width:'100%',height:'100%',alignItems:'center',justifyContent:'center'}}>
         <View style={{position:'absolute',left:5,right:5,top:first?3:-1,bottom:last?3:-1,borderTopLeftRadius:first?radius:0,borderTopRightRadius:first?radius:0,borderBottomLeftRadius:last?radius:0,borderBottomRightRadius:last?radius:0,overflow:'hidden',backgroundColor:night?'#2E2B25':'#EFE5D3',borderLeftWidth:StyleSheet.hairlineWidth,borderRightWidth:StyleSheet.hairlineWidth,borderTopWidth:first?StyleSheet.hairlineWidth:0,borderBottomWidth:last?StyleSheet.hairlineWidth:0,borderColor:night?'rgba(229,203,164,.30)':'rgba(143,109,59,.28)'}}>
           <AgendaPauseSurface night={night}/>
@@ -48389,7 +48399,7 @@ accessibilityHint={
                                             }
                                             disabled={!laneSalonCanQuickBook}
                                           >
-{!isLunchBreakSlot && (isPastFreeSlot || isClosedDay || isLaneVisuallyDisabled) && (weekBaseSlotInterval >= 15 || timeToMinutes(slotTime) % 15 === 0) ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaStateLabel label={isClosedDay||isLaneVisuallyDisabled?'Chiuso':'Passato'} action={laneSalonCanQuickBook&&!isLaneVisuallyDisabled}/></View>:null}{isCurrentSlotToday && !isPastFreeSlot && !isClosedDay && !isLunchBreakSlot ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaLiveSlotLabel action={laneSalonCanQuickBook}/></View>:null}
+{(isClosedDay || isLaneVisuallyDisabled || (!isLunchBreakSlot && isPastFreeSlot)) && (weekBaseSlotInterval >= 15 || timeToMinutes(slotTime) % 15 === 0) ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaStateLabel label={isClosedDay||isLaneVisuallyDisabled?'Chiuso':'Passato'} action={laneSalonCanQuickBook&&!isLaneVisuallyDisabled}/></View>:null}{isCurrentSlotToday && !isPastFreeSlot && !isClosedDay && !isLunchBreakSlot ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaLiveSlotLabel action={laneSalonCanQuickBook}/></View>:null}
                                             {laneDragPreview &&
                                             !laneOccupyingAppointment ? null : laneSalonCanQuickBook &&
                                               !laneQuickBookAvailable &&
@@ -48625,7 +48635,7 @@ null
                                             }
                                           >
                                             {(isPastFreeSlot || isLaneVisuallyDisabled || isClosedDay || isLaneOutsideScheduleSlot || laneCellState === 'outside' || (laneCellState === 'blocked' && !isLunchBreakSlot)) ? <NativeAgendaUnavailable night={availabilityPalette.night} phase={rowIndex + laneIndex}/> : null}
-{!isLunchBreakSlot && (isPastFreeSlot || isClosedDay || isLaneVisuallyDisabled) && (weekBaseSlotInterval >= 15 || timeToMinutes(slotTime) % 15 === 0) ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaStateLabel label={isClosedDay||isLaneVisuallyDisabled?'Chiuso':'Passato'} action={laneSalonCanQuickBook&&!isLaneVisuallyDisabled}/></View>:null}{isCurrentSlotToday && !isPastFreeSlot && !isClosedDay && !isLunchBreakSlot ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaLiveSlotLabel action={laneSalonCanQuickBook}/></View>:null}
+{(isClosedDay || isLaneVisuallyDisabled || (!isLunchBreakSlot && isPastFreeSlot)) && (weekBaseSlotInterval >= 15 || timeToMinutes(slotTime) % 15 === 0) ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaStateLabel label={isClosedDay||isLaneVisuallyDisabled?'Chiuso':'Passato'} action={laneSalonCanQuickBook&&!isLaneVisuallyDisabled}/></View>:null}{isCurrentSlotToday && !isPastFreeSlot && !isClosedDay && !isLunchBreakSlot ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaLiveSlotLabel action={laneSalonCanQuickBook}/></View>:null}
                                             {laneDragPreview &&
                                             !laneOccupyingAppointment ? null : laneSalonCanQuickBook &&
                                               !laneQuickBookAvailable &&
@@ -49173,7 +49183,7 @@ null
                                       cellState !== 'blocked'
                                     }
                                   >
-                                    {!isLunchBreakSlot && (isPastFreeSlot || isClosedDay) && (weekBaseSlotInterval >= 15 || timeToMinutes(slotTime) % 15 === 0) ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaStateLabel label={isClosedDay?'Chiuso':'Passato'} action={canSalonQuickBook}/></View>:null}{isCurrentSlotToday && !isPastFreeSlot && !isClosedDay && !isLunchBreakSlot ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaLiveSlotLabel action={canSalonQuickBook}/></View>:null}
+                                    {(isClosedDay || (!isLunchBreakSlot && isPastFreeSlot)) && (weekBaseSlotInterval >= 15 || timeToMinutes(slotTime) % 15 === 0) ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaStateLabel label={isClosedDay?'Chiuso':'Passato'} action={canSalonQuickBook}/></View>:null}{isCurrentSlotToday && !isPastFreeSlot && !isClosedDay && !isLunchBreakSlot ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaLiveSlotLabel action={canSalonQuickBook}/></View>:null}
 {isSwapPreviewFreeTarget ? (
                                       <WeekDragTargetHighlight
                                         tone={

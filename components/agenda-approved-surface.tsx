@@ -35,6 +35,14 @@ export function AgendaPauseSurface({night}:{night:boolean}){
 
 /** Closed day or operator off: fine bronze diagonals that continue across rows (offset = row top). */
 export function AgendaClosedLane({night,width,height,offset}:{night:boolean;width:number;height:number;offset:number}){
+ if(Platform.OS!=='web'){
+  // App: a calm recessed panel, one even sand wash with hairline edges; rows join without seams.
+  const edge=night?'rgba(216,194,155,.12)':'rgba(150,118,72,.13)';
+  return <View pointerEvents="none" accessible={false} style={[StyleSheet.absoluteFillObject,{backgroundColor:night?'rgba(8,9,10,.34)':'rgba(222,209,186,.40)'}]}>
+   <View style={{position:'absolute',left:0,top:0,bottom:0,width:StyleSheet.hairlineWidth,backgroundColor:edge}}/>
+   <View style={{position:'absolute',right:0,top:0,bottom:0,width:StyleSheet.hairlineWidth,backgroundColor:edge}}/>
+  </View>;
+ }
  const period=14;
  const first=Math.floor(offset/period)*period;
  const lines:number[]=[];

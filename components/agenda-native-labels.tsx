@@ -13,6 +13,18 @@ export function NativeAgendaCaption({label,icon,color,textStyle,bold=false}:{lab
   {pressed?<Text style={{fontSize:18,lineHeight:22,color,marginLeft:4}}>+</Text>:<View style={{width:icon?20:0,flexShrink:0}}/>}
  </View>;
 }
+/** Slot state as a small frosted capsule in letter-spaced caps; "+" joins it while the slot is pressed. */
+export function NativeAgendaStatePill({label,icon,night,color,live=false}:{label:string;icon?:'lock-closed-outline'|'cafe-outline';night:boolean;color:string;live?:boolean}) {
+ const pressed=React.useContext(AgendaSlotFeedbackContext);
+ const tone=live?(night?'#F08A7E':'#C2453A'):color;
+ return <View pointerEvents="none" style={{flexDirection:'row',alignItems:'center',justifyContent:'center',maxWidth:'100%',gap:5,minHeight:18,paddingHorizontal:8,borderRadius:9,borderWidth:StyleSheet.hairlineWidth,
+  borderColor:live?(night?'rgba(240,138,126,.40)':'rgba(194,69,58,.30)'):(night?'rgba(216,194,155,.22)':'rgba(150,118,72,.20)'),
+  backgroundColor:live?(night?'rgba(240,138,126,.10)':'rgba(255,246,243,.86)'):(night?'rgba(24,26,27,.72)':'rgba(255,252,246,.80)')}}>
+  {live?<View style={{width:5,height:5,borderRadius:3,backgroundColor:tone}}/>:icon?<Ionicons name={icon} size={10} color={tone}/>:null}
+  <Text numberOfLines={1} ellipsizeMode="clip" style={{fontSize:9,lineHeight:13,letterSpacing:1.1,fontWeight:'600',color:tone,flexShrink:1,includeFontPadding:false}}>{label.toLocaleUpperCase('it')}</Text>
+  {pressed?<Text style={{fontSize:14,lineHeight:16,color:tone,includeFontPadding:false}}>+</Text>:null}
+ </View>;
+}
 export function NativeAgendaOperatorHeading({name,meta,photo,accent,unavailable,width,night,ink,muted,bare=false}:{name:string;meta:string;photo?:string|null;accent:string;unavailable:boolean;width:number;night:boolean;ink:string;muted:string;bare?:boolean}) {
  const size=width<190?26:32,side=size+10;
  return <View style={{width:'100%',height:'100%',overflow:'hidden',flexDirection:'row',alignItems:'center',justifyContent:'center',paddingHorizontal:width<190?10:16}}>

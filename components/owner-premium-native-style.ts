@@ -24,6 +24,11 @@ export function nativeHomeStyles<T extends Record<string,any>>(base:T,p:Palette)
  for(const key of ['priorityTitle','priorityTitleGlassBlue','priorityTitleAndroidPremium'])patch(key,{color:p.ink,fontFamily:Platform.OS==='ios'?'System':'sans-serif',fontSize:17,lineHeight:23,fontWeight:'600',textAlign:'left',alignSelf:'stretch'});
  for(const key of ['priorityText','priorityTextGlassBlue','priorityTextAndroidPremium'])patch(key,{color:p.muted,fontSize:13,lineHeight:19,fontWeight:'400',textAlign:'left',alignSelf:'stretch',width:'100%',maxWidth:'100%'});
  for(const key of ['priorityEyebrow','priorityEyebrowGlassBlue','priorityEyebrowAndroidPremium'])patch(key,{color:p.night?'#D8C29B':'#8F6D3B',fontSize:10,lineHeight:14,fontWeight:'600',letterSpacing:1.2,textAlign:'left',alignSelf:'stretch'});
+ // Android: the old blue card painted each text line; on the glass card it showed as light bands.
+ if(Platform.OS==='android'){
+  for(const key of ['priorityEyebrowAndroidPremium','priorityTitleAndroidPremium','priorityTextAndroidPremium'])patch(key,{backgroundColor:'transparent',paddingHorizontal:0});
+  for(const key of ['priorityCardAndroidPremium','priorityCardGlassBlueAndroid'])patch(key,{elevation:0});
+ }
  patch('sectionCardDark',{backgroundColor:p.night?'rgba(179,145,93,.10)':'rgba(246,233,211,.5)',borderColor:p.border,borderWidth:1,borderRadius:17,padding:14,marginBottom:12});
  patch('sectionTitleDark',{color:p.ink}); patch('sectionTextDark',{color:p.muted});
  // Focus card reads left-aligned like every other card on the native Home.
