@@ -280,5 +280,10 @@ export function accessPremiumStyles<T extends Record<string, object>>(base: T, p
     patch(['audienceChoiceIcon'], { width: 44, height: 44 });
     patch(['audienceChoiceCardTitle'], { fontSize: 16 });
   }
+  // Android draws elevation shadows through translucent glass, showing a ghost
+  // card and sharp light boxes behind the content. The glass reads flat there.
+  if (Platform.OS === 'android') {
+    for (const style of Object.values(result)) if (style.elevation) style.elevation = 0;
+  }
   return result as T;
 }
