@@ -1,4 +1,5 @@
 import {OwnerWebPageTitle} from '../../components/owner-web-page-title';
+import { useTabScrollReset } from '../../src/lib/tab-scroll-reset';
 import { PremiumFitLabel } from '../../components/ui/premium-fit-label';
 import { TABLET_MODAL_ORIENTATIONS } from '../../src/lib/tablet-modal-orientations';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
@@ -794,6 +795,7 @@ export default function PrenotazioniScreen() {
     openToken?: string | string[];
   }>();
   const scrollRef = useRef<ScrollView | null>(null);
+  useTabScrollReset(scrollRef, 'prenotazioni');
   const isScreenFocusedRef = useRef(false);
   const cancelledSectionYRef = useRef(0);
   const requestCardRefs = useRef(new Map<string, View | null>());
@@ -6797,7 +6799,7 @@ const baseRequestStyles = StyleSheet.create({
     backgroundColor: "#F3F6FA",
   },
   content: {
-    paddingTop: Platform.OS === 'web' ? 8 : 54,
+    paddingTop: Platform.OS === 'web' ? 8 : Platform.OS === 'android' ? 14 : 54,
     paddingBottom: 140,
   },
   pageShell: {

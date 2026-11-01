@@ -1,4 +1,5 @@
 import { OwnerNativeSidebar } from '../../components/owner-native-sidebar';
+import { emitTabReselect } from '../../src/lib/tab-scroll-reset';
 import { OwnerViewportContext, useOwnerViewport } from '../../src/context/OwnerViewportContext';
 import { useOwnerNativeNavigation } from '../../src/lib/use-owner-native-navigation';
 import { OwnerWebBackdrop } from '../../components/owner-web-backdrop';
@@ -27,7 +28,7 @@ import {
 import * as Haptics from "expo-haptics";
 import { useRouter, useSegments, withLayoutContext } from "expo-router";
 import React from "react";
-import { Animated as RNAnimated, AppState, type AppStateStatus, Keyboard, Platform, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Animated as RNAnimated, AppState, type AppStateStatus, Dimensions, Keyboard, Platform, StatusBar, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { HapticNativePressable as Pressable } from '../../components/ui/haptic-native-controls';
 import { AndroidTabBarSurface } from '../../components/ui/android-tab-bar-surface';
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
@@ -5758,6 +5759,10 @@ function BottomTabBar({
               });
               return;
             }
+            if (index === activeVisibleIndex && pressInNavigatedIndexRef.current !== index) {
+              // Tap on the tab already open: its page glides back to the top.
+              emitTabReselect(route.name);
+            }
             if (pressInNavigatedIndexRef.current === index) {
               logAndroidTouchPerfAudit("tab_press_ignored", {
                 routeKey: route.key,
@@ -6768,14 +6773,35 @@ function OwnerTabLayout() {
 function NativeStatusBarVeil() {
   const insets = useSafeAreaInsets();
   const { palette } = useAccessAppearance();
-  if (insets.top <= 0) return null;
+  // Android keeps an opaque system bar (white from the root layout): paint it with the owner theme.
+  const androidBarColor = palette.night ? "#0E0F10" : "#F4F0EA";
+  const androidBarStyle = palette.night ? "light-content" : "dark-content";
+  React.useEffect(() => {
+    if (!IS_ANDROID) return;
+    // A recreated activity starts again from the theme defaults while the JS stack thinks nothing changed: re-send directly.
+    // The declarative stack skips values it believes are already applied, so the bar is also set directly.
+    const apply = () => { StatusBar.setBackgroundColor(androidBarColor); StatusBar.setBarStyle(androidBarStyle); };
+    // A second pass covers a recreated activity that attaches after the first one.
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    const applySoon = () => { apply(); timers.push(setTimeout(apply, 300), setTimeout(apply, 1500)); };
+    applySoon();
+    const appState = AppState.addEventListener("change", (state) => { if (state === "active") applySoon(); });
+    // Switching to the three-button bar recreates the activity and resizes the window.
+    const dimensions = Dimensions.addEventListener("change", applySoon);
+    return () => { timers.forEach(clearTimeout); appState.remove(); dimensions.remove(); };
+  }, [androidBarColor, androidBarStyle]);
+  const androidBar = IS_ANDROID ? <StatusBar backgroundColor={androidBarColor} barStyle={androidBarStyle} /> : null;
+  if (insets.top <= 0) return androidBar;
   // Covers the clock and island only, so the brand plaque at rest is never clipped.
   const height = Math.max(20, insets.top - 12);
   return (
+    <>
+    {androidBar}
     <View pointerEvents="none" style={{ position: "absolute", top: 0, left: 0, right: 0, height, zIndex: 50, elevation: 50 }}>
       {!IS_ANDROID ? <BlurView intensity={24} tint={palette.night ? "dark" : "light"} style={StyleSheet.absoluteFillObject} /> : null}
       <View style={[StyleSheet.absoluteFillObject, { backgroundColor: palette.night ? (IS_ANDROID ? "rgba(14,15,16,.9)" : "rgba(14,15,16,.55)") : (IS_ANDROID ? "rgba(244,240,234,.92)" : "rgba(244,240,234,.6)") }]} />
     </View>
+    </>
   );
 }
 

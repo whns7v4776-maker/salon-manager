@@ -1,4 +1,5 @@
 import {OwnerWebSheetHeader} from '../../components/owner-web-page-title';
+import { useTabScrollReset } from '../../src/lib/tab-scroll-reset';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { NativePremiumScope } from '../../components/owner-native-premium';
 import { PremiumSearchToolbar } from '../../components/ui/premium-search-toolbar';
@@ -722,6 +723,7 @@ export default function HomeScreen() {
   const compactSalonTotals = Platform.OS !== 'web' || responsive.width < 640;
   const [showSalonTotalDetails, setShowSalonTotalDetails] = useState(false);
   const scrollRef = useRef<ScrollView | null>(null);
+  useTabScrollReset(scrollRef, 'index');
   const profileSheetScrollRef = useRef<ScrollView | null>(null);
   const clientQrPrintRef = useRef<{ toDataURL: (callback: (data: string) => void) => void } | null>(null);
   const priorityScrollOffset = useSharedValue(0);
@@ -2862,7 +2864,7 @@ const clientQrValue =
   );
   const canShareClientAccess = publicClientLinkStatus.canShare;
   const clientAccessStatusCopy = publicClientLinkStatus.message;
-  const contentTopPadding = Platform.OS === 'web' ? 8 : 54;
+  const contentTopPadding = Platform.OS === 'web' ? 8 : Platform.OS === 'android' ? 14 : 54;
 
 const openFrontendPreviewForAdmin = useCallback(() => {
   router.push({

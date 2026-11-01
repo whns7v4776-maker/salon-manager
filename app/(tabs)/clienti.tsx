@@ -1,4 +1,5 @@
 import {OwnerWebPageTitle} from '../../components/owner-web-page-title';
+import { useTabScrollReset } from '../../src/lib/tab-scroll-reset';
 import {CustomerEditorPremiumHeader,CustomerEditorPremiumContent} from '../../components/customer-editor-premium';
 import { customerFeedbackMessage } from '../../src/lib/customer-deletion-errors';
 import { SkeletonSurface } from '../../components/ui/skeleton-shimmer';
@@ -1104,6 +1105,7 @@ export default function ClientiScreen() {
   const customerPremiumStatuses = useMemo(()=>new Map(customerPremium.ready ? customerPremium.summary?.customers.map(item=>[item.customerId,item]) : []),[customerPremium.ready,customerPremium.summary]);
   const { refreshBadges } = useUnreadBadges();
   const listRef = useRef<FlatList<ClientiUnifiedListItem> | null>(null);
+  useTabScrollReset(listRef, 'clienti');
   const startupWasLoading = useRef(ownerStartupLoading);
   React.useEffect(() => {
     if (startupWasLoading.current && !ownerStartupLoading && Platform.OS === 'ios') {
@@ -5983,7 +5985,7 @@ const baseCustomerStyles = StyleSheet.create({
     backgroundColor: '#EEF2F6',
   },
   listContent: {
-    paddingTop: Platform.OS === 'web' ? 8 : 54,
+    paddingTop: Platform.OS === 'web' ? 8 : Platform.OS === 'android' ? 14 : 54,
     paddingBottom: 128,
   },
   pageShell: {

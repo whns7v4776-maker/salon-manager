@@ -1,4 +1,5 @@
 import { SettingsWebWorkspace } from '../components/settings-web-workspace';
+import { useTabScrollResetWhenInactive } from '../src/lib/tab-scroll-reset';
 import { AvailabilitySettingsEntry } from '../components/availability-settings-entry';
 import { AppState } from 'react-native';
 import { NativeSettingsPopup } from '../components/native-settings-popup';
@@ -213,6 +214,8 @@ export function ImpostazioniScreen({
     biometricType,
     toggleBiometricEnabled,
   } = useAppContext();
+  const settingsScrollRef = React.useRef<ScrollView | null>(null);
+  useTabScrollResetWhenInactive(settingsScrollRef, 'settings', embeddedInTabs ? active : undefined);
   const [biometricBusy, setBiometricBusy] = React.useState(false);
   const [directoryEnabled, setDirectoryEnabled] = React.useState<boolean | null>(null);
   useFocusEffect(React.useCallback(() => {
@@ -670,6 +673,7 @@ export function ImpostazioniScreen({
   return (
     <SettingsShell {...(embeddedInTabs ? {} : {onBack: handleBack, busy: logoutTransitioning}) as any}>
     <ScrollView
+        ref={settingsScrollRef}
         style={styles.container}
         contentContainerStyle={[
           styles.content,
@@ -1083,7 +1087,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   content: {
-    paddingTop: Platform.OS === 'web' ? 8 : 54,
+    paddingTop: Platform.OS === 'web' ? 8 : Platform.OS === 'android' ? 14 : 54,
     paddingBottom: 128,
   },
   pageShell: {

@@ -1,4 +1,5 @@
 import { NativeMedal } from '../../components/owner-premium-native-home';
+import { useTabScrollReset } from '../../src/lib/tab-scroll-reset';
 import {HistoricalAppointmentOutcome} from '../../components/historical-appointment-outcome';
 import {doesOperatorHaveServiceCapability} from '../../src/lib/booking';
 import {AgendaSlotFeedbackContext} from '../../components/agenda-slot-feedback';
@@ -11869,6 +11870,7 @@ export default function AgendaScreen() {
   const [weekStickyOperatorHeaderFrame, setWeekStickyOperatorHeaderFrame] =
     useState({ left: 0, width: 0 });
   const listRef = useRef<FlatList<AgendaDaySection> | null>(null);
+  useTabScrollReset(listRef, 'agenda');
   const assignAgendaListRef = useCallback(
     (node: FlatList<AgendaDaySection> | null) => {
       listRef.current = node;
