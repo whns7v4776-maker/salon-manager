@@ -1121,7 +1121,7 @@ function CustomerCommunicationsModalBody({
                     key={client.id}
                     style={[
                       styles.clientRow,
-                      selected && styles.clientRowSelected,
+                      selected && styles.clientRowChecked,
                     ]}
                     onPress={() => toggleClient(client.id)}
                   >
@@ -1494,7 +1494,8 @@ const baseCustomerComponentStyles = StyleSheet.create({
     borderColor: "#e4e7ed",
     borderRadius: 13,
   },
-  clientRowSelected: { borderColor: "#8d73df", backgroundColor: "#f7f4ff" },
+  // Non "Selected": il tema premium riempirebbe la riga di beige lasciando il testo chiaro.
+  clientRowChecked: { borderColor: "#C9AE7E", backgroundColor: "rgba(216,194,155,.16)" },
   check: {
     width: 22,
     height: 22,

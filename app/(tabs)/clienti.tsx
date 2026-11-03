@@ -3947,7 +3947,7 @@ export default function ClientiScreen() {
       // the two account-level actions set apart below a hairline.
       const tile = (key: string, icon: React.ComponentProps<typeof Ionicons>["name"], label: string, accent: string, onPress: () => void, wide = false) => (
         <HapticTouchable key={key} webHoverLift accessibilityRole="button" accessibilityLabel={`${label} di ${item.full_name}`}
-          style={{ flexBasis: wide ? '100%' : '46%', flexGrow: 1, minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 12, borderRadius: 16, borderWidth: 1, borderColor: p.border, backgroundColor: night ? 'rgba(255,255,255,.04)' : 'rgba(255,255,255,.62)', ...(Platform.OS === 'web' ? { boxShadow: night ? 'inset 0 1px 0 rgba(255,255,255,.05)' : 'inset 0 1px 0 #ffffffcc' } : {}) } as object}
+          style={{ flexBasis: wide ? '100%' : '46%', flexGrow: 1, minWidth: 180, minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 12, borderRadius: 16, borderWidth: 1, borderColor: p.border, backgroundColor: night ? 'rgba(255,255,255,.04)' : 'rgba(255,255,255,.62)', ...(Platform.OS === 'web' ? { boxShadow: night ? 'inset 0 1px 0 rgba(255,255,255,.05)' : 'inset 0 1px 0 #ffffffcc' } : {}) } as object}
           onPress={() => { setOpenWebClientActionsId(null); onPress(); }} pressScale={0.97} pressOpacity={0.97}>
           <NativeMedal icon={icon} size={34} iconSize={16} accent={accent} />
           <Text numberOfLines={2} style={{ flex: 1, minWidth: 0, color: p.ink, fontSize: 14, lineHeight: 19, fontWeight: '500' }}>{label}</Text>
