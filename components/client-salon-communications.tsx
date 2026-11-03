@@ -27,6 +27,10 @@ export function ClientSalonCommunications(props: Props) {
   const border = p.night ? p.border : 'rgba(109,108,104,.18)';
   const archiveCount = props.archive.reduce((total, year) => total + year.count, 0);
   const count = (value: number) => <Text style={{ color: p.muted, fontSize: 12 }}>{value > 99 ? '99+' : value}</Text>;
+  // Unread messages can sit in an older month: every tab, year and month that holds one says so.
+  const unreadIn = (items: Communication[]) => items.reduce((total, item) => total + (item.readAt ? 0 : 1), 0);
+  const unread = (value: number) => value > 0 ? <View accessibilityLabel={`${value} da leggere`} style={{ minWidth: 20, height: 20, paddingHorizontal: 6, borderRadius: 10, backgroundColor: CLIENT_NOTIFICATION_RED, alignItems: 'center', justifyContent: 'center' }}><Text style={{ color: CLIENT_NOTIFICATION_ON_RED, fontSize: 11, lineHeight: 14, fontWeight: '600' }}>{value > 99 ? '99+' : value}</Text></View> : null;
+  const archiveUnread = props.archive.reduce((total, year) => total + year.months.reduce((sum, month) => sum + unreadIn(month.items), 0), 0);
   return <View {...(Platform.OS === 'web' ? { dataSet: { customerCommunications: 'true' } } : {})} style={{ width: '100%', maxWidth: 1100, alignSelf: 'center', gap: large ? 24 : 18 }}>
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 13 }}>
       <View style={{ width: 44, height: 44, borderRadius: 15, backgroundColor: p.field, borderWidth: 1, borderColor: border, alignItems: 'center', justifyContent: 'center' }}><Ionicons name="megaphone-outline" size={21} color={p.muted} /></View>
@@ -37,9 +41,9 @@ export function ClientSalonCommunications(props: Props) {
       {props.unreadCount > 0 ? <View accessibilityLabel={`${props.unreadCount} ${props.unreadCount === 1 ? 'comunicazione da leggere' : 'comunicazioni da leggere'}`} style={{ minWidth: 28, height: 28, paddingHorizontal: 8, borderRadius: 14, backgroundColor: CLIENT_NOTIFICATION_RED, alignItems: 'center', justifyContent: 'center' }}><Text style={{ color: CLIENT_NOTIFICATION_ON_RED, fontSize: 12, fontWeight: '600' }}>{props.unreadCount > 99 ? '99+' : props.unreadCount}</Text></View> : null}
     </View>
     <View {...(Platform.OS === 'web' ? { dataSet: { clientReadingControl: 'true' } } : {})} accessibilityRole="tablist" accessibilityLabel="Periodo comunicazioni" style={{ flexDirection: 'row', alignSelf: 'flex-start', padding: 4, borderRadius: 16, borderWidth: 1, borderColor: border, backgroundColor: surface, gap: 4, maxWidth: '100%' }}>
-      {([{ label: 'Questo mese', active: !props.archiveOpen, value: props.current.length, archive: false }, { label: 'Archivio', active: props.archiveOpen, value: archiveCount, archive: true }]).map(tab => <Pressable key={tab.label} accessibilityRole="tab" accessibilityLabel={tab.label} accessibilityState={{ selected: tab.active }} onPress={() => props.onArchive(tab.archive)}
+      {([{ label: 'Questo mese', active: !props.archiveOpen, value: props.current.length, toRead: unreadIn(props.current), archive: false }, { label: 'Archivio', active: props.archiveOpen, value: archiveCount, toRead: archiveUnread, archive: true }]).map(tab => <Pressable key={tab.label} accessibilityRole="tab" accessibilityLabel={tab.label} accessibilityState={{ selected: tab.active }} onPress={() => props.onArchive(tab.archive)}
         style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: 9, minHeight: 44, paddingHorizontal: large ? 19 : 13, borderRadius: 12, backgroundColor: tab.active ? p.surface : 'transparent', borderWidth: 1, borderColor: tab.active ? border : 'transparent', opacity: pressed ? .75 : 1 })}>
-        <Text style={{ color: tab.active ? p.ink : p.muted, fontSize: large ? 14 : 12, fontWeight: tab.active ? '600' : '400' }}>{tab.label}</Text>{count(tab.value)}
+        <Text style={{ color: tab.active ? p.ink : p.muted, fontSize: large ? 14 : 12, fontWeight: tab.active ? '600' : '400' }}>{tab.label}</Text>{count(tab.value)}{unread(tab.toRead)}
       </Pressable>)}
     </View>
     {props.error ? <View accessibilityRole="alert" style={{ padding: 20, borderRadius: 20, borderWidth: 1, borderColor: border, backgroundColor: surface, gap: 14 }}>
@@ -48,12 +52,12 @@ export function ClientSalonCommunications(props: Props) {
     </View> : props.loading && !props.current.length && !archiveCount ? <View accessibilityRole="progressbar" accessibilityLabel="Caricamento comunicazioni" style={{ gap: 12 }}>
       {[0, 1].map(index => <SkeletonShimmer key={index} style={{ height: 132, borderRadius: 20 }} />)}
     </View> : props.archiveOpen ? props.archive.length ? props.archive.map(year => <View key={year.key} style={{ gap: 16 }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}><Text style={{ color: p.ink, fontSize: large ? 23 : 20, fontFamily: Platform.OS === 'android' ? 'serif' : 'Georgia' }}>{year.label}</Text>{count(year.count)}</View>
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}><Text style={{ color: p.ink, fontSize: large ? 23 : 20, fontFamily: Platform.OS === 'android' ? 'serif' : 'Georgia' }}>{year.label}</Text><View style={{ flexDirection: 'row', alignItems: 'center', gap: 9 }}>{count(year.count)}{unread(year.months.reduce((sum, month) => sum + unreadIn(month.items), 0))}</View></View>
       {year.months.map(month => {
         const expanded = props.openMonths[month.key] ?? false;
         return <View key={month.key} style={{ gap: 12 }}>
           <Pressable {...(Platform.OS === 'web' ? { dataSet: { clientReadingControl: 'true' } } : {})} accessibilityRole="button" accessibilityLabel={`${expanded ? 'Chiudi' : 'Apri'} ${month.label} ${year.label}`} accessibilityState={{ expanded }} onPress={() => props.onMonth(month.key, !expanded)} style={({ pressed }) => ({ minHeight: 54, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, borderRadius: 16, backgroundColor: surface, borderWidth: 1, borderColor: border, opacity: pressed ? .88 : 1 })}>
-            <Ionicons name="calendar-outline" size={18} color={p.muted} /><Text style={{ flex: 1, color: p.ink, fontSize: 14, textTransform: 'capitalize' }}>{month.label}</Text>{count(month.items.length)}<Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={16} color={p.muted} />
+            <Ionicons name="calendar-outline" size={18} color={p.muted} /><Text style={{ flex: 1, color: p.ink, fontSize: 14, textTransform: 'capitalize' }}>{month.label}</Text>{count(month.items.length)}{unread(unreadIn(month.items))}<Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={16} color={p.muted} />
           </Pressable>
           {expanded ? month.items.map(item => <CommunicationCard key={item.communicationId} item={item} expanded={props.expanded.has(item.communicationId)} onToggle={props.onToggle} formatDate={props.formatDate} renderPoster={props.renderPoster} large={large} />) : null}
         </View>;
