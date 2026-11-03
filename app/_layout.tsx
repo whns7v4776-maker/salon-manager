@@ -457,6 +457,13 @@ function AppContent() {
   const { refreshBadges } = useUnreadBadges();
   const segments = useSegments();
   const firstSegment = segments[0] ?? '';
+  const isAgendaRoute = segments.includes('agenda' as never);
+  // The Agenda's floating operator header lives in document.body: when the screen is frozen behind
+  // another page it cannot unmount itself, so the route decides whether it may be shown.
+  React.useEffect(() => {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') return;
+    document.documentElement.setAttribute('data-agenda-route', isAgendaRoute ? 'true' : 'false');
+  }, [isAgendaRoute]);
   const isOwnerClientDetailRoute = firstSegment === 'cliente' && segments.length > 1;
   const isOwnerProtectedRoute =
     OWNER_PROTECTED_SEGMENTS.has(firstSegment) || isOwnerClientDetailRoute;

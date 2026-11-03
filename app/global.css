@@ -740,6 +740,7 @@ html body [data-customer-directory-title] {flex:0 1 auto!important;width:auto!im
 /* Agenda: the floating operator banner replaces the grid header while scrolling. */
 html[data-agenda-sticky-on="true"] [data-agenda-operator-header="true"]{visibility:hidden;}
 html[data-agenda-sticky-on="true"] [data-testid="agenda-sticky-operator-header"] [data-agenda-operator-header="true"]{visibility:visible;}
+html:not([data-agenda-route="true"]) [data-testid="agenda-sticky-operator-header"]{display:none!important;}
 /* Browser autofill must not repaint app fields (light fill under light text in Night). */
 input:-webkit-autofill,input:-webkit-autofill:hover,input:-webkit-autofill:focus{-webkit-text-fill-color:currentColor;caret-color:currentColor;transition:background-color 100000s ease-in-out 0s;}
 

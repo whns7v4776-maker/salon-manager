@@ -49967,7 +49967,8 @@ null
         entering={FadeIn.duration(IS_IOS ? 180 : 150).easing(
           Easing.out(Easing.cubic),
         )}
-        exiting={FadeOut.duration(IS_IOS ? 260 : 210).easing(
+        // Sul web l'animazione d'uscita di un nodo in portale lascia un clone vuoto sopra le altre pagine.
+        exiting={IS_WEB ? undefined : FadeOut.duration(IS_IOS ? 260 : 210).easing(
           Easing.out(Easing.cubic),
         )}
         style={[

@@ -133,7 +133,7 @@ export function SalonLogoEditor({workspaceId,name,disabled}: {workspaceId:string
       <View {...(Platform.OS === 'web' ? { dataSet: { premiumLogoPopup: 'true' } } : {})} style={[styles.backdrop,{paddingTop:insets.top+16,paddingBottom:0},Platform.OS==='web'&&{justifyContent:'center',paddingBottom:24}]}>
       {Platform.OS === 'web' ? React.createElement('style', null, `
 [data-premium-logo-popup] { background:${p.night ? 'rgba(0,0,0,.5)' : 'rgba(40,35,29,.28)'}!important; backdrop-filter:blur(8px); }
-[data-premium-logo-popup] > div { background:${popupGlass(p).backgroundColor}!important; backdrop-filter:blur(24px) saturate(110%); border:1px solid ${p.border}; box-shadow:0 -12px 80px #0003; max-width:560px!important; }
+[data-premium-logo-popup] > div { background:${popupGlass(p).backgroundColor}!important; backdrop-filter:blur(24px) saturate(110%); border:1px solid ${p.border}; box-shadow:0 -12px 80px #0003; max-width:560px!important; width:100%; margin-left:auto!important; margin-right:auto!important; }
 [data-premium-logo-popup] [dir="auto"] { color:${p.ink}!important; }
 [data-premium-logo-popup] [aria-label="Chiudi logo e targhetta"], [data-premium-logo-popup] [role="button"], [data-premium-logo-popup] [role="tab"] { background:${p.field}!important; border:1px solid ${p.border}!important; box-shadow:none!important; border-radius:11px!important; }
 [data-premium-logo-popup] [data-logo-selected="true"], [data-premium-logo-popup] [aria-checked="true"] { background:${p.action}!important; }
