@@ -5744,6 +5744,10 @@ function ClienteFrontendScreenContent({ nativeInitialTab }: ClienteFrontendScree
     cancelled: false,
     archive: false,
   });
+  // Booking a push talks about: its section opens, the list scrolls to it and it stays highlighted briefly.
+  const [focusedClientRequest, setFocusedClientRequest] = useState<{ id: string; groupId: string; token: number } | null>(null);
+  const focusedClientRequestNodeRef = useRef<View | null>(null);
+  const focusedClientRequestOpenedTokenRef = useRef(0);
   const [frontendClientTab, setFrontendClientTab] = useState<FrontendClientTabKey>(
     nativeInitialTab ?? (isFrontendRequestsRoute ? 'notifications' : 'booking')
   );
@@ -26328,6 +26332,10 @@ function ClienteFrontendScreenContent({ nativeInitialTab }: ClienteFrontendScree
             forceVisible: frontendRequestNotificationHighlightKeys.has(notificationSignature),
           });
     const freezeRequestCardLayout = !isWeb && (!!cancelDialogVisualSnapshot || isCancelling);
+    const isFocusedFromNotification =
+      !!focusedClientRequest &&
+      ((!!focusedClientRequest.id && String(item.id ?? '').trim() === focusedClientRequest.id) ||
+        (!!focusedClientRequest.groupId && logicalGroupId === focusedClientRequest.groupId));
     const handleCancelRequest = () => {
       annullaPrenotazioneCliente(item.id);
     };
@@ -26335,6 +26343,7 @@ function ClienteFrontendScreenContent({ nativeInitialTab }: ClienteFrontendScree
     return (
       <Animated.View
         key={item.id}
+        ref={isFocusedFromNotification ? (node: View | null) => { if (node) focusedClientRequestNodeRef.current = node; } : undefined}
         {...(isWeb ? { dataSet: { customerNotificationCard: visualItem.stato, unreadNotification: notificationBadge ? 'true' : 'false' } } : {})}
         layout={freezeRequestCardLayout ? undefined : LinearTransition.duration(240)}
         exiting={freezeRequestCardLayout ? undefined : FadeOutUp.duration(220)}
@@ -26366,6 +26375,10 @@ function ClienteFrontendScreenContent({ nativeInitialTab }: ClienteFrontendScree
               paddingBottom: 12,
               borderRadius: 18,
             },
+          isFocusedFromNotification && {
+            borderWidth: 2,
+            borderColor: clientNotificationTone(bookingPalette, 'changed').ink,
+          },
         ]}
       >
         <View
@@ -27630,6 +27643,9 @@ function ClienteFrontendScreenContent({ nativeInitialTab }: ClienteFrontendScree
       setShowWaitlistAlertsExpanded(false);
       void refreshClientDbUnreadBookingRows();
       waitlistRefreshHoldUntilRef.current = Date.now() + 1200;
+      const focusId = String(target.requestId ?? '').trim();
+      const focusGroupId = String(target.appointmentGroupId ?? '').trim();
+      if (focusId || focusGroupId) setFocusedClientRequest({ id: focusId, groupId: focusGroupId, token: Date.now() });
       requestAnimationFrame(() => {
         scrollFrontendToTop(!isWeb);
       });
@@ -27651,6 +27667,76 @@ function ClienteFrontendScreenContent({ nativeInitialTab }: ClienteFrontendScree
     scrollFrontendToTop,
     setNotificationTapHandler,
   ]);
+
+  useEffect(() => {
+    if (!focusedClientRequest || focusedClientRequestOpenedTokenRef.current === focusedClientRequest.token) return;
+    const { id, groupId } = focusedClientRequest;
+    const isTarget = (item: PublicSalonState['richiestePrenotazione'][number]) =>
+      (!!id && String(item.id ?? '').trim() === id) ||
+      (!!groupId && item.appointmentGroupId?.trim() === groupId);
+    const sectionKey: FrontendBookingSectionKey | null = displayedRichiesteApprovateFuture.some(isTarget)
+      ? 'upcoming'
+      : richiestePendenti.some(isTarget)
+        ? 'pending'
+        : richiesteApprovateRecenti.some(isTarget)
+          ? 'accepted'
+          : richiesteAnnullateRecenti.some(isTarget)
+            ? 'cancelled'
+            : richiesteArchiviateStorico.some(isTarget)
+              ? 'archive'
+              : null;
+    // The booking may still be loading after a cold start: try again when the lists change.
+    if (!sectionKey) return;
+    focusedClientRequestOpenedTokenRef.current = focusedClientRequest.token;
+    if (!frontendBookingSectionsExpanded[sectionKey]) {
+      stageFrontendBookingSectionReadSession(sectionKey);
+      setFrontendBookingSectionsExpanded((current) => ({ ...current, [sectionKey]: true }));
+    }
+    if (sectionKey === 'archive') {
+      const monthKey = richiesteArchiviatePerAnno
+        .flatMap((yearGroup) => yearGroup.months)
+        .find((monthGroup) => monthGroup.items.some(isTarget))?.key;
+      if (monthKey) setArchivedMonthExpanded((current) => ({ ...current, [monthKey]: true }));
+    }
+  }, [
+    displayedRichiesteApprovateFuture,
+    focusedClientRequest,
+    frontendBookingSectionsExpanded,
+    richiestePendenti,
+    richiesteApprovateRecenti,
+    richiesteAnnullateRecenti,
+    richiesteArchiviatePerAnno,
+    richiesteArchiviateStorico,
+    stageFrontendBookingSectionReadSession,
+  ]);
+
+  useEffect(() => {
+    if (!focusedClientRequest) return;
+    const { token } = focusedClientRequest;
+    focusedClientRequestNodeRef.current = null;
+    let attempts = 0;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    // Wait for the card to mount (section opening, data arriving), then bring it near the top once.
+    const tryScroll = () => {
+      const node = focusedClientRequestNodeRef.current;
+      if (!node) {
+        if (++attempts < 30) timer = setTimeout(tryScroll, 150);
+        return;
+      }
+      node.measureInWindow((_x, y) => {
+        const topComfort = Platform.OS === 'web' ? Math.max(96, height * 0.18) : 120;
+        scrollFrontendToY(lastFrontendScrollYRef.current + y - topComfort, true);
+      });
+    };
+    timer = setTimeout(tryScroll, 450);
+    const clear = setTimeout(() => {
+      setFocusedClientRequest((current) => (current?.token === token ? null : current));
+    }, 6000);
+    return () => {
+      if (timer) clearTimeout(timer);
+      clearTimeout(clear);
+    };
+  }, [focusedClientRequest, height, scrollFrontendToY]);
 
   useEffect(() => {
     setNotificationForegroundHandler(() => {
