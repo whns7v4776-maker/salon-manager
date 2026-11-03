@@ -3399,8 +3399,6 @@ priority: (<View {...webHomePart("priority")}
                             services: servizi,
                             operators: operatori,
                           }) || 'Senza mestiere';
-                        const accent = getHomePriorityAccent(item.servizio, resolvedRoleLabel);
-
                         return (
                           <View
                             key={item.id}
@@ -3431,7 +3429,7 @@ priority: (<View {...webHomePart("priority")}
                                 {item.servizio}
                               </Text>
                               <Text
-                                style={[styles.priorityMultiRole, { color: accent.text }]}
+                                style={styles.priorityMultiRole}
                                 numberOfLines={1}
                                 adjustsFontSizeToFit
                                 minimumFontScale={0.72}
