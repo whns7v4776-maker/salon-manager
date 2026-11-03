@@ -25,7 +25,7 @@ import { OWNER_RAIL_WIDTH } from '../../components/owner-premium-web';
 import { useIsFocused } from '@react-navigation/native';
 import { StatusBar } from 'react-native';
 import { NativeCustomersSkeleton } from '../../components/owner-premium-customers-skeleton';
-import { CustomerPremiumScope, nativeCustomersStyles, useCustomerPremiumStyles } from '../../components/owner-premium-customers-style';
+import { CustomerPremiumScope, nativeCustomersStyles, useCustomerPremiumAppearance, useCustomerPremiumStyles } from '../../components/owner-premium-customers-style';
 import { useAccessAppearance } from '../../components/access-premium';
 import { CustomerNotificationPermission } from '../../components/customer-notification-permission';
 import { CustomerRegistrationReview } from '../../components/customer-registration-review';
@@ -916,6 +916,8 @@ const CustomerOnlinePolicyServiceSearch = React.memo(
     >;
   }) {
     const styles=useCustomerPremiumStyles(baseCustomerStyles);
+    const premium=useCustomerPremiumAppearance();
+    const iconMuted=premium?.muted ?? '#64748B';
     const [query, setQuery] = useState('');
     const deferredQuery = useDeferredValue(query);
     const serviceGroups = useMemo(() => {
@@ -940,13 +942,13 @@ const CustomerOnlinePolicyServiceSearch = React.memo(
     return (
       <>
         <PremiumSearchToolbar><View style={styles.onlinePolicySearchWrap}>
-          <Ionicons name="search" size={18} color="#64748B" />
+          <Ionicons name="search" size={18} color={iconMuted} />
           <TextInput
             style={styles.onlinePolicySearchInput}
             value={query}
             onChangeText={setQuery}
             placeholder="Cerca servizio o mestiere"
-            placeholderTextColor="#94A3B8"
+            placeholderTextColor={iconMuted}
             autoCorrect={false}
             returnKeyType="done"
           />
@@ -955,7 +957,7 @@ const CustomerOnlinePolicyServiceSearch = React.memo(
               style={styles.onlinePolicySearchClear}
               onPress={() => setQuery('')}
             >
-              <Ionicons name="close-circle" size={18} color="#94A3B8" />
+              <Ionicons name="close-circle" size={18} color={iconMuted} />
             </HapticTouchable>
           ) : null}
         </View></PremiumSearchToolbar>
@@ -1039,7 +1041,7 @@ const CustomerOnlinePolicyServiceSearch = React.memo(
           ))}
           {serviceGroups.length === 0 ? (
             <View style={styles.onlinePolicyEmpty}>
-              <Ionicons name="search-outline" size={24} color="#94A3B8" />
+              <Ionicons name="search-outline" size={24} color={iconMuted} />
               <Text style={styles.onlinePolicyEmptyText}>
                 Nessun servizio corrisponde alla ricerca.
               </Text>
@@ -5710,7 +5712,7 @@ export default function ClientiScreen() {
                   <Ionicons
                     name={onlinePolicySaving ? 'hourglass-outline' : 'shield-checkmark-outline'}
                     size={19}
-                    color={customerPalette.muted}
+                    color={customerPalette.actionText}
                   />
                   <Text style={styles.onlinePolicySaveText}>
                     {onlinePolicySaving ? 'Salvataggio…' : 'Salva servizi e approvazione'}
