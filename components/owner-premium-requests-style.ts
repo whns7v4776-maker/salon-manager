@@ -137,6 +137,12 @@ export function nativeRequestsStyles<T extends Record<string,any>>(base:T,p:Pale
  for(const key of ['requestDetailTitle','manualAcceptTitle'])patch(key,{fontFamily:Platform.OS==='ios'?'Georgia':'serif',fontSize:24,lineHeight:30,fontWeight:'400',color:p.ink});
  patch('requestDetailHandle',{backgroundColor:p.line});
  for(const key of ['requestDetailField','manualAcceptOperatorChip','manualAcceptDurationCard'])patch(key,{backgroundColor:p.field,borderColor:p.border,borderRadius:16});
+ // Scelta operatore in Accetta e modifica: stati leggibili anche nel tema scuro.
+ patch('manualAcceptOperatorChipSelected',{backgroundColor:p.field,borderColor:p.action,borderWidth:1.5});
+ patch('manualAcceptOperatorChipDisabled',{backgroundColor:p.field,opacity:0.5});
+ patch('manualAcceptOperatorAvatar',{backgroundColor:p.line});patch('manualAcceptOperatorAvatarSelected',{backgroundColor:p.action});
+ patch('manualAcceptOperatorAvatarText',{color:p.ink});patch('manualAcceptOperatorAvatarTextSelected',{color:p.actionText});
+ patch('manualAcceptOperatorNameDisabled',{color:p.muted});
  patch('card',{backgroundColor:glass,borderColor:p.border,borderRadius:19});
  patch('selected',{backgroundColor:p.action,borderColor:p.action});
  patch('save',{backgroundColor:p.action});patch('saveText',{color:p.actionText});

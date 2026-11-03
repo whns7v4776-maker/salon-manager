@@ -8,6 +8,9 @@ import { ClientSalonHeaderRow } from './client-salon-brand';
 import { ClientBookingJourney, ClientBookingJourneyDock, ClientBookingProgress, type ClientBookingJourneyProps } from './client-booking-journey';
 import { useClientBookingLayout } from './client-booking-layout';
 
+// On web the list ends right where the dock begins: fading its last rows keeps them from being sliced by a hard edge.
+const webDockFade = { maskImage: 'linear-gradient(to bottom, #000 calc(100% - 44px), transparent)', WebkitMaskImage: 'linear-gradient(to bottom, #000 calc(100% - 44px), transparent)' } as object;
+
 export function ClientBookingHeader({ workspaceId, salonName, shop, children }: { workspaceId?: string; salonName: string; shop?: ReactNode; children?: ReactNode }) {
   const { palette: p, toggle } = useAccessAppearance();
   const { desktop, insets } = useClientBookingLayout();
@@ -72,7 +75,7 @@ export function ClientBookingFrame({ journey, workspaceId, salonName, shop, scro
     <ScrollView key={journey.pages[journey.page].key} ref={activeScrollRef} nativeID={scrollNativeID} {...(Platform.OS === 'web' ? { dataSet: { bookingScroll: 'true' } } : {})}
       // Writing the note hides the dock and its margin: the padding takes their place so the content
       // never gets shorter, otherwise iOS clamps the offset and the field drops behind the keyboard.
-      style={{ flex: 1, minHeight: 0, ...(native ? { marginBottom: editingNote ? 0 : layout.navigationSpace + nativeDockCornerClearance, overflow: 'hidden' } : {}) }} contentContainerStyle={{ paddingHorizontal: layout.desktop ? 32 : Math.max(20, layout.insets.left, layout.insets.right), paddingTop: 0, paddingBottom: 24 + (native ? nativeDockHeight : 0) + (editingNote ? layout.navigationSpace + nativeDockCornerClearance : 0) }}
+      style={{ flex: 1, minHeight: 0, ...(native ? { marginBottom: editingNote ? 0 : layout.navigationSpace + nativeDockCornerClearance, overflow: 'hidden' } : editingNote ? {} : webDockFade) }} contentContainerStyle={{ paddingHorizontal: layout.desktop ? 32 : Math.max(20, layout.insets.left, layout.insets.right), paddingTop: 0, paddingBottom: (native || editingNote ? 24 : 44) + (native ? nativeDockHeight : 0) + (editingNote ? layout.navigationSpace + nativeDockCornerClearance : 0) }}
       showsVerticalScrollIndicator indicatorStyle="default" keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" contentInsetAdjustmentBehavior="never" automaticallyAdjustKeyboardInsets={false} scrollEventThrottle={16}
       onLayout={event => { viewportHeight.current = event.nativeEvent.layout.height; revealIncluded(includedKey); if (editingNote) onNoteLayout?.(); }}
       onContentSizeChange={() => { if (editingNote) onNoteLayout?.(); }}
