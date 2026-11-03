@@ -32,6 +32,7 @@ export function CashWebWorkspace({
 }) {
   const { palette: p } = useAccessAppearance();
   const { width } = useWindowDimensions();
+  const narrowTotals = width < 720;
   const [expandedMovements, setExpandedMovements] = useState(false);
   const [panel, setPanel] = useState<string | null>(null);
   const [selectedMovement, setMovement] = useState<any>(null);
@@ -253,7 +254,7 @@ export function CashWebWorkspace({
           <Text style={{ color: p.muted, fontSize: 12 }}>
             {m.count} movimenti
           </Text>
-          {!expanded
+          {!expanded && !narrowTotals
             ? button(
                 "Espandi",
                 () => setExpandedMovements(true),
@@ -263,6 +264,12 @@ export function CashWebWorkspace({
               )
             : null}
         </View>
+        {/* Schermo stretto: Espandi e ricerca sulla stessa riga, la ricerca occupa lo spazio rimasto. */}
+        <View style={narrowTotals && !expanded ? { flexDirection: "row", alignItems: "center", gap: 10 } : undefined}>
+        {narrowTotals && !expanded
+          ? button("Espandi", () => setExpandedMovements(true), false, false, "expand-outline")
+          : null}
+        <View style={narrowTotals && !expanded ? { flex: 1, minWidth: 0 } : undefined}>
         <PremiumSearchToolbar><View
           {...{ dataSet: { cashSearch: "true" } }}
           style={{
@@ -281,7 +288,7 @@ export function CashWebWorkspace({
             accessibilityLabel="Cerca un movimento"
             value={m.query}
             onChangeText={m.onQuery}
-            placeholder="Cerca descrizione, servizio o metodo"
+            placeholder={narrowTotals ? "Cerca" : "Cerca descrizione, servizio o metodo"}
             placeholderTextColor={p.muted}
             style={{
               flex: 1,
@@ -294,6 +301,8 @@ export function CashWebWorkspace({
             }}
           />
         </View></PremiumSearchToolbar>
+        </View>
+        </View>
       </View>
       <View
         {...{
@@ -644,13 +653,14 @@ export function CashWebWorkspace({
                 </View>
               </View>
               <View style={{ height: 1, backgroundColor: p.line }} />
+              {/* Schermo stretto: le tre voci vanno una sotto l'altra, allineate a sinistra e senza divisori verticali. */}
               <View style={{ flexDirection: "row", flexWrap: "wrap", rowGap: 14 }}>
                 {([
                   { label: "Contanti", amount: m.cash, icon: "cash-outline", accent: ["#86C2BE", "#3E7C7A"] },
                   { label: "Carta", amount: m.card, icon: "card-outline", accent: ["#BFA6D4", "#7A5C8E"] },
                   { label: "Da incassare", amount: m.pending, icon: "time-outline", accent: ["#D99A92", "#A35A52"] },
                 ] as const).map((metric, i) => (
-                  <View key={metric.label} style={{ flexGrow: 1, flexBasis: 180, minWidth: 0, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 12, paddingHorizontal: 12, borderLeftWidth: i ? 1 : 0, borderLeftColor: p.line }}>
+                  <View key={metric.label} style={{ flexGrow: 1, flexBasis: 180, minWidth: 0, flexDirection: "row", alignItems: "center", justifyContent: narrowTotals ? "flex-start" : "center", gap: 12, paddingHorizontal: narrowTotals ? 0 : 12, borderLeftWidth: i && !narrowTotals ? 1 : 0, borderLeftColor: p.line }}>
                     <NativeMedal icon={metric.icon} size={40} iconSize={18} accent={p.night ? metric.accent[0] : metric.accent[1]} />
                     <View style={{ minWidth: 0 }}>
                       <Text style={{ fontSize: 22, lineHeight: 28, fontWeight: "600", color: p.ink, fontVariant: ["tabular-nums"] }}>{m.loading ? "—" : formatCash(metric.amount)}</Text>
@@ -793,7 +803,7 @@ export function CashWebWorkspace({
                   gap: 12,
                 }}
               >
-                <View style={{ gap: 5 }}>
+                <View style={{ gap: 5, flexShrink: 1, minWidth: 0, maxWidth: "100%" }}>
                   <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
                     <NativeMedal icon="analytics-outline" size={42} iconSize={19} accent={p.night ? "#9DBAD6" : "#4D6E8F"} />
                     {heading("Report e statistiche")}
