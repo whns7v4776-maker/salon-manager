@@ -249,6 +249,9 @@ import {
   type ServicePhaseOverlapOverrides,
 } from '../../src/lib/service-phases';
 import { supabase } from '../../src/lib/supabase';
+import { AgendaSlotFlash } from '../../components/agenda-slot-flash';
+
+const AGENDA_SLOT_FLASH_COLOR = '#C79A4B';
 import {
   buildInvalidFieldsMessage,
   isValidEmail,
@@ -16871,9 +16874,12 @@ export default function AgendaScreen() {
 
       scrollAgendaToWeekPlanner(Math.max(plannerRowOffset, 0));
 
+      // Notifications and banners land on the slot and make it flash, so it is spotted at once;
+      // the details sheet stays one tap away instead of covering the agenda.
       if (matchedPendingBlock && openDetails) {
         requestAnimationFrame(() => {
-          setWeekAppointmentDetails(matchedPendingBlock);
+          setHighlightedAppointmentId(null);
+          requestAnimationFrame(() => setHighlightedAppointmentId(matchedPendingBlock.id));
         });
       }
 
@@ -36342,13 +36348,19 @@ export default function AgendaScreen() {
       if (!appointment || weekAppointmentDeleteInFlightRef.current) {
         return;
       }
-      if (
-        getWeekAppointmentTemporalState(appointment, Date.now()) === 'past' ||
-        appointment.completato || appointment.incassato || appointment.nonEffettuato
-      ) {
+      // Past appointments can be removed too; only what is already in the till stays.
+      if (appointment.incassato) {
         Alert.alert(
           'Appuntamento non eliminabile',
-          'L’appuntamento è concluso o già contabilizzato. Per preservare lo storico non può essere eliminato da questo popup.',
+          'L’appuntamento è già incassato: per tenere la cassa in ordine non può essere eliminato.',
+        );
+        return;
+      }
+      // Deleting while a move is still being saved let the old slot come back.
+      if (pendingMovedWeekOptimisticAppointmentsRef.current.has(appointment.id?.trim() ?? '')) {
+        Alert.alert(
+          'Spostamento in salvataggio',
+          'Sto ancora salvando lo spostamento di questo appuntamento. Riprova tra qualche secondo.',
         );
         return;
       }
@@ -36365,8 +36377,8 @@ export default function AgendaScreen() {
         linkedCancellationScope: 'phase' | 'group',
       ) => {
         if (weekAppointmentDeleteInFlightRef.current) return;
-        if (getWeekAppointmentTemporalState(targetAppointment, Date.now()) === 'past' || targetAppointment.completato || targetAppointment.incassato || targetAppointment.nonEffettuato) {
-          Alert.alert('Appuntamento non eliminabile', 'L’appuntamento è concluso o già contabilizzato. Aggiorna l’Agenda per consultare lo stato attuale.');
+        if (targetAppointment.incassato) {
+          Alert.alert('Appuntamento non eliminabile', 'L’appuntamento è già incassato. Aggiorna l’Agenda per consultare lo stato attuale.');
           return;
         }
         weekAppointmentDeleteInFlightRef.current = true;
@@ -45232,10 +45244,17 @@ export default function AgendaScreen() {
     pendingAgendaSwipeResetRef.current = item.id;
     const appointmentDate = item.data ?? todayDate;
 
-    if (!isAppointmentInFuture(item, todayDate)) {
+    if (item.incassato) {
       Alert.alert(
         tApp(appLanguage, 'agenda_delete_unavailable_title'),
-        tApp(appLanguage, 'agenda_delete_unavailable_body'),
+        'L’appuntamento è già incassato: per tenere la cassa in ordine non può essere eliminato.',
+      );
+      return;
+    }
+    if (pendingMovedWeekOptimisticAppointmentsRef.current.has(item.id?.trim() ?? '')) {
+      Alert.alert(
+        'Spostamento in salvataggio',
+        'Sto ancora salvando lo spostamento di questo appuntamento. Riprova tra qualche secondo.',
       );
       return;
     }
@@ -47909,6 +47928,10 @@ accessibilityHint={
                                                     },
                                                   ]}
                                                 >
+                                                  <AgendaSlotFlash
+                                                    active={!!highlightedAppointmentId && laneStartAppointment.id === highlightedAppointmentId}
+                                                    color={AGENDA_SLOT_FLASH_COLOR}
+                                                  />
                                                   {laneAppointmentOverlapTailHeight >
                                                   0 ? (
                                                     <View
@@ -48822,6 +48845,10 @@ null
                                         },
                                       ]}
                                     >
+                                      <AgendaSlotFlash
+                                        active={!!highlightedAppointmentId && appointmentStart.id === highlightedAppointmentId}
+                                        color={AGENDA_SLOT_FLASH_COLOR}
+                                      />
                                       {hasPendingRequestOverlay ? (
                                         <View
                                           style={[
@@ -56934,10 +56961,10 @@ null
                 );
               })()}
 
-              {weekAppointmentDetails && weekAppointmentDetailsTemporalState === 'ongoing' &&
+              {weekAppointmentDetails && weekAppointmentDetailsTemporalState !== 'future' &&
                 !weekAppointmentPendingRequest && !isSyntheticWeekAppointmentId(weekAppointmentDetails.id) &&
-                !weekAppointmentDetails.completato && !weekAppointmentDetails.incassato && !weekAppointmentDetails.nonEffettuato ? (
-                <HapticTouchable accessibilityRole="button" accessibilityLabel="Elimina appuntamento in corso"
+                !weekAppointmentDetails.incassato ? (
+                <HapticTouchable accessibilityRole="button" accessibilityLabel="Elimina appuntamento"
                   disabled={weekAppointmentDeletePendingId !== null || completionPendingId !== null || weekAppointmentNoShowPendingId !== null}
                   onPress={() => { void deleteWeekAppointmentFromDetails(weekAppointmentDetails); }}
                   style={[styles.weekAppointmentNoShowButton, {marginTop:20,backgroundColor:'transparent',borderColor:availabilityPalette.line}]}>
