@@ -21,8 +21,25 @@ for (const platform of ['ios', 'android']) {
   fs.rmSync(path.join(target, '_expo', 'static', 'js', platform), { recursive: true, force: true });
 }
 fs.rmSync(path.join(target, 'metadata.json'), { force: true });
-const oldAssets = path.join(target, 'assets', 'node_modules');
-if (fs.existsSync(oldAssets)) fs.renameSync(oldAssets, path.join(target, 'assets', 'vendor'));
+// node_modules can sit deeper than assets/ (an export from a git worktree whose
+// node_modules is a symlink lands under assets/_<folder>/node_modules): rename
+// every one of them, or the CLI silently drops the icon fonts.
+const renamedAssetDirs = [];
+function renameNodeModules(directory) {
+  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const file = path.join(directory, entry.name);
+    if (entry.name === 'node_modules') {
+      const relative = path.relative(target, file).split(path.sep).join('/');
+      fs.renameSync(file, path.join(directory, 'vendor'));
+      renamedAssetDirs.push([`${relative}/`, `${relative.slice(0, -'node_modules'.length)}vendor/`]);
+      continue;
+    }
+    renameNodeModules(file);
+  }
+}
+const assetsRoot = path.join(target, 'assets');
+if (fs.existsSync(assetsRoot)) renameNodeModules(assetsRoot);
 let rewritten = 0;
 function rewrite(directory) {
   for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
@@ -30,7 +47,8 @@ function rewrite(directory) {
     if (entry.isDirectory()) { rewrite(file); continue; }
     if (!/\.(?:html|js|css|json)$/.test(entry.name)) continue;
     const content = fs.readFileSync(file, 'utf8');
-    const next = content.replaceAll('assets/node_modules/', 'assets/vendor/');
+    let next = content;
+    for (const [from, to] of renamedAssetDirs) next = next.replaceAll(from, to);
     if (next !== content) { fs.writeFileSync(file, next); rewritten++; }
   }
 }
@@ -73,6 +91,7 @@ const html = fs.readFileSync(path.join(target, 'index.html'), 'utf8');
 const fonts = [...html.matchAll(/url\("([^"\n]+\.ttf)"\)/g)].map(match => match[1]);
 if (!fonts.some(file => file.includes('Ionicons.'))) throw new Error('Icon font missing from export.');
 for (const font of fonts) {
+  if (font.includes('node_modules')) throw new Error(`Font path would be dropped by Vercel: ${font}`);
   const file = path.join(target, font.replace(/^\//, ''));
   if (!fs.existsSync(file) || fs.statSync(file).size < 1000) throw new Error(`Missing font: ${font}`);
 }
