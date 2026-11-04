@@ -35,13 +35,13 @@ export function BenefitDateField({
           borderColor: premiumColor("#DAE3E9","borderColor"),
         }}
       >
-        <Text>
+        <Text style={{ color: value ? premiumColor("#0F172A","color") : premiumColor("#667085","color") }}>
           {value ? value.split("-").reverse().join("/") : "Senza scadenza"}
         </Text>
       </HapticTouchable>
       {optional && value ? (
         <HapticTouchable disabled={disabled} onPress={() => onChange("")}>
-          <Text>Rimuovi scadenza</Text>
+          <Text style={{ color: premiumColor("#334155","color"), textDecorationLine: "underline" }}>Rimuovi scadenza</Text>
         </HapticTouchable>
       ) : null}
       <NativeDatePickerModal
