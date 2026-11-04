@@ -25256,7 +25256,7 @@ export default function AgendaScreen() {
           accessibilityHint="Attiva o disattiva l'assegnazione automatica degli operatori nella composizione"
         >
           <View style={[styles.quickCompositionAutoFitIcon, quickSlotDesign.quickCompositionAutoFitIcon]}>
-            <Ionicons name="sparkles" size={16} color="#1D4ED8" />
+            <Ionicons name="sparkles" size={16} color={availabilityPalette.night ? '#D8C29B' : '#7A6446'} />
           </View>
           <View style={styles.quickCompositionAutoFitCopy}>
             <View style={styles.quickCompositionAutoFitTitleRow}>
@@ -71992,6 +71992,9 @@ const baseAgendaStyles = StyleSheet.create({
     borderWidth: 0,
     backgroundColor: 'transparent',
     gap: 10,
+    // Su schermo stretto i comandi scendono sotto il testo invece di schiacciarlo in verticale.
+    flexWrap: 'wrap',
+    rowGap: 4,
   },
   quickCompositionPauseEditorNative: {
     flex: 1,
@@ -72007,7 +72010,8 @@ const baseAgendaStyles = StyleSheet.create({
   },
   quickCompositionPauseCopy: {
     flex: 1,
-    minWidth: 0,
+    minWidth: IS_WEB ? 150 : 0,
+    flexBasis: IS_WEB ? 150 : undefined,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 7,

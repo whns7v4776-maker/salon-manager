@@ -63,6 +63,11 @@ export function createAgendaPremiumStyles<T extends Record<string,any>>(base:T,t
  // Nested time selection is a solid sheet, never the translucent field fill.
  const booking=getAgendaBookingColors(p.night);
  // Booking editors share one opaque surface and field treatment across platforms.
+ // Incastro automatico attivo: velo bronzo leggero, non il fondo pieno dei pulsanti (testo illeggibile).
+ patch('quickCompositionAutoFitCardActive',{backgroundColor:p.night?'rgba(216,194,155,.09)':'rgba(182,161,125,.12)',borderColor:p.night?'rgba(216,194,155,.42)':'rgba(140,116,78,.42)'});
+ patch('quickCompositionAutoFitIcon',{backgroundColor:p.night?'rgba(216,194,155,.12)':'rgba(140,116,78,.10)',borderColor:p.night?'rgba(216,194,155,.28)':'rgba(140,116,78,.24)'});
+ patch('quickCompositionAutoFitDefaultBadge',{backgroundColor:p.night?'rgba(216,194,155,.16)':'rgba(140,116,78,.12)',borderRadius:6});
+ patch('quickCompositionAutoFitDefaultBadgeText',{color:p.night?'#D8C29B':'#7A6446'});
  patch('quickBookingNestedOverlay',{backgroundColor:booking.backdrop,justifyContent:web?'center':'flex-end',padding:web?24:8,paddingBottom:web?24:0,...(web?{backdropFilter:'none'}:{})});
  patch('quickBookingNestedKeyboardShell',{maxHeight:'100%',maxWidth:820});
  for(const key of ['quickBookingNestedCard','quickBookingNestedCardService','quickBookingNestedCardCustomer'])patch(key,{backgroundColor:booking.surface,borderColor:booking.border,opacity:1,shadowOpacity:0,...(web?{backdropFilter:'none',boxShadow:'0 20px 60px rgba(0,0,0,.28)'}:{})});

@@ -5823,8 +5823,10 @@ export default function PrenotazioniScreen() {
                     pressScale={0.98}
                     pressOpacity={0.95}
                     style={{
-                      flexBasis: tilesInRow ? `${100 / count - 2}%` : "100%",
-                      flexGrow: 1,
+                      // In colonna la base al 100% vale per l'altezza: le card si allungavano e si accavallavano.
+                      flexBasis: tilesInRow ? `${100 / count - 2}%` : "auto",
+                      flexGrow: tilesInRow ? 1 : 0,
+                      flexShrink: 0,
                       minWidth: 0,
                       flexDirection: tilesInRow ? "column" : "row",
                       alignItems: tilesInRow ? "flex-start" : "center",

@@ -91,14 +91,14 @@
   grid-template-columns: minmax(0, 1fr) 188px;
   min-height: 82px;
   padding-right: 34px !important;
-  border: 1px solid #d3dfed;
+  border: 1px solid #e2dccf;
   border-radius: 14px !important;
-  background: #edf3fa;
+  background: #fbf8f3;
   box-shadow: 0 2px 5px rgb(29 52 84 / 4%) !important;
 }
 :root [data-testid='quick-slot-phase']:has([data-testid='quick-slot-phase-overlap']) {
-  background: #fff6e9 !important;
-  border-color: #dbb680 !important;
+  background: #f8f0e2 !important;
+  border-color: #d6b47c !important;
 }
 :root [data-testid='quick-slot-phase-body'] {
   grid-column: 1;
@@ -114,7 +114,7 @@
   width: 28px !important;
   height: 28px !important;
   border-radius: 9px !important;
-  background: #294b70 !important;
+  background: #343735 !important;
 }
 :root [data-testid='quick-slot-phase-order'] > * { color: #fff !important; }
 :root [data-testid='quick-slot-phase-header'] {
@@ -128,7 +128,7 @@
 :root [data-testid='quick-slot-phase-meta'] { margin-top: 5px !important; }
 :root [data-testid='quick-slot-phase-assignment'] {
   padding-left: 14px !important;
-  border-left: 1px solid #d2deed !important;
+  border-left: 1px solid #e2dccf !important;
 }
 :root [data-testid='quick-slot-phase-assignment-controls'] { gap: 7px !important; }
 :root [data-testid='quick-slot-phase-operator-wrap'] { flex: 1 !important; width: auto !important; min-width: 0 !important; }
@@ -152,7 +152,7 @@
   align-self: center !important;
   align-items: stretch !important;
   flex-direction: column !important;
-  border-left: 1px solid #d2deed !important;
+  border-left: 1px solid #e2dccf !important;
   border-radius: 0 !important;
   margin: 0 12px 0 0 !important;
   padding: 0 0 0 12px !important;
@@ -169,8 +169,8 @@
 :root [data-testid='quick-slot-phase'] > :not([data-testid='quick-slot-phase-body']):not([data-testid='quick-slot-phase-actions']):not([data-testid='salon-composition-grab']) { grid-column: 1 / -1; }
 :root [data-testid='quick-slot-phase-pause'] { padding-right: 12px !important; }
 :root [data-testid='quick-slot-phase'] > [data-testid='salon-composition-grab'] {
-  background: #e6edf6 !important;
-  border-left-color: #d3dfed !important;
+  background: #f3eee5 !important;
+  border-left-color: #e2dccf !important;
   width: 34px !important;
 }
 @container quick-slot-phases (max-width: 820px) {
@@ -179,7 +179,7 @@
     grid-column: 1;
     grid-row: auto;
     border-left: 0 !important;
-    border-top: 1px solid #d2deed !important;
+    border-top: 1px solid #e2dccf !important;
     margin: 0 12px 10px 50px !important;
     padding: 8px 0 0 !important;
   }
@@ -189,7 +189,7 @@
 @container quick-slot-phases (max-width: 610px) {
   :root [data-testid='quick-slot-phase-body'] { align-items: flex-start !important; }
   :root [data-testid='quick-slot-phase-header'] { grid-template-columns: minmax(0, 1fr); gap: 9px !important; }
-  :root [data-testid='quick-slot-phase-assignment'] { border-left: 0 !important; border-top: 1px solid #d2deed !important; padding: 9px 0 0 !important; }
+  :root [data-testid='quick-slot-phase-assignment'] { border-left: 0 !important; border-top: 1px solid #e2dccf !important; padding: 9px 0 0 !important; }
 }
 @media (hover: hover) and (pointer: fine) {
   :root :is([data-testid='quick-slot-fit-card'], [data-testid='quick-slot-fit-cross-card']):hover {
@@ -750,3 +750,33 @@ input:-webkit-autofill,input:-webkit-autofill:hover,input:-webkit-autofill:focus
  html body [data-agenda-operator-header="true"] [role="button"]:hover [data-agenda-operator-surface="true"]{filter:brightness(1.14);border-color:rgba(216,194,155,.42)!important;}
 }
 [data-agenda-operator-surface="true"]{transition:filter .18s ease,border-color .18s ease;}
+
+/* Composizione su schermo stretto: il selettore operatore prende tutta la riga
+   invece di schiacciare "Automatico · Sofia" in una colonna di lettere. */
+@container quick-slot-phases (max-width: 610px) {
+  :root [data-testid='quick-slot-phase-assignment-controls'] { flex-wrap: wrap !important; }
+  :root [data-testid='quick-slot-phase-operator-wrap'] { flex: 1 1 100% !important; width: 100% !important; }
+  :root [data-testid='quick-slot-phase-operator'] > :has(> [data-testid='quick-slot-phase-operator-label']) { flex: 0 0 auto !important; min-width: max-content !important; }
+  :root [data-testid='quick-slot-phase-operator'] > :has(> [data-testid='quick-slot-phase-operator-label']) ~ div:not(:last-child) { flex-shrink: 1 !important; min-width: 0 !important; overflow: hidden !important; }
+  :root [data-testid='quick-slot-phase-operator'] > :has(> [data-testid='quick-slot-phase-operator-label']) ~ div:not(:last-child) > div:last-child { overflow: hidden !important; text-overflow: ellipsis !important; white-space: nowrap !important; }
+  :root [data-testid='quick-slot-phase-operator'] :is([data-testid='quick-slot-phase-operator-label'], [data-testid='quick-slot-phase-operator-name']) { white-space: nowrap !important; overflow-wrap: normal !important; word-break: normal !important; }
+}
+/* Tema scuro: niente fondi crema o azzurri nelle fasi della composizione. */
+:root[data-premium-appearance="night"] [data-testid='quick-slot-phase'] {
+  background: #272c2d !important;
+  border-color: rgba(216, 194, 155, 0.2) !important;
+  box-shadow: none !important;
+}
+:root[data-premium-appearance="night"] [data-testid='quick-slot-phase']:has([data-testid='quick-slot-phase-overlap']) {
+  background: #2d2a25 !important;
+  border-color: rgba(201, 160, 98, 0.55) !important;
+}
+:root[data-premium-appearance="night"] [data-testid='quick-slot-phase'] > [data-testid='salon-composition-grab'] {
+  background: #23282a !important;
+  border-left-color: rgba(255, 255, 255, 0.07) !important;
+}
+:root[data-premium-appearance="night"] [data-testid='quick-slot-phase-order'] { background: #d8c29b !important; }
+:root[data-premium-appearance="night"] [data-testid='quick-slot-phase-order'] > * { color: #1b1f20 !important; }
+:root[data-premium-appearance="night"] :is([data-testid='quick-slot-phase-assignment'], [data-testid='quick-slot-phase-actions']) {
+  border-color: rgba(255, 255, 255, 0.09) !important;
+}
