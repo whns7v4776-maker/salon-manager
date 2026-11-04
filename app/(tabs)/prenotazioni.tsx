@@ -19,7 +19,7 @@ import { NotificationArchiveSearch } from '../../components/notification-archive
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useFocusEffect, useIsFocused } from "@react-navigation/native";
-import { useLocalSearchParams } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import React, {
   useCallback,
   useEffect,
@@ -4524,6 +4524,23 @@ export default function PrenotazioniScreen() {
             </View>
           </HapticTouchable>
           <View style={{ justifyContent: "center", gap: 8, paddingRight: 12, paddingLeft: 2, paddingVertical: 12 }}>
+            {item.stato !== "Annullata" && item.stato !== "Rifiutata" && item.data && item.ora
+              ? contactButton("calendar-outline", "In agenda", () => {
+                  // Same landing as notifications and banners: the agenda opens on the slot and flashes it.
+                  const openToken = String(Date.now());
+                  router.push({
+                    pathname: "/(tabs)/agenda",
+                    params: {
+                      start: item.data,
+                      requestId: String(item.id ?? ""),
+                      requestTime: item.ora.trim().slice(0, 5),
+                      openDetails: "true",
+                      openToken,
+                      requestOpenToken: openToken,
+                    },
+                  });
+                })
+              : null}
             {contactButton("call-outline", "Chiama", () => openExternalUrl(`tel:${buildDialablePhone(item.telefono)}`))}
             {contactButton("logo-whatsapp", "WhatsApp", () => openExternalUrl(buildWhatsappUrl(item.telefono)))}
             {item.instagram ? contactButton("logo-instagram", "Instagram", () => openExternalUrl(buildInstagramUrl(item.instagram))) : null}

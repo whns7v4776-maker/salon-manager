@@ -16857,6 +16857,14 @@ export default function AgendaScreen() {
             normalizedRequestTime !== '' &&
             item.ora.trim().slice(0, 5) === normalizedRequestTime,
         ) ??
+        // An accepted request may not carry its request id: flash the slot when it is the only one at that time.
+        (() => {
+          if (!normalizedRequestTime) return null;
+          const atTime = dayAppointments.filter(
+            (item) => item.ora.trim().slice(0, 5) === normalizedRequestTime,
+          );
+          return atTime.length === 1 ? atTime[0] : null;
+        })() ??
         null;
 
       const matchedTime =
