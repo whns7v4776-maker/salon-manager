@@ -33,6 +33,7 @@ export function ClientBookingFrame({ journey, workspaceId, salonName, shop, scro
   noteEditing?: boolean; onNoteLayout?: () => void;
 }) {
   const layout = useClientBookingLayout();
+  const { palette: p } = useAccessAppearance();
   const native = Platform.OS !== 'web';
   const editingNote = native && noteEditing;
   // Stop inside the opaque dock before its rounded lower corners, so no card leaks underneath.
@@ -82,6 +83,12 @@ export function ClientBookingFrame({ journey, workspaceId, salonName, shop, scro
       onScroll={event => { scrollPosition.current = event.nativeEvent.contentOffset.y; onScrollY?.(scrollPosition.current); }}>
       <ClientBookingJourney {...journey} hideProgress onIncludedServicesLayout={(y, height) => { includedLayout.current = { key: includedKey, y, height }; revealIncluded(includedKey); }} />
     </ScrollView>
+    {native && !editingNote ? (
+      // Native twin of the web mask: the list fades into the dock instead of being sliced by its top edge.
+      <View pointerEvents="none" style={{ position: 'absolute', left: 0, right: 0, height: 44, bottom: layout.navigationSpace + nativeDockHeight - 2 }}>
+        <Svg width="100%" height="100%" preserveAspectRatio="none" viewBox="0 0 400 44"><Defs><LinearGradient id="customer-dock-fade" x1="0" y1="0" x2="0" y2="1"><Stop offset="0" stopColor={p.night ? '#191D20' : '#FFFFFF'} stopOpacity="0" /><Stop offset="1" stopColor={p.night ? '#191D20' : '#FFFFFF'} stopOpacity={p.night ? .78 : .72} /></LinearGradient></Defs><Rect width="400" height="44" fill="url(#customer-dock-fade)" /></Svg>
+      </View>
+    ) : null}
     {!editingNote ? <View onLayout={native ? event => { const height = event.nativeEvent.layout.height; nativeDockHeightRef.current = height; setNativeDockHeight(height); revealIncluded(includedKey); } : undefined}
       style={{ paddingHorizontal: layout.desktop ? 32 : Math.max(12, layout.insets.left, layout.insets.right), paddingTop: 8, paddingBottom: native ? 0 : layout.navigationSpace, ...(native ? { position: 'absolute', left: 0, right: 0, bottom: layout.navigationSpace } : {}) }}><ClientBookingJourneyDock {...journey} inline /></View> : null}
   </View>;

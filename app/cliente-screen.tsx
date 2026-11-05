@@ -6589,6 +6589,8 @@ function ClienteFrontendScreenContent({ nativeInitialTab }: ClienteFrontendScree
   const [isLoadingSalon, setIsLoadingSalon] = useState(false);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [profileSaveError, setProfileSaveError] = useState('');
+  // Web: the login button keeps "Accesso in corso..." from the tap until the customer area is on screen.
+  const [webLoginEntering, setWebLoginEntering] = useState(false);
   const [frontendAccessConflictError, setFrontendAccessConflictError] = useState('');
   const [profileFieldErrors, setProfileFieldErrors] = useState<{
     nome?: string;
@@ -27845,7 +27847,25 @@ function ClienteFrontendScreenContent({ nativeInitialTab }: ClienteFrontendScree
     !isFrontendBiometricVisualLogin &&
     !limitPhoneToTenDigits(frontendLoginDraft.telefono);
   const isFrontendLoginButtonVisuallyDisabled =
-    isSavingProfile || isFrontendLoginMissingRequiredFields || Boolean(loginEmailCompletionSentTo);
+    isSavingProfile || webLoginEntering || isFrontendLoginMissingRequiredFields || Boolean(loginEmailCompletionSentTo);
+  useEffect(() => {
+    if (!webLoginEntering) return;
+    // A failed attempt or the email-code step gives the button back at once.
+    if (profileSaveError || loginEmailCompletionSentTo) {
+      setWebLoginEntering(false);
+      return;
+    }
+    if (isSavingProfile || isRegistered) return;
+    // Safety net: never leave the button stuck if the attempt ends without entering.
+    const timer = setTimeout(() => setWebLoginEntering(false), 8000);
+    return () => clearTimeout(timer);
+  }, [isRegistered, isSavingProfile, loginEmailCompletionSentTo, profileSaveError, webLoginEntering]);
+  const wasRegisteredForWebLoginRef = useRef(isRegistered);
+  useEffect(() => {
+    // After logging out the form must start clean.
+    if (wasRegisteredForWebLoginRef.current && !isRegistered) setWebLoginEntering(false);
+    wasRegisteredForWebLoginRef.current = isRegistered;
+  }, [isRegistered]);
   const showFrontendLoginRequiredErrors = () => {
     const normalizedEmail = normalizeEmail(frontendLoginDraft.email);
     const normalizedPhone = limitPhoneToTenDigits(frontendLoginDraft.telefono);
@@ -33195,13 +33215,14 @@ function ClienteFrontendScreenContent({ nativeInitialTab }: ClienteFrontendScree
                                 return;
                               }
                               setProfileSaveError('');
+                              if (isWeb) setWebLoginEntering(true);
                               void loginFrontendCliente();
                             }}
                             activeOpacity={0.9}
                             disabled={isFrontendLoginButtonVisuallyDisabled}
                             webTouchAction="manipulation"
                           >
-                            {isSavingProfile ? (
+                            {isSavingProfile || webLoginEntering ? (
                               <View style={styles.clientAccessButtonLoadingRow}>
                                 <Text style={styles.primaryButtonText}>Accesso in corso...</Text>
                                 <ClientAccessSpinner />
