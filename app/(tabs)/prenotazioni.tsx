@@ -58,6 +58,9 @@ import {
   getWebExpandableCardStyle,
 } from "../../components/ui/web-expandable-card";
 import { useAppContext } from "../../src/context/AppContext";
+import { useCustomerBadgeMap } from "../../src/lib/use-customer-premium";
+import { findCustomerOnlinePolicyForBookingRequest } from "../../src/lib/customer-online-booking-policy";
+import { CustomerBadgeAlerts } from "../../components/customer-badge-alerts";
 import {
   OwnerStartupSkeletonItem,
   OwnerStartupSkeletonPulse,
@@ -891,6 +894,7 @@ export default function PrenotazioniScreen() {
     workspaceAccessAllowed,
   } = useAppContext();
   const { unreadCountsBySection, refreshBadges } = useUnreadBadges();
+  const customerBadges = useCustomerBadgeMap(salonWorkspace.id ?? "");
   const [selectedRequest, setSelectedRequest] = useState<
     (typeof richiestePrenotazione)[number] | null
   >(null);
@@ -4484,6 +4488,12 @@ export default function PrenotazioniScreen() {
                   <Text style={{ fontSize: 11, lineHeight: 15, fontWeight: "600", color: statusTone }} numberOfLines={1}>{statusLabel}</Text>
                 </View>
               </View>
+              {customerBadges.size > 0 ? (
+                <CustomerBadgeAlerts
+                  hideStandard
+                  status={customerBadges.get(findCustomerOnlinePolicyForBookingRequest(clienti, item)?.id ?? "")}
+                />
+              ) : null}
               <Text style={{ fontSize: 13, lineHeight: 18, color: rp.ink, opacity: 0.86 }} numberOfLines={IS_WEB ? 2 : 1}>
                 {logicalTitle}
               </Text>

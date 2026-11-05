@@ -250,6 +250,8 @@ import {
 } from '../../src/lib/service-phases';
 import { supabase } from '../../src/lib/supabase';
 import { AgendaSlotFlash } from '../../components/agenda-slot-flash';
+import { AgendaCustomerTierMark, CustomerBadgeAlerts } from '../../components/customer-badge-alerts';
+import { useCustomerBadgeMap } from '../../src/lib/use-customer-premium';
 
 const AGENDA_SLOT_FLASH_COLOR = '#C79A4B';
 import {
@@ -27960,6 +27962,16 @@ export default function AgendaScreen() {
     [clienti],
   );
 
+  const agendaCustomerBadges = useCustomerBadgeMap(salonWorkspace.id ?? '');
+  const getAgendaCustomerBadge = useCallback(
+    (appointment: AppuntamentoItem | null | undefined) => {
+      if (!appointment || agendaCustomerBadges.size === 0) return undefined;
+      const identityKey = getAgendaCustomerIdentityKey(appointment);
+      return identityKey.startsWith('id:') ? agendaCustomerBadges.get(identityKey.slice(3)) : undefined;
+    },
+    [agendaCustomerBadges, getAgendaCustomerIdentityKey],
+  );
+
   const agendaCustomerIdentityColorsByKey = useCustomerIdentityColors(
     salonWorkspace.id, salonWorkspace.ownerEmail, clienti.map(customer => customer.id),
   );
@@ -47940,6 +47952,7 @@ accessibilityHint={
                                                     active={!!highlightedAppointmentId && laneStartAppointment.id === highlightedAppointmentId}
                                                     color={AGENDA_SLOT_FLASH_COLOR}
                                                   />
+                                                  <AgendaCustomerTierMark status={getAgendaCustomerBadge(laneStartAppointment)} />
                                                   {laneAppointmentOverlapTailHeight >
                                                   0 ? (
                                                     <View
@@ -48857,6 +48870,7 @@ null
                                         active={!!highlightedAppointmentId && appointmentStart.id === highlightedAppointmentId}
                                         color={AGENDA_SLOT_FLASH_COLOR}
                                       />
+                                      <AgendaCustomerTierMark status={getAgendaCustomerBadge(appointmentStart)} />
                                       {hasPendingRequestOverlay ? (
                                         <View
                                           style={[
@@ -56127,6 +56141,11 @@ null
                   >
                   {weekAppointmentDetails?.cliente ?? ''}
                 </Text>
+                {getAgendaCustomerBadge(weekAppointmentDetails) ? (
+                  <View style={{ alignItems: 'center', marginTop: 6 }}>
+                    <CustomerBadgeAlerts status={getAgendaCustomerBadge(weekAppointmentDetails)} />
+                  </View>
+                ) : null}
               </View>
               <HapticTouchable
                 style={[

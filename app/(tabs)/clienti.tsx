@@ -1216,6 +1216,7 @@ export default function ClientiScreen() {
   >(null);
   const [ricerca, setRicerca] = useState('');
   const [registrationFilter, setRegistrationFilter] = useState<'all' | 'pending'>('all');
+  const [badgeFilter, setBadgeFilter] = useState<string | null>(null);
   const [registrationDecisions, setRegistrationDecisions] = useState<Record<string, 'approved' | 'rejected'>>({});
   const registrationDecisionsRef = useRef(new Set<string>());
 
@@ -3483,11 +3484,24 @@ export default function ClientiScreen() {
     );
   }, [performRegistrationDecision, showSwipeConfirmation]);
 
+  const badgeFilterOptions = useMemo(() => {
+    if (!customerPremium.summary?.enabled) return [];
+    const counts = new Map<string, number>();
+    clienti.forEach(item => { const tier = customerPremiumStatuses.get(item.id)?.tier; if (tier) counts.set(tier, (counts.get(tier) ?? 0) + 1); });
+    return ([['standard','Standard','person-outline'],['frequente','Frequente','repeat-outline'],['premium','Premium','ribbon-outline'],['top_premium','Top Premium','diamond-outline']] as const)
+      .map(([tier,label,icon]) => ({ tier, label, icon, count: counts.get(tier) ?? 0 }))
+      .filter(option => option.count > 0);
+  }, [clienti, customerPremium.summary?.enabled, customerPremiumStatuses]);
+  const activeBadgeFilter = badgeFilter && badgeFilterOptions.some(option => option.tier === badgeFilter) ? badgeFilter : null;
+
   const clientiFiltrati = useMemo(() => {
     const testo = ricerca.trim().toLowerCase();
-    const visibleClients = registrationFilter === 'pending'
+    const byRegistration = registrationFilter === 'pending'
       ? clienti.filter(item => item.registrationStatus === 'pending')
       : clienti;
+    const visibleClients = activeBadgeFilter
+      ? byRegistration.filter(item => customerPremiumStatuses.get(item.id)?.tier === activeBadgeFilter)
+      : byRegistration;
 
     if (!testo) return visibleClients;
 
@@ -3498,7 +3512,7 @@ export default function ClientiScreen() {
       const instagramMatch = item.instagram?.toLowerCase().includes(testo);
       return nomeMatch || telefonoMatch || emailMatch || instagramMatch;
     });
-  }, [clienti, ricerca, registrationFilter]);
+  }, [clienti, ricerca, registrationFilter, activeBadgeFilter, customerPremiumStatuses]);
 
   const clientiSections = useMemo(() => {
     const alphabetical = [...clientiFiltrati].sort((a, b) =>
@@ -4286,8 +4300,8 @@ export default function ClientiScreen() {
               </View>
             </Modal>
           ) : null) : null;
-    const directoryRow = <CustomerDirectoryRow premium={Platform.OS==='web'?customerPremiumStatuses.get(item.id):undefined} name={item.full_name} initials={buildClientMonogram(item.full_name)} color={customerIdentityColor} unread={isUnreadFrontendClient} status={isPendingRegistration?'Da approvare':isInibito?'Inibito':isUnreadFrontendClient?'Nuovo cliente':'Attivo'} visit={customerDirectoryVisits.get(item.id)} table={displayMode==='table'} selected={selected} onSelect={()=>{if(isUnreadFrontendClient&&!expanded)markFrontendClientsAsViewed([item.id]);if(Platform.OS!=='web')setClientDetailsId(item.id);else toggleExpanded();}} onOptions={() => setOpenWebClientActionsId(item.id)} onCall={() => Linking.openURL(`tel:${buildDialablePhone(item.phone)}`).catch(() => null)} onMessage={() => { const url=buildWhatsappUrl(item.phone); if(url) Linking.openURL(url).catch(() => null); }} />;
-    const profileDetails = <CustomerProfileSummary premium={Platform.OS==='web'?customerPremiumStatuses.get(item.id):undefined} name={item.full_name} initials={buildClientMonogram(item.full_name)} color={customerIdentityColor} phone={item.phone??''} email={item.email??''} status={isPendingRegistration?'Da approvare':isInibito?'Inibito':'Attivo'} cancellations={cancellationCount} limits={[typeof item.maxFutureAppointments==='number'?`${item.maxFutureAppointments} ${item.maxFutureAppointmentsMode==='total_future'?'prenotazioni future':'prenotazioni al mese'}`:'Senza limite mensile',typeof item.maxDailyAppointments==='number'?`${item.maxDailyAppointments} al giorno`:'Senza limite giornaliero'].join(' · ')} onEdit={()=>leaveClientDetailsFor('edit',item)} onOptions={()=>leaveClientDetailsFor('options',item)} onBenefits={()=>leaveClientDetailsFor('benefits',item)} actions={[
+    const directoryRow = <CustomerDirectoryRow premium={customerPremiumStatuses.get(item.id)} name={item.full_name} initials={buildClientMonogram(item.full_name)} color={customerIdentityColor} unread={isUnreadFrontendClient} status={isPendingRegistration?'Da approvare':isInibito?'Inibito':isUnreadFrontendClient?'Nuovo cliente':'Attivo'} visit={customerDirectoryVisits.get(item.id)} table={displayMode==='table'} selected={selected} onSelect={()=>{if(isUnreadFrontendClient&&!expanded)markFrontendClientsAsViewed([item.id]);if(Platform.OS!=='web')setClientDetailsId(item.id);else toggleExpanded();}} onOptions={() => setOpenWebClientActionsId(item.id)} onCall={() => Linking.openURL(`tel:${buildDialablePhone(item.phone)}`).catch(() => null)} onMessage={() => { const url=buildWhatsappUrl(item.phone); if(url) Linking.openURL(url).catch(() => null); }} />;
+    const profileDetails = <CustomerProfileSummary premium={customerPremiumStatuses.get(item.id)} name={item.full_name} initials={buildClientMonogram(item.full_name)} color={customerIdentityColor} phone={item.phone??''} email={item.email??''} status={isPendingRegistration?'Da approvare':isInibito?'Inibito':'Attivo'} cancellations={cancellationCount} limits={[typeof item.maxFutureAppointments==='number'?`${item.maxFutureAppointments} ${item.maxFutureAppointmentsMode==='total_future'?'prenotazioni future':'prenotazioni al mese'}`:'Senza limite mensile',typeof item.maxDailyAppointments==='number'?`${item.maxDailyAppointments} al giorno`:'Senza limite giornaliero'].join(' · ')} onEdit={()=>leaveClientDetailsFor('edit',item)} onOptions={()=>leaveClientDetailsFor('options',item)} onBenefits={()=>leaveClientDetailsFor('benefits',item)} actions={[
       {label:'Chiama',icon:'call-outline',onPress:()=>{Linking.openURL(`tel:${buildDialablePhone(item.phone)}`).catch(()=>null);}},
       {label:'WhatsApp',icon:'chatbubble-outline',onPress:()=>{Linking.openURL(buildWhatsappUrl(item.phone)).catch(()=>null);}},
       {label:'Instagram',icon:'logo-instagram',disabled:!canOpenInstagram,onPress:()=>{if(canOpenInstagram)Linking.openURL(buildInstagramUrl(item.instagram)||'').catch(()=>null);}},
@@ -4516,6 +4530,28 @@ export default function ClientiScreen() {
                 </View>
               ) : null}
 
+              {badgeFilterOptions.length > 1 ? (
+                <View {...(Platform.OS==='web'?{dataSet:{premiumToolbarFilters:"true"}}:{})} style={styles.registrationFilters}>
+                  {badgeFilterOptions.map(option => {
+                    const active = activeBadgeFilter === option.tier;
+                    return (
+                      <HapticTouchable
+                        key={option.tier}
+                        accessibilityRole="button"
+                        accessibilityLabel={active ? `Mostra tutti i badge` : `Mostra solo i clienti ${option.label}, ${option.count}`}
+                        accessibilityState={{ selected: active }}
+                        aria-pressed={active}
+                        onPress={() => setBadgeFilter(active ? null : option.tier)}
+                        style={[styles.registrationFilterChip, active && styles.registrationFilterSelected]}
+                      >
+                        <Ionicons name={option.icon} size={14} color={active ? '#1D4ED8' : '#64748B'} />
+                        <Text style={[styles.registrationFilterText, active && styles.registrationFilterTextSelected]}>{option.label} · {option.count}</Text>
+                      </HapticTouchable>
+                    );
+                  })}
+                </View>
+              ) : null}
+
               </PremiumSearchToolbar>
 
               {item.sections.length === 0 ? (
@@ -4599,7 +4635,8 @@ export default function ClientiScreen() {
       markHeaderExpandTouchStart,
       unreadFrontendClientIds.length,
       pendingRegistrationCount,
-      registrationFilter, styles, customerPalette
+      registrationFilter, styles, customerPalette,
+      badgeFilterOptions, activeBadgeFilter
     ]
   );
 
@@ -5055,6 +5092,7 @@ export default function ClientiScreen() {
           name: item.nome,
           email: item.email,
           phone: item.telefono,
+          badge: customerPremium.summary?.enabled ? customerPremiumStatuses.get(item.id) ?? null : null,
         }))}
         onClose={() => {
           setShowCommunicationsModal(false);
