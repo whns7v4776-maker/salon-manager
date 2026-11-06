@@ -58,8 +58,26 @@ export function ShopField({
   multiline?: boolean;
 }) {
   const s = useCustomerShopStyles(true);
+  // Ricerca: un solo campo con il testo come suggerimento, così la barra premium disegna
+  // il suo riquadro attorno all'input (non attorno a etichetta + input).
+  if (/cerca/i.test(label))
+    return (
+      <PremiumSearchToolbar>
+        <TextInput
+          accessibilityLabel={label}
+          placeholder={label}
+          placeholderTextColor={s.copy.color}
+          style={s.input}
+          value={value}
+          onChangeText={onChange}
+          editable={!disabled}
+          autoCapitalize="none"
+          autoCorrect={false}
+        />
+      </PremiumSearchToolbar>
+    );
   return (
-    <PremiumSearchToolbar enabled={/cerca/i.test(label)}><View style={{ gap: 7 }}>
+    <PremiumSearchToolbar enabled={false}><View style={{ gap: 7 }}>
       <Text style={s.label}>{label}</Text>
       <TextInput
         accessibilityLabel={label}

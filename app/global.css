@@ -780,3 +780,72 @@ input:-webkit-autofill,input:-webkit-autofill:hover,input:-webkit-autofill:focus
 :root[data-premium-appearance="night"] :is([data-testid='quick-slot-phase-assignment'], [data-testid='quick-slot-phase-actions']) {
   border-color: rgba(255, 255, 255, 0.09) !important;
 }
+
+/* Migliori incastri disponibili: stessi toni avorio e bronzo delle fasi (niente azzurri della grafica precedente). */
+:root [data-testid='quick-slot-fits'] { background: #fbf8f3 !important; border-color: #e2dccf !important; }
+:root :is([data-testid='quick-slot-fit-card'], [data-testid='quick-slot-fit-cross-card']) {
+  --fit-ink: #343735;
+  --fit-muted: #7a6f60;
+  --fit-avatar: #e9e1d2;
+  background: linear-gradient(150deg, #fffdf9, #f3eee5) !important;
+  border-color: #e2dccf !important;
+  box-shadow: 0 2px 5px rgb(52 55 53 / 5%) !important;
+}
+:root [data-testid='quick-slot-fit-cross-card'] {
+  --fit-ink: #6b4a22;
+  --fit-muted: #876d4e;
+  background: linear-gradient(150deg, #fbf4e8, #f1e5cf) !important;
+  border-color: #dfc9a3 !important;
+}
+:root :is([data-testid='quick-slot-fit-card'], [data-testid='quick-slot-fit-cross-card']):has([data-slot-fit-content][data-selected='true']) {
+  --fit-ink: #ffffff;
+  --fit-muted: #ddd3c2;
+  --fit-avatar: rgb(255 255 255 / 14%);
+  background: linear-gradient(140deg, #45494a, #2c2f2e) !important;
+  border-color: #343735 !important;
+  box-shadow: 0 4px 10px rgb(52 55 53 / 18%) !important;
+}
+.slot-fit-rank[data-rank='Migliore'] { background: #e5f0e7; border-color: #bfd8c4; color: #2f6b45; }
+.slot-fit-rank[data-rank='Ottimo'] { background: #f1e7d6; border-color: #e0cba6; color: #7a5a2c; }
+.slot-fit-rank[data-rank='Alternativa'] { background: #eee9e0; border-color: #ddd5c7; color: #5d564b; }
+.slot-fit-footer { border-color: rgba(255,255,255,.9); background: linear-gradient(120deg, rgba(255,255,255,.9), rgba(255,253,249,.65)); box-shadow: 0 2px 4px rgba(52,55,53,.06); }
+.slot-fit-footer .slot-fit-avatar { background: #343735; color: #fff; border-color: #fff; box-shadow: 0 1px 3px rgba(52,55,53,.15); }
+.slot-fit-footer .slot-fit-team-badge { background: #f3eee5; color: #5d564b; border-color: #e2dccf; }
+.slot-fit-content[data-selected='true'] .slot-fit-avatar { background: #d8c29b; color: #1b1f20; border-color: rgba(255,255,255,.4); }
+.slot-fit-content[data-selected='true'] .slot-fit-team-badge { background: rgba(255,255,255,.12); color: #f1ece3; border-color: rgba(255,255,255,.2); }
+/* Tema scuro: fondo grafite, testi chiari e accenti bronzo. */
+:root[data-premium-appearance="night"] [data-testid='quick-slot-fits'] { background: #23282a !important; border-color: rgba(216, 194, 155, 0.2) !important; }
+:root[data-premium-appearance="night"] :is([data-testid='quick-slot-fit-card'], [data-testid='quick-slot-fit-cross-card']) {
+  --fit-ink: #f1ece3;
+  --fit-muted: #a79f92;
+  --fit-avatar: rgba(216, 194, 155, 0.18);
+  background: linear-gradient(150deg, #2e3436, #272c2d) !important;
+  border-color: rgba(255, 255, 255, 0.08) !important;
+  box-shadow: none !important;
+}
+:root[data-premium-appearance="night"] [data-testid='quick-slot-fit-cross-card'] {
+  --fit-ink: #ecd9b8;
+  background: linear-gradient(150deg, #332e26, #2b2721) !important;
+  border-color: rgba(201, 160, 98, 0.35) !important;
+}
+:root[data-premium-appearance="night"] :is([data-testid='quick-slot-fit-card'], [data-testid='quick-slot-fit-cross-card']):has([data-slot-fit-content][data-selected='true']) {
+  --fit-ink: #ffffff;
+  --fit-muted: #d8c29b;
+  background: linear-gradient(140deg, #3b3529, #2c2923) !important;
+  border-color: #d8c29b !important;
+}
+:root[data-premium-appearance="night"] .slot-fit-rank { background: rgba(255,255,255,.07); border-color: rgba(255,255,255,.12); color: #d9d2c6; }
+:root[data-premium-appearance="night"] .slot-fit-rank[data-rank='Migliore'] { background: rgba(122,176,135,.16); border-color: rgba(122,176,135,.32); color: #a9d4b3; }
+:root[data-premium-appearance="night"] .slot-fit-rank[data-rank='Ottimo'] { background: rgba(216,194,155,.16); border-color: rgba(216,194,155,.32); color: #e4cfa6; }
+:root[data-premium-appearance="night"] .slot-fit-rank[data-rank='Altro mestiere'] { background: rgba(201,160,98,.18); border-color: rgba(201,160,98,.36); color: #e2bd85; }
+:root[data-premium-appearance="night"] .slot-fit-footer { background: rgba(255,255,255,.05); border-color: rgba(255,255,255,.08); box-shadow: none; }
+:root[data-premium-appearance="night"] .slot-fit-footer .slot-fit-avatar { background: #d8c29b; color: #1b1f20; border-color: rgba(0,0,0,.25); }
+:root[data-premium-appearance="night"] .slot-fit-footer .slot-fit-team-badge { background: rgba(216,194,155,.12); color: #d8c29b; border-color: rgba(216,194,155,.25); }
+/* Tema scuro: l'avviso di sovrapposizione resta ambrato ma su fondo scuro, come il resto del foglio. */
+:root[data-premium-appearance="night"] [data-testid='quick-slot-conflict'] { background: #2d2a25 !important; border-color: rgba(201, 160, 98, 0.55) !important; }
+:root[data-premium-appearance="night"] [data-testid='quick-slot-conflict'] :is(div, span) { color: #e8c48d !important; }
+:root[data-premium-appearance="night"] [data-testid='quick-slot-phase-overlap'] { background: rgba(201, 160, 98, 0.16) !important; }
+:root[data-premium-appearance="night"] [data-testid='quick-slot-phase-overlap'] :is(div, span) { color: #e8c48d !important; }
+/* Bozza in Agenda (web): "Stabilizza bozza" appoggiata al fondo della finestra (sopra la barra in basso solo quando c'è). */
+:root [data-testid='agenda-draft-bar'] { bottom: calc(24px + env(safe-area-inset-bottom)) !important; }
+html:has([data-premium-bottom-bar="true"]) [data-testid='agenda-draft-bar'] { bottom: calc(104px + env(safe-area-inset-bottom)) !important; }

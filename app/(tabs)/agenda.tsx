@@ -26560,8 +26560,8 @@ export default function AgendaScreen() {
                                             ? pauseControlMinutes <= 5
                                             : pauseControlMinutes === 0
                                         )
-                                          ? '#CBD5E1'
-                                          : '#5B21B6'
+                                          ? (availabilityPalette.night ? 'rgba(255,255,255,0.28)' : '#CBD5E1')
+                                          : (availabilityPalette.night ? '#D8C29B' : '#7A6446')
                                       }
                                     />
                                   </HapticTouchable>
@@ -26621,8 +26621,8 @@ export default function AgendaScreen() {
                                       color={
                                         pauseControlMinutes >=
                                         (editsServicePose ? 480 : 180)
-                                          ? '#CBD5E1'
-                                          : '#5B21B6'
+                                          ? (availabilityPalette.night ? 'rgba(255,255,255,0.28)' : '#CBD5E1')
+                                          : (availabilityPalette.night ? '#D8C29B' : '#7A6446')
                                       }
                                     />
                                   </HapticTouchable>
@@ -51772,6 +51772,7 @@ null
       !weekReorganizationEditorOpen &&
       !webWeekDragConfirmation ? (
         <View
+          testID={IS_WEB ? 'agenda-draft-bar' : undefined}
           pointerEvents="box-none"
           style={[
             styles.weekReorganizationFloatingWrap,
@@ -52762,7 +52763,7 @@ null
                   </HapticTouchable>
                 </View>
                 {quickBookingPackageMode && (quickBookingPackagePlan.operatorOverlapMinutes ?? 0) > 0 ? (
-                  <View style={quickSlotDesign.conflict} accessibilityRole="alert">
+                  <View testID={IS_WEB ? 'quick-slot-conflict' : undefined} style={quickSlotDesign.conflict} accessibilityRole="alert">
                     <Ionicons name="alert-circle-outline" size={18} color="#92400E" />
                     <View style={quickSlotDesign.conflictCopy}>
                       <Text style={quickSlotDesign.conflictTitle}>Sovrapposizione · {quickBookingPackagePlan.operatorOverlapMinutes} min</Text>
@@ -72137,7 +72138,7 @@ const baseAgendaStyles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: '#DDD6FE',
+    borderColor: '#E2DCCF',
   },
   quickCompositionPauseButtonNative: {
     width: 30,
