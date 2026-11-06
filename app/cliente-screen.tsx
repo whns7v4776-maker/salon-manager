@@ -5744,6 +5744,10 @@ function ClienteFrontendScreenContent({ nativeInitialTab }: ClienteFrontendScree
     cancelled: false,
     archive: false,
   });
+  // Booking a push talks about: its section opens, the list scrolls to it and it stays highlighted briefly.
+  const [focusedClientRequest, setFocusedClientRequest] = useState<{ id: string; groupId: string; token: number } | null>(null);
+  const focusedClientRequestNodeRef = useRef<View | null>(null);
+  const focusedClientRequestOpenedTokenRef = useRef(0);
   const [frontendClientTab, setFrontendClientTab] = useState<FrontendClientTabKey>(
     nativeInitialTab ?? (isFrontendRequestsRoute ? 'notifications' : 'booking')
   );
@@ -6585,6 +6589,8 @@ function ClienteFrontendScreenContent({ nativeInitialTab }: ClienteFrontendScree
   const [isLoadingSalon, setIsLoadingSalon] = useState(false);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [profileSaveError, setProfileSaveError] = useState('');
+  // Web: the login button keeps "Accesso in corso..." from the tap until the customer area is on screen.
+  const [webLoginEntering, setWebLoginEntering] = useState(false);
   const [frontendAccessConflictError, setFrontendAccessConflictError] = useState('');
   const [profileFieldErrors, setProfileFieldErrors] = useState<{
     nome?: string;
@@ -26328,6 +26334,10 @@ function ClienteFrontendScreenContent({ nativeInitialTab }: ClienteFrontendScree
             forceVisible: frontendRequestNotificationHighlightKeys.has(notificationSignature),
           });
     const freezeRequestCardLayout = !isWeb && (!!cancelDialogVisualSnapshot || isCancelling);
+    const isFocusedFromNotification =
+      !!focusedClientRequest &&
+      ((!!focusedClientRequest.id && String(item.id ?? '').trim() === focusedClientRequest.id) ||
+        (!!focusedClientRequest.groupId && logicalGroupId === focusedClientRequest.groupId));
     const handleCancelRequest = () => {
       annullaPrenotazioneCliente(item.id);
     };
@@ -26335,6 +26345,7 @@ function ClienteFrontendScreenContent({ nativeInitialTab }: ClienteFrontendScree
     return (
       <Animated.View
         key={item.id}
+        ref={isFocusedFromNotification ? (node: View | null) => { if (node) focusedClientRequestNodeRef.current = node; } : undefined}
         {...(isWeb ? { dataSet: { customerNotificationCard: visualItem.stato, unreadNotification: notificationBadge ? 'true' : 'false' } } : {})}
         layout={freezeRequestCardLayout ? undefined : LinearTransition.duration(240)}
         exiting={freezeRequestCardLayout ? undefined : FadeOutUp.duration(220)}
@@ -26366,6 +26377,10 @@ function ClienteFrontendScreenContent({ nativeInitialTab }: ClienteFrontendScree
               paddingBottom: 12,
               borderRadius: 18,
             },
+          isFocusedFromNotification && {
+            borderWidth: 2,
+            borderColor: clientNotificationTone(bookingPalette, 'changed').ink,
+          },
         ]}
       >
         <View
@@ -27630,6 +27645,9 @@ function ClienteFrontendScreenContent({ nativeInitialTab }: ClienteFrontendScree
       setShowWaitlistAlertsExpanded(false);
       void refreshClientDbUnreadBookingRows();
       waitlistRefreshHoldUntilRef.current = Date.now() + 1200;
+      const focusId = String(target.requestId ?? '').trim();
+      const focusGroupId = String(target.appointmentGroupId ?? '').trim();
+      if (focusId || focusGroupId) setFocusedClientRequest({ id: focusId, groupId: focusGroupId, token: Date.now() });
       requestAnimationFrame(() => {
         scrollFrontendToTop(!isWeb);
       });
@@ -27651,6 +27669,76 @@ function ClienteFrontendScreenContent({ nativeInitialTab }: ClienteFrontendScree
     scrollFrontendToTop,
     setNotificationTapHandler,
   ]);
+
+  useEffect(() => {
+    if (!focusedClientRequest || focusedClientRequestOpenedTokenRef.current === focusedClientRequest.token) return;
+    const { id, groupId } = focusedClientRequest;
+    const isTarget = (item: PublicSalonState['richiestePrenotazione'][number]) =>
+      (!!id && String(item.id ?? '').trim() === id) ||
+      (!!groupId && item.appointmentGroupId?.trim() === groupId);
+    const sectionKey: FrontendBookingSectionKey | null = displayedRichiesteApprovateFuture.some(isTarget)
+      ? 'upcoming'
+      : richiestePendenti.some(isTarget)
+        ? 'pending'
+        : richiesteApprovateRecenti.some(isTarget)
+          ? 'accepted'
+          : richiesteAnnullateRecenti.some(isTarget)
+            ? 'cancelled'
+            : richiesteArchiviateStorico.some(isTarget)
+              ? 'archive'
+              : null;
+    // The booking may still be loading after a cold start: try again when the lists change.
+    if (!sectionKey) return;
+    focusedClientRequestOpenedTokenRef.current = focusedClientRequest.token;
+    if (!frontendBookingSectionsExpanded[sectionKey]) {
+      stageFrontendBookingSectionReadSession(sectionKey);
+      setFrontendBookingSectionsExpanded((current) => ({ ...current, [sectionKey]: true }));
+    }
+    if (sectionKey === 'archive') {
+      const monthKey = richiesteArchiviatePerAnno
+        .flatMap((yearGroup) => yearGroup.months)
+        .find((monthGroup) => monthGroup.items.some(isTarget))?.key;
+      if (monthKey) setArchivedMonthExpanded((current) => ({ ...current, [monthKey]: true }));
+    }
+  }, [
+    displayedRichiesteApprovateFuture,
+    focusedClientRequest,
+    frontendBookingSectionsExpanded,
+    richiestePendenti,
+    richiesteApprovateRecenti,
+    richiesteAnnullateRecenti,
+    richiesteArchiviatePerAnno,
+    richiesteArchiviateStorico,
+    stageFrontendBookingSectionReadSession,
+  ]);
+
+  useEffect(() => {
+    if (!focusedClientRequest) return;
+    const { token } = focusedClientRequest;
+    focusedClientRequestNodeRef.current = null;
+    let attempts = 0;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    // Wait for the card to mount (section opening, data arriving), then bring it near the top once.
+    const tryScroll = () => {
+      const node = focusedClientRequestNodeRef.current;
+      if (!node) {
+        if (++attempts < 30) timer = setTimeout(tryScroll, 150);
+        return;
+      }
+      node.measureInWindow((_x, y) => {
+        const topComfort = Platform.OS === 'web' ? Math.max(96, height * 0.18) : 120;
+        scrollFrontendToY(lastFrontendScrollYRef.current + y - topComfort, true);
+      });
+    };
+    timer = setTimeout(tryScroll, 450);
+    const clear = setTimeout(() => {
+      setFocusedClientRequest((current) => (current?.token === token ? null : current));
+    }, 6000);
+    return () => {
+      if (timer) clearTimeout(timer);
+      clearTimeout(clear);
+    };
+  }, [focusedClientRequest, height, scrollFrontendToY]);
 
   useEffect(() => {
     setNotificationForegroundHandler(() => {
@@ -27759,7 +27847,25 @@ function ClienteFrontendScreenContent({ nativeInitialTab }: ClienteFrontendScree
     !isFrontendBiometricVisualLogin &&
     !limitPhoneToTenDigits(frontendLoginDraft.telefono);
   const isFrontendLoginButtonVisuallyDisabled =
-    isSavingProfile || isFrontendLoginMissingRequiredFields || Boolean(loginEmailCompletionSentTo);
+    isSavingProfile || webLoginEntering || isFrontendLoginMissingRequiredFields || Boolean(loginEmailCompletionSentTo);
+  useEffect(() => {
+    if (!webLoginEntering) return;
+    // A failed attempt or the email-code step gives the button back at once.
+    if (profileSaveError || loginEmailCompletionSentTo) {
+      setWebLoginEntering(false);
+      return;
+    }
+    if (isSavingProfile || isRegistered) return;
+    // Safety net: never leave the button stuck if the attempt ends without entering.
+    const timer = setTimeout(() => setWebLoginEntering(false), 8000);
+    return () => clearTimeout(timer);
+  }, [isRegistered, isSavingProfile, loginEmailCompletionSentTo, profileSaveError, webLoginEntering]);
+  const wasRegisteredForWebLoginRef = useRef(isRegistered);
+  useEffect(() => {
+    // After logging out the form must start clean.
+    if (wasRegisteredForWebLoginRef.current && !isRegistered) setWebLoginEntering(false);
+    wasRegisteredForWebLoginRef.current = isRegistered;
+  }, [isRegistered]);
   const showFrontendLoginRequiredErrors = () => {
     const normalizedEmail = normalizeEmail(frontendLoginDraft.email);
     const normalizedPhone = limitPhoneToTenDigits(frontendLoginDraft.telefono);
@@ -33109,13 +33215,14 @@ function ClienteFrontendScreenContent({ nativeInitialTab }: ClienteFrontendScree
                                 return;
                               }
                               setProfileSaveError('');
+                              if (isWeb) setWebLoginEntering(true);
                               void loginFrontendCliente();
                             }}
                             activeOpacity={0.9}
                             disabled={isFrontendLoginButtonVisuallyDisabled}
                             webTouchAction="manipulation"
                           >
-                            {isSavingProfile ? (
+                            {isSavingProfile || webLoginEntering ? (
                               <View style={styles.clientAccessButtonLoadingRow}>
                                 <Text style={styles.primaryButtonText}>Accesso in corso...</Text>
                                 <ClientAccessSpinner />

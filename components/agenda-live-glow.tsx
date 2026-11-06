@@ -1,6 +1,8 @@
 import React, { createContext, useContext, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { AccessibilityInfo, Animated, AppState, Easing, Platform, StyleSheet, Text, View } from 'react-native';
 import Svg, { Defs, LinearGradient, RadialGradient, Rect, Stop, Circle } from 'react-native-svg';
+import { NativeAgendaStatePill } from './agenda-native-labels';
+import { useSolidAgendaPalette } from './agenda-premium-style';
 
 const LiveSignal=createContext<{pulse:Animated.Value;sweep:Animated.Value;animate:boolean}|null>(null);
 /** One shared phase for the radar and rail. Animation never renders the grid. */
@@ -75,6 +77,9 @@ export function AgendaLiveGlow({enabled}:{night:boolean;enabled:boolean}) {
 }
 /** "In corso" in the live slot: plain coral, no motion. */
 export function AgendaLiveSlotLabel({action=false}:{action?:boolean}={}){
+ const night=useSolidAgendaPalette().night;
+ // App: the same capsule as "Chiuso"/"Passato", in the live red with a dot.
+ if(Platform.OS!=='web')return <View pointerEvents="none" style={{width:'100%',height:'100%',alignItems:'center',justifyContent:'center'}}><NativeAgendaStatePill label="In corso" night={night} color="#C2453A" live/></View>;
  // Like "Passato": on hover the label steps aside and the "+" sits next to it.
  return <View pointerEvents="none" style={{width:'100%',height:'100%',alignItems:'center',justifyContent:'center'}}>
   <View {...(Platform.OS==='web'?{dataSet:{agendaBlockedLabel:action?'true':'false'}}:{})} style={{position:'relative',alignItems:'center'}}>

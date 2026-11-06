@@ -1,4 +1,5 @@
 import { NativeMedal } from '../../components/owner-premium-native-home';
+import { useTabScrollReset } from '../../src/lib/tab-scroll-reset';
 import {HistoricalAppointmentOutcome} from '../../components/historical-appointment-outcome';
 import {doesOperatorHaveServiceCapability} from '../../src/lib/booking';
 import {AgendaSlotFeedbackContext} from '../../components/agenda-slot-feedback';
@@ -30,7 +31,9 @@ import { OwnerAppointmentCheckout } from '../../components/owner-appointment-che
 import { NativeSheetHandle, NativeDraggableSheet } from '../../components/ui/native-sheet-drag';
 import { FitMessageScroll } from '../../components/ui/fit-message-scroll';
 import { AgendaLiveTimeOverlay } from '../../components/agenda-live-time-overlay';
-import { AgendaSlotSatin,AgendaPauseSurface } from '../../components/agenda-approved-surface';
+import { AgendaSlotSatin,AgendaPauseSurface,AgendaClosedLane } from '../../components/agenda-approved-surface';
+import { NativeAgendaStatePill } from '../../components/agenda-native-labels';
+import { getRoleIcon } from '../../src/lib/role-icons';
 import { AgendaLiveSignalProvider, AgendaLiveGlow, AgendaLiveClockRing, AgendaLiveSlotLabel } from '../../components/agenda-live-glow';
 import { useAppointmentBenefits } from '../../hooks/use-appointment-benefits';
 import { AppointmentBenefitBadges } from '../../components/appointment-benefit-badges';
@@ -246,6 +249,11 @@ import {
   type ServicePhaseOverlapOverrides,
 } from '../../src/lib/service-phases';
 import { supabase } from '../../src/lib/supabase';
+import { AgendaSlotFlash } from '../../components/agenda-slot-flash';
+import { AgendaCustomerTierMark, CustomerBadgeAlerts } from '../../components/customer-badge-alerts';
+import { useCustomerBadgeMap } from '../../src/lib/use-customer-premium';
+
+const AGENDA_SLOT_FLASH_COLOR = '#C79A4B';
 import {
   buildInvalidFieldsMessage,
   isValidEmail,
@@ -371,7 +379,8 @@ const readWeekSlotTouchPoint = (event: unknown) => {
 
 function NativeWeekSlotPressHint({visible,labelled=false}:{visible:boolean;labelled?:boolean}) {
   const {palette:p}=useAccessAppearance();
-  return <View pointerEvents="none" style={[StyleSheet.absoluteFill,{alignItems:'center',justifyContent:'center',opacity:visible?1:0,backgroundColor:p.night?'rgba(216,194,155,.14)':'rgba(104,128,108,.13)'}]}>
+  // Rounded, inset glow instead of a square tint: it follows the soft agenda blocks.
+  return <View pointerEvents="none" style={{position:'absolute',left:4,right:4,top:2,bottom:2,borderRadius:10,alignItems:'center',justifyContent:'center',opacity:visible?1:0,backgroundColor:p.night?'rgba(216,194,155,.16)':'rgba(143,109,59,.12)',borderWidth:StyleSheet.hairlineWidth,borderColor:p.night?'rgba(216,194,155,.35)':'rgba(143,109,59,.28)'}}>
     {!labelled?<Text style={{fontSize:22,lineHeight:26,fontWeight:'400',color:p.ink}}>+</Text>:null}
   </View>;
 }
@@ -445,8 +454,9 @@ function AndroidWeekPlannerSlotTouchable({
       android_disableSound={false}
       style={({ pressed }) => [
         style,
-        pressed && !disabled && WEEK_SLOT_PRESS_FEEDBACK_STYLE,
-        pressed && !disabled ? { opacity: activeOpacity } : null,
+        // Labelled rows (pause, closed, past) are parts of a bigger block: no shrink, only the glow.
+        pressed && !disabled && !labelled && WEEK_SLOT_PRESS_FEEDBACK_STYLE,
+        pressed && !disabled && !labelled ? { opacity: activeOpacity } : null,
       ]}
     >
       {({pressed})=><AgendaSlotFeedbackContext.Provider value={pressed&&!disabled}>{children}<NativeWeekSlotPressHint visible={pressed&&!disabled} labelled={labelled}/></AgendaSlotFeedbackContext.Provider>}
@@ -11865,6 +11875,7 @@ export default function AgendaScreen() {
   const [weekStickyOperatorHeaderFrame, setWeekStickyOperatorHeaderFrame] =
     useState({ left: 0, width: 0 });
   const listRef = useRef<FlatList<AgendaDaySection> | null>(null);
+  useTabScrollReset(listRef, 'agenda');
   const assignAgendaListRef = useCallback(
     (node: FlatList<AgendaDaySection> | null) => {
       listRef.current = node;
@@ -16848,6 +16859,14 @@ export default function AgendaScreen() {
             normalizedRequestTime !== '' &&
             item.ora.trim().slice(0, 5) === normalizedRequestTime,
         ) ??
+        // An accepted request may not carry its request id: flash the slot when it is the only one at that time.
+        (() => {
+          if (!normalizedRequestTime) return null;
+          const atTime = dayAppointments.filter(
+            (item) => item.ora.trim().slice(0, 5) === normalizedRequestTime,
+          );
+          return atTime.length === 1 ? atTime[0] : null;
+        })() ??
         null;
 
       const matchedTime =
@@ -16865,9 +16884,12 @@ export default function AgendaScreen() {
 
       scrollAgendaToWeekPlanner(Math.max(plannerRowOffset, 0));
 
+      // Notifications and banners land on the slot and make it flash, so it is spotted at once;
+      // the details sheet stays one tap away instead of covering the agenda.
       if (matchedPendingBlock && openDetails) {
         requestAnimationFrame(() => {
-          setWeekAppointmentDetails(matchedPendingBlock);
+          setHighlightedAppointmentId(null);
+          requestAnimationFrame(() => setHighlightedAppointmentId(matchedPendingBlock.id));
         });
       }
 
@@ -19021,14 +19043,46 @@ export default function AgendaScreen() {
   );
 
   const renderWeekLunchBreakSlotLabel = useCallback(
-    (_slotTime: string, _isPastFreeSlot?: boolean, _showForceAction = false) => <View pointerEvents="none" style={{width:'100%',height:'100%',alignItems:'center',justifyContent:'center'}}>
-      <AgendaPauseSurface night={availabilityPalette.night}/>
-      <View {...(IS_WEB?{dataSet:{agendaPauseLabel:'true'}}:{})} style={{position:'relative',alignItems:'center'}}>
-       {!IS_WEB?<NativeAgendaCaption label="Pausa" icon="cafe-outline" color={availabilityPalette.night?'#E5CBA4':'#69502F'} bold/>:<>
-       <Ionicons name="cafe-outline" size={12} color={availabilityPalette.night?'#E5CBA4':'#69502F'} style={{position:'absolute',right:'100%',marginRight:9,top:1}}/>
-       <Text numberOfLines={1} style={{fontSize:10,lineHeight:14,fontWeight:'700',color:availabilityPalette.night?'#E5CBA4':'#69502F'}}>Pausa</Text></>}
-      </View>
-    </View>,[availabilityPalette.night],
+    (slotTime: string, _isPastFreeSlot?: boolean, _showForceAction = false) => {
+      // One pause reads as one solid rounded block: rounded ends, an opaque
+      // warm body that hides the grid, and one capsule label in its middle row.
+      const step = Math.max(5, weekBaseSlotInterval || 15);
+      const start = timeToMinutes(slotTime);
+      const inPause = (minutes: number) =>
+        minutes >= 0 && minutes < 24 * 60 && isTimeBlockedByLunchBreak(availabilitySettings, minutesToTime(minutes));
+      const first = !inPause(start - step);
+      const last = !inPause(start + step);
+      let runStart = start;
+      while (inPause(runStart - step) && runStart > 0) runStart -= step;
+      let runEnd = start + step;
+      while (inPause(runEnd) && runEnd < 24 * 60) runEnd += step;
+      const rows = Math.max(1, Math.round((runEnd - runStart) / step));
+      const labelRow = runStart + Math.floor((rows - 1) / 2) * step === start;
+      const night = availabilityPalette.night;
+      const ink = night ? '#E5CBA4' : '#6B5230';
+      const radius = 14;
+      if (!IS_WEB) {
+        // App: the pause lives inside the slots like "Chiuso": an edge-to-edge warm wash, its capsule in the first slot.
+        const pauseRange = [runStart, Math.min(runEnd, 24 * 60 - 1)].map(value => value % 60 === 0 ? String(value / 60) : minutesToTime(value)).join('–');
+        const edge = night ? 'rgba(211,178,126,.16)' : 'rgba(165,129,76,.16)';
+        return <View pointerEvents="none" style={{width:'100%',height:'100%',alignItems:'center',justifyContent:'center',paddingHorizontal:4}}>
+          <View style={{position:'absolute',left:0,right:0,top:0,bottom:0,backgroundColor:night?'rgba(211,178,126,.10)':'rgba(222,196,152,.24)',borderLeftWidth:StyleSheet.hairlineWidth,borderRightWidth:StyleSheet.hairlineWidth,borderColor:edge}}/>
+          {first ? <NativeAgendaStatePill label={`Pausa ${pauseRange}`} icon="cafe-outline" night={night} color={ink}/> : null}
+        </View>;
+      }
+      return <View pointerEvents="none" style={{width:'100%',height:'100%',alignItems:'center',justifyContent:'center'}}>
+        <View style={{position:'absolute',left:5,right:5,top:first?3:-1,bottom:last?3:-1,borderTopLeftRadius:first?radius:0,borderTopRightRadius:first?radius:0,borderBottomLeftRadius:last?radius:0,borderBottomRightRadius:last?radius:0,overflow:'hidden',backgroundColor:night?'#2E2B25':'#EFE5D3',borderLeftWidth:StyleSheet.hairlineWidth,borderRightWidth:StyleSheet.hairlineWidth,borderTopWidth:first?StyleSheet.hairlineWidth:0,borderBottomWidth:last?StyleSheet.hairlineWidth:0,borderColor:night?'rgba(229,203,164,.30)':'rgba(143,109,59,.28)'}}>
+          <AgendaPauseSurface night={night}/>
+        </View>
+        {labelRow ? <View {...(IS_WEB?{dataSet:{agendaPauseLabel:'true'}}:{})} style={{maxWidth:'92%',flexDirection:'row',alignItems:'center',gap:5,paddingHorizontal:9,paddingVertical:2,borderRadius:999,borderWidth:StyleSheet.hairlineWidth,borderColor:night?'rgba(229,203,164,.35)':'rgba(143,109,59,.30)',backgroundColor:night?'rgba(24,23,21,.55)':'rgba(255,252,246,.78)'}}>
+          <Ionicons name="cafe-outline" size={IS_WEB?11:12} color={ink}/>
+          {/* Whole hours read as 13–14; the line shrinks to fit instead of ending in "…". */}
+          <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7} style={{flexShrink:1,fontSize:IS_WEB?11:12,lineHeight:IS_WEB?14:16,fontWeight:'600',letterSpacing:.3,color:ink}}>
+            Pausa{'  '}<Text style={{fontWeight:'500',opacity:.7,fontVariant:['tabular-nums']}}>{[runStart, Math.min(runEnd, 24 * 60 - 1)].map(value => value % 60 === 0 ? String(value / 60) : minutesToTime(value)).join('–')}</Text>
+          </Text>
+        </View> : null}
+      </View>;
+    },[availabilityPalette.night, availabilitySettings, weekBaseSlotInterval],
   );
 
   const getWeekOutsideSlotLabel = useCallback(
@@ -25204,7 +25258,7 @@ export default function AgendaScreen() {
           accessibilityHint="Attiva o disattiva l'assegnazione automatica degli operatori nella composizione"
         >
           <View style={[styles.quickCompositionAutoFitIcon, quickSlotDesign.quickCompositionAutoFitIcon]}>
-            <Ionicons name="sparkles" size={16} color="#1D4ED8" />
+            <Ionicons name="sparkles" size={16} color={availabilityPalette.night ? '#D8C29B' : '#7A6446'} />
           </View>
           <View style={styles.quickCompositionAutoFitCopy}>
             <View style={styles.quickCompositionAutoFitTitleRow}>
@@ -26506,8 +26560,8 @@ export default function AgendaScreen() {
                                             ? pauseControlMinutes <= 5
                                             : pauseControlMinutes === 0
                                         )
-                                          ? '#CBD5E1'
-                                          : '#5B21B6'
+                                          ? (availabilityPalette.night ? 'rgba(255,255,255,0.28)' : '#CBD5E1')
+                                          : (availabilityPalette.night ? '#D8C29B' : '#7A6446')
                                       }
                                     />
                                   </HapticTouchable>
@@ -26567,8 +26621,8 @@ export default function AgendaScreen() {
                                       color={
                                         pauseControlMinutes >=
                                         (editsServicePose ? 480 : 180)
-                                          ? '#CBD5E1'
-                                          : '#5B21B6'
+                                          ? (availabilityPalette.night ? 'rgba(255,255,255,0.28)' : '#CBD5E1')
+                                          : (availabilityPalette.night ? '#D8C29B' : '#7A6446')
                                       }
                                     />
                                   </HapticTouchable>
@@ -27654,7 +27708,12 @@ export default function AgendaScreen() {
 
   // A historical placement does not finalize an appointment. Only its explicit
   // outcome/financial state locks movement, so an emergency move remains reversible.
+  // A paid or completed appointment can still be moved to fix time or operator:
+  // price and duration stay as collected. Its length stays locked.
   const canMoveActiveWeekAppointment = useCallback((appointment: AppuntamentoItem) =>
+    !appointment.nonEffettuato,
+    []);
+  const canResizeActiveWeekAppointment = useCallback((appointment: AppuntamentoItem) =>
     !appointment.completato && !appointment.incassato && !appointment.nonEffettuato,
     []);
 
@@ -27901,6 +27960,16 @@ export default function AgendaScreen() {
       return `name:${fullName || appointment.id}`;
     },
     [clienti],
+  );
+
+  const agendaCustomerBadges = useCustomerBadgeMap(salonWorkspace.id ?? '');
+  const getAgendaCustomerBadge = useCallback(
+    (appointment: AppuntamentoItem | null | undefined) => {
+      if (!appointment || agendaCustomerBadges.size === 0) return undefined;
+      const identityKey = getAgendaCustomerIdentityKey(appointment);
+      return identityKey.startsWith('id:') ? agendaCustomerBadges.get(identityKey.slice(3)) : undefined;
+    },
+    [agendaCustomerBadges, getAgendaCustomerIdentityKey],
   );
 
   const agendaCustomerIdentityColorsByKey = useCustomerIdentityColors(
@@ -31261,7 +31330,7 @@ export default function AgendaScreen() {
     async function executeWeekSwap(preview: WeekSwapPreview) {
       if (!canMoveActiveWeekAppointment(preview.sourceAppointment)) {
         clearNativeWeekDragReleaseOverlay(); setWeekSwapPreview(null);
-        Alert.alert('Spostamento non disponibile', 'L’appuntamento è completato, incassato o segnato non effettuato. Aggiorna l’Agenda.');
+        Alert.alert('Spostamento non disponibile', 'L’appuntamento è segnato non effettuato. Aggiorna l’Agenda.');
         return;
       }
       const movedAppointmentIds = new Set(
@@ -33068,6 +33137,19 @@ export default function AgendaScreen() {
           allowCustomerOverlap:
             candidate.allowCustomerOverlap || candidate.hasCustomerOverlap,
         };
+        const settled = candidate.sourceAppointment;
+        if (settled.incassato || settled.completato) {
+          // Moving a collected appointment only corrects where and when it happened.
+          showPreviewAlert(
+            settled.incassato ? 'Appuntamento già incassato' : 'Appuntamento completato',
+            'Cambio solo orario e operatore: prezzo, durata e incasso restano invariati.',
+            [
+              { text: 'Annulla', style: 'cancel', onPress: () => { clearNativeWeekDragReleaseOverlay(); setWeekSwapPreview(null); } },
+              { text: 'Sposta', onPress: () => { void runWeekSwap(confirmedCandidate); } },
+            ],
+          );
+          return;
+        }
         void runWeekSwap(confirmedCandidate);
       };
       const actionLabel =
@@ -34448,6 +34530,9 @@ export default function AgendaScreen() {
       }
 
       if (Platform.OS !== 'web') {
+        // The card's gesture recognizer owns the touch, so the tap that opens
+        // the details gives its feedback here.
+        haptic.light().catch(() => null);
         setWeekAppointmentDetails(appointment);
         requestAnimationFrame(() => {
           resetNativeAgendaTransientLayers();
@@ -36283,13 +36368,19 @@ export default function AgendaScreen() {
       if (!appointment || weekAppointmentDeleteInFlightRef.current) {
         return;
       }
-      if (
-        getWeekAppointmentTemporalState(appointment, Date.now()) === 'past' ||
-        appointment.completato || appointment.incassato || appointment.nonEffettuato
-      ) {
+      // Past appointments can be removed too; only what is already in the till stays.
+      if (appointment.incassato) {
         Alert.alert(
           'Appuntamento non eliminabile',
-          'L’appuntamento è concluso o già contabilizzato. Per preservare lo storico non può essere eliminato da questo popup.',
+          'L’appuntamento è già incassato: per tenere la cassa in ordine non può essere eliminato.',
+        );
+        return;
+      }
+      // Deleting while a move is still being saved let the old slot come back.
+      if (pendingMovedWeekOptimisticAppointmentsRef.current.has(appointment.id?.trim() ?? '')) {
+        Alert.alert(
+          'Spostamento in salvataggio',
+          'Sto ancora salvando lo spostamento di questo appuntamento. Riprova tra qualche secondo.',
         );
         return;
       }
@@ -36306,8 +36397,8 @@ export default function AgendaScreen() {
         linkedCancellationScope: 'phase' | 'group',
       ) => {
         if (weekAppointmentDeleteInFlightRef.current) return;
-        if (getWeekAppointmentTemporalState(targetAppointment, Date.now()) === 'past' || targetAppointment.completato || targetAppointment.incassato || targetAppointment.nonEffettuato) {
-          Alert.alert('Appuntamento non eliminabile', 'L’appuntamento è concluso o già contabilizzato. Aggiorna l’Agenda per consultare lo stato attuale.');
+        if (targetAppointment.incassato) {
+          Alert.alert('Appuntamento non eliminabile', 'L’appuntamento è già incassato. Aggiorna l’Agenda per consultare lo stato attuale.');
           return;
         }
         weekAppointmentDeleteInFlightRef.current = true;
@@ -39077,7 +39168,7 @@ export default function AgendaScreen() {
       return;
     }
     if (
-      !canMoveActiveWeekAppointment(weekAppointmentEditDraft)
+      !canResizeActiveWeekAppointment(weekAppointmentEditDraft)
     ) {
       closeWeekAppointmentEditModal();
       Alert.alert(
@@ -39117,7 +39208,7 @@ export default function AgendaScreen() {
       allowOperatorOverlap = false,
       allowCustomerOverlap = false,
     ) => {
-      if (!canMoveActiveWeekAppointment(weekAppointmentEditDraft)) {
+      if (!canResizeActiveWeekAppointment(weekAppointmentEditDraft)) {
         Alert.alert('Spostamento non disponibile', 'L’appuntamento è completato, incassato o segnato non effettuato. Aggiorna l’Agenda.');
         return;
       }
@@ -45173,10 +45264,17 @@ export default function AgendaScreen() {
     pendingAgendaSwipeResetRef.current = item.id;
     const appointmentDate = item.data ?? todayDate;
 
-    if (!isAppointmentInFuture(item, todayDate)) {
+    if (item.incassato) {
       Alert.alert(
         tApp(appLanguage, 'agenda_delete_unavailable_title'),
-        tApp(appLanguage, 'agenda_delete_unavailable_body'),
+        'L’appuntamento è già incassato: per tenere la cassa in ordine non può essere eliminato.',
+      );
+      return;
+    }
+    if (pendingMovedWeekOptimisticAppointmentsRef.current.has(item.id?.trim() ?? '')) {
+      Alert.alert(
+        'Spostamento in salvataggio',
+        'Sto ancora salvando lo spostamento di questo appuntamento. Riprova tra qualche secondo.',
       );
       return;
     }
@@ -47184,6 +47282,17 @@ accessibilityHint={
                                     const isLaneOutsideScheduleSlot =
                                       laneCellState === 'outside' &&
                                       !isClosedDay;
+                                    // A manual block spanning many rows shows its label once, on its first row.
+                                    const previousLaneSlotTime = rowIndex > 0 ? weekTimeSlots[rowIndex - 1] : undefined;
+                                    const laneBlockedRunContinues =
+                                      laneCellState === 'blocked' &&
+                                      !!previousLaneSlotTime &&
+                                      !isWeekLunchBreakSlot(previousLaneSlotTime) &&
+                                      getWeekRenderCellState(day.value, previousLaneSlotTime, {
+                                        selectedOperatorId: lane.operatorId ?? null,
+                                        selectedOperatorName: lane.label ?? null,
+                                        laneKey: lane.key,
+                                      }) === 'blocked';
                                     const laneAppointmentIndex =
                                       weekRenderLaneAppointmentIndexByDate[
                                         day.value
@@ -47420,6 +47529,18 @@ accessibilityHint={
                                           { width: operatorLaneWidth },
                                         ]}
                                       >
+                                        {(isLaneOperatorUnavailableOnDay ||
+                                          isClosedDay) &&
+                                        !isHistoricalLaneDisabled &&
+                                        !laneStartAppointment &&
+                                        !laneOccupyingAppointment ? (
+                                          <AgendaClosedLane
+                                            night={availabilityPalette.night}
+                                            width={operatorLaneWidth}
+                                            height={agendaDensityRowHeight}
+                                            offset={rowIndex * agendaDensityRowHeight}
+                                          />
+                                        ) : null}
                                         {isConfiguredTimeMarker &&
                                         rowIndex !== 0 &&
                                         !laneOccupyingAppointment &&
@@ -47713,6 +47834,7 @@ accessibilityHint={
                                                 !IS_WEB &&
                                                 !canMoveActiveWeekAppointment(laneStartAppointment);
                                               const laneResizeEnabled = !!(
+                                                canResizeActiveWeekAppointment(laneStartAppointment) &&
                                                 laneAppointmentTemporalState !== 'past' &&
                                                 !isSyntheticWeekAppointmentId(
                                                   laneStartAppointment.id,
@@ -47826,6 +47948,11 @@ accessibilityHint={
                                                     },
                                                   ]}
                                                 >
+                                                  <AgendaSlotFlash
+                                                    active={!!highlightedAppointmentId && laneStartAppointment.id === highlightedAppointmentId}
+                                                    color={AGENDA_SLOT_FLASH_COLOR}
+                                                  />
+                                                  <AgendaCustomerTierMark status={getAgendaCustomerBadge(laneStartAppointment)} />
                                                   {laneAppointmentOverlapTailHeight >
                                                   0 ? (
                                                     <View
@@ -48318,7 +48445,7 @@ accessibilityHint={
                                             }
                                             disabled={!laneSalonCanQuickBook}
                                           >
-{!isLunchBreakSlot && (isPastFreeSlot || isClosedDay || isLaneVisuallyDisabled) && (weekBaseSlotInterval >= 15 || timeToMinutes(slotTime) % 15 === 0) ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaStateLabel label={isClosedDay||isLaneVisuallyDisabled?'Chiuso':'Passato'} action={laneSalonCanQuickBook&&!isLaneVisuallyDisabled}/></View>:null}{isCurrentSlotToday && !isPastFreeSlot && !isClosedDay && !isLunchBreakSlot ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaLiveSlotLabel action={laneSalonCanQuickBook}/></View>:null}
+{(isClosedDay || isLaneVisuallyDisabled || (!isLunchBreakSlot && isPastFreeSlot)) && (weekBaseSlotInterval >= 15 || timeToMinutes(slotTime) % 15 === 0) ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaStateLabel label={isClosedDay||isLaneVisuallyDisabled?'Chiuso':'Passato'} action={laneSalonCanQuickBook&&!isLaneVisuallyDisabled}/></View>:null}{isCurrentSlotToday && !isPastFreeSlot && !isClosedDay && !isLunchBreakSlot ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaLiveSlotLabel action={laneSalonCanQuickBook}/></View>:null}
                                             {laneDragPreview &&
                                             !laneOccupyingAppointment ? null : laneSalonCanQuickBook &&
                                               !laneQuickBookAvailable &&
@@ -48329,13 +48456,13 @@ accessibilityHint={
                                                 }
                                               >
                                                 {isLunchBreakSlot ? (
-                                                  renderWeekLunchBreakSlotLabel(
+                                                  isLaneVisuallyDisabled || isClosedDay ? null : renderWeekLunchBreakSlotLabel(
                                                     slotTime,
                                                     isPastFreeSlot,
                                                     true,
                                                   )
                                                 ) : (
-                                                  <AgendaPremiumBlockedSlotLabel
+                                                  laneBlockedRunContinues ? null : <AgendaPremiumBlockedSlotLabel
                                                     label={getWeekBlockedSlotLabel(day.value,slotTime)}
                                                     textStyle={[styles.weekPlannerCellText,styles.weekPlannerOperatorLaneText,styles.weekPlannerCellTextBlocked]}
                                                   />
@@ -48554,7 +48681,7 @@ null
                                             }
                                           >
                                             {(isPastFreeSlot || isLaneVisuallyDisabled || isClosedDay || isLaneOutsideScheduleSlot || laneCellState === 'outside' || (laneCellState === 'blocked' && !isLunchBreakSlot)) ? <NativeAgendaUnavailable night={availabilityPalette.night} phase={rowIndex + laneIndex}/> : null}
-{!isLunchBreakSlot && (isPastFreeSlot || isClosedDay || isLaneVisuallyDisabled) && (weekBaseSlotInterval >= 15 || timeToMinutes(slotTime) % 15 === 0) ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaStateLabel label={isClosedDay||isLaneVisuallyDisabled?'Chiuso':'Passato'} action={laneSalonCanQuickBook&&!isLaneVisuallyDisabled}/></View>:null}{isCurrentSlotToday && !isPastFreeSlot && !isClosedDay && !isLunchBreakSlot ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaLiveSlotLabel action={laneSalonCanQuickBook}/></View>:null}
+{(isClosedDay || isLaneVisuallyDisabled || (!isLunchBreakSlot && isPastFreeSlot)) && (weekBaseSlotInterval >= 15 || timeToMinutes(slotTime) % 15 === 0) ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaStateLabel label={isClosedDay||isLaneVisuallyDisabled?'Chiuso':'Passato'} action={laneSalonCanQuickBook&&!isLaneVisuallyDisabled}/></View>:null}{isCurrentSlotToday && !isPastFreeSlot && !isClosedDay && !isLunchBreakSlot ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaLiveSlotLabel action={laneSalonCanQuickBook}/></View>:null}
                                             {laneDragPreview &&
                                             !laneOccupyingAppointment ? null : laneSalonCanQuickBook &&
                                               !laneQuickBookAvailable &&
@@ -48565,13 +48692,13 @@ null
                                                 }
                                               >
                                                 {isLunchBreakSlot ? (
-                                                  renderWeekLunchBreakSlotLabel(
+                                                  isLaneVisuallyDisabled || isClosedDay ? null : renderWeekLunchBreakSlotLabel(
                                                     slotTime,
                                                     isPastFreeSlot,
                                                     true,
                                                   )
                                                 ) : (
-                                                  <AgendaPremiumBlockedSlotLabel
+                                                  laneBlockedRunContinues ? null : <AgendaPremiumBlockedSlotLabel
                                                     label={getWeekBlockedSlotLabel(day.value,slotTime)}
                                                     textStyle={[styles.weekPlannerCellText,styles.weekPlannerOperatorLaneText,styles.weekPlannerCellTextBlocked]}
                                                   />
@@ -48682,6 +48809,7 @@ null
                                     !IS_WEB &&
                                     !canMoveActiveWeekAppointment(appointmentStart);
                                   const standardResizeEnabled = !!(
+                                    canResizeActiveWeekAppointment(appointmentStart) &&
                                     appointmentTemporalState !== 'past' &&
                                     !isSyntheticWeekAppointmentId(
                                       appointmentStart.id,
@@ -48738,6 +48866,11 @@ null
                                         },
                                       ]}
                                     >
+                                      <AgendaSlotFlash
+                                        active={!!highlightedAppointmentId && appointmentStart.id === highlightedAppointmentId}
+                                        color={AGENDA_SLOT_FLASH_COLOR}
+                                      />
+                                      <AgendaCustomerTierMark status={getAgendaCustomerBadge(appointmentStart)} />
                                       {hasPendingRequestOverlay ? (
                                         <View
                                           style={[
@@ -49101,7 +49234,7 @@ null
                                       cellState !== 'blocked'
                                     }
                                   >
-                                    {!isLunchBreakSlot && (isPastFreeSlot || isClosedDay) && (weekBaseSlotInterval >= 15 || timeToMinutes(slotTime) % 15 === 0) ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaStateLabel label={isClosedDay?'Chiuso':'Passato'} action={canSalonQuickBook}/></View>:null}{isCurrentSlotToday && !isPastFreeSlot && !isClosedDay && !isLunchBreakSlot ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaLiveSlotLabel action={canSalonQuickBook}/></View>:null}
+                                    {(isClosedDay || (!isLunchBreakSlot && isPastFreeSlot)) && (weekBaseSlotInterval >= 15 || timeToMinutes(slotTime) % 15 === 0) ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaStateLabel label={isClosedDay?'Chiuso':'Passato'} action={canSalonQuickBook}/></View>:null}{isCurrentSlotToday && !isPastFreeSlot && !isClosedDay && !isLunchBreakSlot ? <View pointerEvents="none" style={{position:'absolute',inset:0}}><AgendaLiveSlotLabel action={canSalonQuickBook}/></View>:null}
 {isSwapPreviewFreeTarget ? (
                                       <WeekDragTargetHighlight
                                         tone={
@@ -49883,7 +50016,8 @@ null
         entering={FadeIn.duration(IS_IOS ? 180 : 150).easing(
           Easing.out(Easing.cubic),
         )}
-        exiting={FadeOut.duration(IS_IOS ? 260 : 210).easing(
+        // Sul web l'animazione d'uscita di un nodo in portale lascia un clone vuoto sopra le altre pagine.
+        exiting={IS_WEB ? undefined : FadeOut.duration(IS_IOS ? 260 : 210).easing(
           Easing.out(Easing.cubic),
         )}
         style={[
@@ -51638,6 +51772,7 @@ null
       !weekReorganizationEditorOpen &&
       !webWeekDragConfirmation ? (
         <View
+          testID={IS_WEB ? 'agenda-draft-bar' : undefined}
           pointerEvents="box-none"
           style={[
             styles.weekReorganizationFloatingWrap,
@@ -52628,7 +52763,7 @@ null
                   </HapticTouchable>
                 </View>
                 {quickBookingPackageMode && (quickBookingPackagePlan.operatorOverlapMinutes ?? 0) > 0 ? (
-                  <View style={quickSlotDesign.conflict} accessibilityRole="alert">
+                  <View testID={IS_WEB ? 'quick-slot-conflict' : undefined} style={quickSlotDesign.conflict} accessibilityRole="alert">
                     <Ionicons name="alert-circle-outline" size={18} color="#92400E" />
                     <View style={quickSlotDesign.conflictCopy}>
                       <Text style={quickSlotDesign.conflictTitle}>Sovrapposizione · {quickBookingPackagePlan.operatorOverlapMinutes} min</Text>
@@ -53415,7 +53550,7 @@ null
                                           }
                                         >
                                           <NativeMedal
-                                            icon="briefcase-outline"
+                                            {...getRoleIcon(group.roleLabel)}
                                             size={30}
                                             iconSize={14}
                                             accent={getServiceAccentByMeta({ roleName: group.roleLabel }).border}
@@ -53795,6 +53930,13 @@ null
                           <Text style={[styles.summaryTitle, quickSlotDesign.sectionTitle]}>
                             Riepilogo appuntamento
                           </Text>
+                          {/* Last step: say plainly what is left to do, the bright button below does it. */}
+                          <View style={{flexDirection:'row',alignItems:'center',gap:8,marginBottom:6,paddingVertical:8,paddingHorizontal:10,borderRadius:12,borderWidth:StyleSheet.hairlineWidth,borderColor:availabilityPalette.night?'rgba(216,194,155,.4)':'rgba(143,109,59,.35)',backgroundColor:availabilityPalette.night?'rgba(216,194,155,.08)':'rgba(176,138,78,.08)'}}>
+                            <Ionicons name="checkmark-done-outline" size={17} color={availabilityPalette.night?'#D8C29B':'#8F6D3B'} />
+                            <Text style={{flex:1,fontSize:13,lineHeight:18,fontWeight:'500',color:availabilityPalette.ink}}>
+                              Controlla i dati qui sotto, poi tocca «Conferma appuntamento».
+                            </Text>
+                          </View>
                           <Text style={[styles.summaryText, quickSlotDesign.summaryText]}>
                             Servizio: {selectedQuickService?.nome || '—'}
                           </Text>
@@ -53945,6 +54087,17 @@ null
                             styles.primaryButtonDisabled,
                           quickBookingSubmitState === 'sent' &&
                             styles.quickBookingSubmitButtonSent,
+                          // Final confirmation glows in bronze so it reads as the step to take.
+                          quickBookingPanel === 6 && !quickBookingPackageMode && quickBookingSubmitReady && !quickBookingSubmitBusy && quickBookingSubmitState !== 'sent' && {
+                            backgroundColor: availabilityPalette.night ? '#C9A35A' : '#9C7A3F',
+                            borderColor: availabilityPalette.night ? '#E6CB94' : '#C9A86D',
+                            borderWidth: 1,
+                            shadowColor: availabilityPalette.night ? '#E6CB94' : '#9C7A3F',
+                            shadowOpacity: availabilityPalette.night ? 0.55 : 0.45,
+                            shadowRadius: 14,
+                            shadowOffset: { width: 0, height: 4 },
+                            elevation: 8,
+                          },
                         ]}
                         onPress={quickBookingPanel===6?handleQuickBookingSubmitPress:advanceQuickBookingPanel}
                         disabled={
@@ -53953,7 +54106,7 @@ null
                         activeOpacity={0.9}
                       >
                         <PremiumFitLabel fontSize={15} minFontSize={11}
-                          style={[styles.modalPrimaryButtonText, quickSlotDesign.primaryLabel]}
+                          style={[styles.modalPrimaryButtonText, quickSlotDesign.primaryLabel, quickBookingPanel === 6 && !quickBookingPackageMode && quickBookingSubmitReady && !quickBookingSubmitBusy && quickBookingSubmitState !== 'sent' && { color: availabilityPalette.night ? '#1B1A17' : '#FFFDF8', fontWeight: '700' }]}
                           numberOfLines={2}
                           adjustsFontSizeToFit
                           minimumFontScale={0.72}
@@ -55989,6 +56142,11 @@ null
                   >
                   {weekAppointmentDetails?.cliente ?? ''}
                 </Text>
+                {getAgendaCustomerBadge(weekAppointmentDetails) ? (
+                  <View style={{ alignItems: 'center', marginTop: 6 }}>
+                    <CustomerBadgeAlerts status={getAgendaCustomerBadge(weekAppointmentDetails)} />
+                  </View>
+                ) : null}
               </View>
               <HapticTouchable
                 style={[
@@ -56821,7 +56979,7 @@ null
                       () => requestWeekAppointmentNoShow(details), weekAppointmentNoShowPendingId !== null));
                   }
                 }
-                if (weekAppointmentDetailsTemporalState !== 'future' && canMoveActiveWeekAppointment(details)) {
+                if (weekAppointmentDetailsTemporalState !== 'future' && canResizeActiveWeekAppointment(details)) {
                   rows.push(row('move', 'calendar-outline', ['#A9ABD9', '#5B5E9A'], 'Sposta appuntamento', 'Scegli un altro orario o operatore', () => editWeekAppointmentFromDetails(), anyPending, true));
                 }
                 return (
@@ -56831,10 +56989,10 @@ null
                 );
               })()}
 
-              {weekAppointmentDetails && weekAppointmentDetailsTemporalState === 'ongoing' &&
+              {weekAppointmentDetails && weekAppointmentDetailsTemporalState !== 'future' &&
                 !weekAppointmentPendingRequest && !isSyntheticWeekAppointmentId(weekAppointmentDetails.id) &&
-                !weekAppointmentDetails.completato && !weekAppointmentDetails.incassato && !weekAppointmentDetails.nonEffettuato ? (
-                <HapticTouchable accessibilityRole="button" accessibilityLabel="Elimina appuntamento in corso"
+                !weekAppointmentDetails.incassato ? (
+                <HapticTouchable accessibilityRole="button" accessibilityLabel="Elimina appuntamento"
                   disabled={weekAppointmentDeletePendingId !== null || completionPendingId !== null || weekAppointmentNoShowPendingId !== null}
                   onPress={() => { void deleteWeekAppointmentFromDetails(weekAppointmentDetails); }}
                   style={[styles.weekAppointmentNoShowButton, {marginTop:20,backgroundColor:'transparent',borderColor:availabilityPalette.line}]}>
@@ -71854,6 +72012,9 @@ const baseAgendaStyles = StyleSheet.create({
     borderWidth: 0,
     backgroundColor: 'transparent',
     gap: 10,
+    // Su schermo stretto i comandi scendono sotto il testo invece di schiacciarlo in verticale.
+    flexWrap: 'wrap',
+    rowGap: 4,
   },
   quickCompositionPauseEditorNative: {
     flex: 1,
@@ -71869,7 +72030,8 @@ const baseAgendaStyles = StyleSheet.create({
   },
   quickCompositionPauseCopy: {
     flex: 1,
-    minWidth: 0,
+    minWidth: IS_WEB ? 150 : 0,
+    flexBasis: IS_WEB ? 150 : undefined,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 7,
@@ -71976,7 +72138,7 @@ const baseAgendaStyles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: '#DDD6FE',
+    borderColor: '#E2DCCF',
   },
   quickCompositionPauseButtonNative: {
     width: 30,

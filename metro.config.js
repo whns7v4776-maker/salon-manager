@@ -11,6 +11,11 @@ const metroSurface = process.env.SALONPRO_METRO_SURFACE === 'web' ? 'web' : 'nat
 // each on this Mac and can exhaust memory/swap while both platforms rebuild.
 config.maxWorkers = metroSurface === 'web' ? 2 : 3;
 
+// Watchman can stall on this disk (cookie file never observed): SALONPRO_NO_WATCHMAN=1 uses Metro's Node crawler instead.
+if (process.env.SALONPRO_NO_WATCHMAN === '1') {
+  config.resolver.useWatchman = false;
+}
+
 // Physical iOS and Android clients request different transforms of the same
 // large files. Sticky assignment queues both behind one worker while others
 // sit idle. Limit this scheduling change to the local native DEV server.

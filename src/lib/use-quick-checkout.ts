@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { NativeModules, Platform } from 'react-native';
 import Constants from 'expo-constants';
-import { callCashStripe } from '../../components/cash-stripe-panel';
+import { callCashStripe, rememberCashStripeStatus } from '../../components/cash-stripe-panel';
 
 export type QuickCheckout = 'terminal' | 'checkout' | 'cash';
 type Readiness = { stripe: boolean; tapToPay: boolean };
@@ -13,12 +13,19 @@ const inflight = new Map<string, Promise<Readiness>>();
 export const tapToPayDeviceCapable = () =>
   Platform.OS === 'ios' && Constants.expoConfig?.extra?.terminalBuildEnabled === true && !!NativeModules.StripeTerminalReactNative;
 
-async function loadReadiness(): Promise<Readiness> {
+async function loadReadiness(workspaceId: string): Promise<Readiness> {
+  const capable = tapToPayDeviceCapable();
+  // Started together and shared with the checkout panel: tapping Tap to Pay
+  // then opens the reader without repeating these two server checks.
+  const terminalRequest = capable ? callCashStripe('terminal-status') : null;
+  terminalRequest?.catch(() => {});
   const status = await callCashStripe('status');
   const stripe = status?.ready === true;
-  if (!stripe || !tapToPayDeviceCapable()) return { stripe, tapToPay: false };
+  rememberCashStripeStatus(workspaceId, status);
+  if (!stripe || !terminalRequest) return { stripe, tapToPay: false };
   try {
-    const terminal = await callCashStripe('terminal-status');
+    const terminal = await terminalRequest;
+    rememberCashStripeStatus(workspaceId, status, terminal);
     return { stripe, tapToPay: terminal?.enabled === true && !!terminal.locations?.length };
   } catch {
     return { stripe, tapToPay: false };
@@ -37,7 +44,7 @@ export function useQuickCheckout(workspaceId: string): { quick: QuickCheckout | 
     let current = true;
     let job = inflight.get(workspaceId);
     if (!job) {
-      job = loadReadiness().catch(() => ({ stripe: false, tapToPay: false }));
+      job = loadReadiness(workspaceId).catch(() => ({ stripe: false, tapToPay: false }));
       inflight.set(workspaceId, job);
       void job.then(next => { cache.set(workspaceId, { at: Date.now(), value: next }); inflight.delete(workspaceId); });
     }

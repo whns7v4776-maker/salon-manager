@@ -39,6 +39,9 @@ export function CustomerPremiumSettings({model,compact=false}:{model:ReturnType<
   chrome:p.night?'#292726':'#DED9D1',
  };
  const [open,setOpen]=useState(false);
+ // A narrow card (phone-width web, side columns) stacks the action under the tiers instead of squeezing the title.
+ const [cardWidth,setCardWidth]=useState(0);
+ const stacked=compact||(cardWidth>0&&cardWidth<560);
  const [enabled,setEnabled]=useState(false);
  const [config,setConfig]=useState<CustomerBadgePolicy>(defaultCustomerBadgePolicy);
  const [saving,setSaving]=useState(false);
@@ -50,23 +53,23 @@ export function CustomerPremiumSettings({model,compact=false}:{model:ReturnType<
  const field=(label:string,value:number,onChange:(value:number)=>void,money=false)=><View style={{gap:6,flexGrow:1,minWidth:135}}><Text style={{color:p.muted,fontSize:12}}>{label}</Text><TextInput accessibilityLabel={label} editable={!saving} value={Number.isNaN(value)?'':String(money?value/100:value)} onChangeText={text=>{const parsed=Number(text.replace(',','.'));onChange(text.trim()===''?NaN:money?Math.round(parsed*100):parsed);}} keyboardType={money?'decimal-pad':'number-pad'} style={{paddingHorizontal:12,paddingVertical:11,borderRadius:11,borderWidth:1,borderColor:tones.border,backgroundColor:tones.field,color:p.ink,fontSize:14}}/></View>;
  const validation=validateCustomerBadgePolicy(config);
  return <>
-  <View style={{borderWidth:1,borderColor:p.border,borderRadius:18,padding:compact?20:16,marginBottom:compact?0:14,backgroundColor:p.night?'rgba(35,39,40,.73)':'rgba(255,253,249,.65)',flexDirection:compact?'column':'row',alignItems:compact?'flex-start':'center',gap:compact?14:12,minHeight:compact?224:undefined,flex:compact?1:undefined}}>
+  <View onLayout={event=>setCardWidth(Math.round(event.nativeEvent.layout.width))} style={{borderWidth:1,borderColor:p.border,borderRadius:18,padding:compact?20:16,marginBottom:compact?0:14,backgroundColor:p.night?'rgba(35,39,40,.73)':'rgba(255,253,249,.65)',flexDirection:stacked?'column':'row',alignItems:stacked?'stretch':'center',gap:stacked?14:12,minHeight:compact?224:undefined,flex:compact?1:undefined}}>
    {(()=>{
     // Badge entry: amber medallion, the four tiers as coloured chips, coloured status and an accent action.
     const amber=p.night?'#D6B27A':'#8A6A2E';const enabled=!!model.summary?.enabled;const statusTone=enabled?(p.night?'#9CC7A6':'#3F7A4D'):amber;
     const tiers:[string,React.ComponentProps<typeof Ionicons>['name'],string][]=[['Standard','person-outline',p.night?'#A9A39A':'#6B665E'],['Frequente','repeat-outline',p.night?'#7FC0C4':'#2F7478'],['Premium','ribbon-outline',p.night?'#B9A3D6':'#6E5590'],['Top Premium','diamond-outline',amber]];
-    return <View style={{flex:1,minWidth:0,gap:12,alignSelf:'stretch'}}>
+    return <View style={{flex:stacked?undefined:1,minWidth:0,gap:12,alignSelf:'stretch'}}>
      <View style={{flexDirection:'row',alignItems:'center',gap:12}}>
       <NativeMedal icon="ribbon-outline" size={compact?44:40} iconSize={compact?20:18} accent={amber}/>
       <View style={{flex:1,minWidth:0,gap:4}}>
-       <Text style={{color:p.ink,fontSize:compact?22:17,lineHeight:compact?28:23,fontFamily:compact?"Georgia":undefined,fontWeight:compact?"400":"600"}}>Badge clienti</Text>
-       <View style={{flexDirection:'row',alignItems:'center',gap:6}}><View style={{width:7,height:7,borderRadius:4,backgroundColor:statusTone}}/><Text style={{color:statusTone,fontSize:12,fontWeight:'600'}}>{enabled?'Attivi':'Da configurare'}</Text></View>
+       <Text style={{color:p.ink,fontSize:compact?22:17,lineHeight:compact?28:23,fontFamily:compact?"Georgia":undefined,fontWeight:compact?"400":"600"}} numberOfLines={1}>Badge clienti</Text>
+       <View style={{flexDirection:'row',alignItems:'center',gap:6}}><View style={{width:7,height:7,borderRadius:4,backgroundColor:statusTone}}/><Text style={{color:statusTone,fontSize:12,fontWeight:'600'}} numberOfLines={1}>{enabled?'Attivi':'Da configurare'}</Text></View>
       </View>
      </View>
      <View style={{flexDirection:'row',flexWrap:'wrap',gap:6}}>{tiers.map(([label,icon,tone])=><View key={label} style={{flexDirection:'row',alignItems:'center',gap:5,paddingHorizontal:9,paddingVertical:5,borderRadius:10,borderWidth:1,borderColor:`${tone}${p.night?'4D':'40'}`,backgroundColor:`${tone}${p.night?'1C':'14'}`}}><Ionicons name={icon} size={12} color={tone}/><Text style={{fontSize:11,fontWeight:'600',color:p.ink}}>{label}</Text></View>)}</View>
     </View>;
    })()}
-   <HapticTouchable accessibilityRole="button" accessibilityLabel="Configura badge clienti" onPress={show} style={{minHeight:40,paddingHorizontal:13,paddingVertical:10,borderRadius:12,borderWidth:1,borderColor:p.night?'#D6B27A4D':'#8A6A2E40',backgroundColor:p.night?'#D6B27A1C':'#8A6A2E14',flexDirection:'row',alignItems:'center',gap:7,alignSelf:compact?'flex-start':'center'}}><Ionicons name="options-outline" size={16} color={p.night?'#D6B27A':'#8A6A2E'}/><Text style={{fontSize:13,fontWeight:'500',color:p.ink}}>Configura badge</Text></HapticTouchable>
+   <HapticTouchable accessibilityRole="button" accessibilityLabel="Configura badge clienti" onPress={show} style={{minHeight:40,paddingHorizontal:13,paddingVertical:10,borderRadius:12,borderWidth:1,borderColor:p.night?'#D6B27A4D':'#8A6A2E40',backgroundColor:p.night?'#D6B27A1C':'#8A6A2E14',flexDirection:'row',alignItems:'center',justifyContent:'center',gap:7,alignSelf:compact?'flex-start':stacked?'stretch':'center'}}><Ionicons name="options-outline" size={16} color={p.night?'#D6B27A':'#8A6A2E'}/><Text style={{fontSize:13,fontWeight:'500',color:p.ink}}>Configura badge</Text></HapticTouchable>
   </View>
   <Modal supportedOrientations={TABLET_MODAL_ORIENTATIONS} visible={open} transparent animationType="fade" onRequestClose={()=>{if(!saving)setOpen(false);}}>
    <View style={[{flex:1,alignItems:'center',justifyContent:'center',padding:16,backgroundColor:p.night?'rgba(0,0,0,.56)':'rgba(50,44,35,.28)'},{backdropFilter:'blur(12px)'} as any]}>

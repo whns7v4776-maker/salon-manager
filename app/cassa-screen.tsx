@@ -1,4 +1,5 @@
 import { CASH_STRIPE_FUNCTION } from '../src/lib/cash-stripe-function';
+import { useTabScrollResetWhenInactive } from '../src/lib/tab-scroll-reset';
 import { TABLET_MODAL_ORIENTATIONS } from '../src/lib/tablet-modal-orientations';
 import {CashNativeWorkspace} from '../components/cash-native-workspace';
 import {useCashRefresh} from '../src/lib/use-cash-refresh';
@@ -243,6 +244,7 @@ function CassaContent({
   const [ultime4, setUltime4] = useState('');
   const [campoAttivo, setCampoAttivo] = useState<'descrizione' | 'ricerca' | null>(null);
   const listRef = useRef<FlatList<(typeof movimentiFiltrati)[number]> | null>(null);
+  useTabScrollResetWhenInactive(listRef, 'cassa', active);
   const cardNameRef = useRef<TextInput | null>(null);
   const cardCircuitRef = useRef<TextInput | null>(null);
   const cardLast4Ref = useRef<TextInput | null>(null);
@@ -1816,7 +1818,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#F3F6FA',
   },
   content: {
-    paddingTop: Platform.OS === 'web' ? 8 : 54,
+    paddingTop: Platform.OS === 'web' ? 8 : Platform.OS === 'android' ? 14 : 54,
     paddingBottom: 140,
   },
   cashAreaHeading: { marginTop: 6, marginBottom: 16, paddingHorizontal: 4 },

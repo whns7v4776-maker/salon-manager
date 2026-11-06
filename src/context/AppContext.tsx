@@ -29799,7 +29799,7 @@ function AppProviderState({ children, isOwnerProtectedContextRoute }: {
                   ? Number(row.appointment_group_size)
                   : undefined,
             data: String(row.appointment_date ?? '').trim(),
-            ora: String(row.appointment_time ?? '').trim(),
+            ora: String(row.appointment_time ?? '').trim().slice(0, 5),
             servizio: String(row.requested_service_name ?? '').trim(),
             prezzo: Number(row.requested_price ?? 0),
             durataMinuti:

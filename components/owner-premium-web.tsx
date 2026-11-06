@@ -1,5 +1,6 @@
 import { OwnerSidebarViewportHost } from './owner-sidebar-viewport-host';
 import { premiumWebCardStyles } from './premium-web-surfaces';
+import { premiumPrioritySlotStyles } from './owner-premium-native-style';
 import { OwnerBrandMark } from './salon-brand-mark';
 import React from 'react';
 import { useAppContext } from '../src/context/AppContext';
@@ -155,6 +156,7 @@ export function premiumHomeStyles<T extends Record<string, any>>(base: T, p: Ret
   patch('sectionTextCentered', { textAlign: 'left' });
   patch('priorityTitle', { fontSize: 15, lineHeight: 21 });
   patch('priorityText', { fontSize: 11, lineHeight: 17 });
+  for (const [key, v] of Object.entries(premiumPrioritySlotStyles(p))) patch(key, v);
   patch('operatorAgendaCardHeader', { justifyContent: 'space-between', minHeight: 42, marginBottom: 6, height: 'auto' });
   patch('operatorAgendaCardTextWrap', { paddingHorizontal: 0, paddingRight: 0, alignItems: 'flex-start', width: undefined });
   patch('operatorAgendaCardAction', { backgroundColor: p.action, borderColor: p.border, boxShadow: 'inset 0 1px 0 rgba(255,255,255,.2)', borderRadius: 13 });

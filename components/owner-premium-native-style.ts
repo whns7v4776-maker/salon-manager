@@ -2,6 +2,21 @@ import { Platform, StyleSheet } from 'react-native';
 import { premiumNotificationBannerStyles } from './premium-notification-banner';
 import type { useAccessAppearance } from './access-premium';
 type Palette=ReturnType<typeof useAccessAppearance>['palette'];
+
+/** Next-slot cards (same time, different trades): warm surfaces like the rest of the renewed Home. */
+export function premiumPrioritySlotStyles(p:Palette):Record<string,any>{
+ const gold=p.night?'#D8C29B':'#8F6D3B';
+ return {
+  priorityMultiItem:{backgroundColor:p.surface,borderColor:p.border,borderWidth:1,borderRadius:15,minHeight:66,paddingHorizontal:10,paddingVertical:9,gap:12,shadowOpacity:0,elevation:0,...(Platform.OS==='web'?{boxShadow:'none'}:null)},
+  priorityMultiTimeBadge:{width:60,minWidth:60,height:40,borderRadius:11,backgroundColor:p.night?'rgba(216,194,155,.12)':'rgba(240,229,209,.8)',borderColor:p.night?'rgba(216,194,155,.22)':'rgba(143,109,59,.16)',borderWidth:1},
+  priorityMultiTime:{color:p.ink,fontSize:15,lineHeight:18,fontWeight:'600',fontVariant:['tabular-nums']},
+  priorityMultiClient:{color:p.ink,fontSize:16,lineHeight:20,fontWeight:'600'},
+  priorityMultiService:{color:p.muted,fontSize:13,lineHeight:17,fontWeight:'400',marginTop:1},
+  priorityMultiRole:{color:gold,fontSize:10,lineHeight:13,fontWeight:'600',letterSpacing:1.2,marginTop:3},
+  priorityScrollIndicatorTrack:{backgroundColor:p.night?'rgba(237,230,215,.10)':'rgba(143,109,59,.10)'},
+  priorityScrollIndicatorThumb:{backgroundColor:p.night?'rgba(216,194,155,.55)':'rgba(143,109,59,.38)',shadowOpacity:0},
+ };
+}
 /** Presentation only. No callbacks, navigation, timers or gesture geometry. */
 export function nativeHomeStyles<T extends Record<string,any>>(base:T,p:Palette):T{
  if(Platform.OS==='web')return base;
@@ -24,6 +39,12 @@ export function nativeHomeStyles<T extends Record<string,any>>(base:T,p:Palette)
  for(const key of ['priorityTitle','priorityTitleGlassBlue','priorityTitleAndroidPremium'])patch(key,{color:p.ink,fontFamily:Platform.OS==='ios'?'System':'sans-serif',fontSize:17,lineHeight:23,fontWeight:'600',textAlign:'left',alignSelf:'stretch'});
  for(const key of ['priorityText','priorityTextGlassBlue','priorityTextAndroidPremium'])patch(key,{color:p.muted,fontSize:13,lineHeight:19,fontWeight:'400',textAlign:'left',alignSelf:'stretch',width:'100%',maxWidth:'100%'});
  for(const key of ['priorityEyebrow','priorityEyebrowGlassBlue','priorityEyebrowAndroidPremium'])patch(key,{color:p.night?'#D8C29B':'#8F6D3B',fontSize:10,lineHeight:14,fontWeight:'600',letterSpacing:1.2,textAlign:'left',alignSelf:'stretch'});
+ for(const [key,v] of Object.entries(premiumPrioritySlotStyles(p)))patch(key,v);
+ // Android: the old blue card painted each text line; on the glass card it showed as light bands.
+ if(Platform.OS==='android'){
+  for(const key of ['priorityEyebrowAndroidPremium','priorityTitleAndroidPremium','priorityTextAndroidPremium'])patch(key,{backgroundColor:'transparent',paddingHorizontal:0});
+  for(const key of ['priorityCardAndroidPremium','priorityCardGlassBlueAndroid'])patch(key,{elevation:0});
+ }
  patch('sectionCardDark',{backgroundColor:p.night?'rgba(179,145,93,.10)':'rgba(246,233,211,.5)',borderColor:p.border,borderWidth:1,borderRadius:17,padding:14,marginBottom:12});
  patch('sectionTitleDark',{color:p.ink}); patch('sectionTextDark',{color:p.muted});
  // Focus card reads left-aligned like every other card on the native Home.

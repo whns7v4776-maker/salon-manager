@@ -233,7 +233,7 @@ export function BenefitPackageBuilder({
                 <View
                   style={{
                     padding: 13,
-                    backgroundColor: theme.bg,
+                    backgroundColor: premiumColor(theme.bg,"backgroundColor"),
                     flexDirection: "row",
                     alignItems: "center",
                     gap: 8,
@@ -281,7 +281,7 @@ export function BenefitPackageBuilder({
                         flexDirection: "row",
                         alignItems: "center",
                         gap: 10,
-                        backgroundColor: active ? theme.bg : premiumColor("#FFF","backgroundColor"),
+                        backgroundColor: active ? "rgba(216,194,155,.16)" : premiumColor("#FFF","backgroundColor"),
                         borderTopWidth: 1,
                         borderTopColor: theme.borderColor,
                       }}

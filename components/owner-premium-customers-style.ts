@@ -128,6 +128,17 @@ export function nativeCustomersStyles<T extends Record<string,any>>(base:T,p:Pal
  for(const key of ['customerEditorFooter','customerEditorFooterWeb','onlinePolicyFooter'])if(result[key])patch(key,{backgroundColor:'transparent',padding:18,borderTopWidth:1,borderTopColor:p.line});
  for(const key of ['customerTimingHeaderIcon','onlinePolicyHeaderIcon'])if(result[key])patch(key,{width:40,height:40,borderRadius:13,backgroundColor:p.field,borderWidth:1,borderColor:p.border});
  for(const key of ['customerEditorModalCardWeb','customerEditorModalCard','onlinePolicySheet'])if(result[key]&&Platform.OS==='web')patch(key,{maxWidth:680,paddingHorizontal:0});
+ // Booking rules: switches keep a clear on/off reading instead of the shared field tint.
+ const sage=p.night?'#8FB59A':'#4F7A5B';
+ patch('onlinePolicyToggle',{backgroundColor:p.night?'rgba(255,255,255,.14)':'rgba(52,55,53,.16)',borderWidth:1,borderColor:p.border});
+ patch('onlinePolicyToggleAllowed',{backgroundColor:sage,borderColor:sage});
+ for(const key of ['onlinePolicyToggleThumb','onlinePolicyToggleThumbAllowed'])patch(key,{backgroundColor:'#FFFFFF',shadowColor:'#17231B',shadowOpacity:.18,shadowRadius:2,shadowOffset:{width:0,height:1},elevation:1});
+ patch('onlinePolicyServiceRowBlocked',{backgroundColor:p.night?'rgba(188,115,123,.08)':'rgba(245,224,227,.32)'});
+ patch('onlinePolicyGroupDot',{backgroundColor:p.night?'#D8C29B':'#8F6D3B'});
+ patch('onlinePolicyGroupTitle',{color:p.ink});
+ // Footer: the primary action spans the sheet, Chiudi sits under it.
+ patch('onlinePolicyFooterActions',{flexDirection:'column-reverse',flexWrap:'nowrap',alignItems:'stretch',gap:8});
+ for(const key of ['onlinePolicySave','onlinePolicyCancel'])patch(key,{alignSelf:'stretch',justifyContent:'center',flexDirection:'row',gap:8,minHeight:48});
 
  patch('webManagementSheet',{maxWidth:480,padding:20,gap:18});
  patch('webManagementActionsRow',{width:'100%',flexDirection:'column',flexWrap:'nowrap',gap:6});

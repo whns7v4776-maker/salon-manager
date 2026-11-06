@@ -1,4 +1,5 @@
 import {OwnerWebPageTitle} from '../../components/owner-web-page-title';
+import { useTabScrollReset } from '../../src/lib/tab-scroll-reset';
 import { PremiumFitLabel } from '../../components/ui/premium-fit-label';
 import { TABLET_MODAL_ORIENTATIONS } from '../../src/lib/tablet-modal-orientations';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
@@ -18,7 +19,7 @@ import { NotificationArchiveSearch } from '../../components/notification-archive
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useFocusEffect, useIsFocused } from "@react-navigation/native";
-import { useLocalSearchParams } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import React, {
   useCallback,
   useEffect,
@@ -57,6 +58,9 @@ import {
   getWebExpandableCardStyle,
 } from "../../components/ui/web-expandable-card";
 import { useAppContext } from "../../src/context/AppContext";
+import { useCustomerBadgeMap } from "../../src/lib/use-customer-premium";
+import { findCustomerOnlinePolicyForBookingRequest } from "../../src/lib/customer-online-booking-policy";
+import { CustomerBadgeAlerts } from "../../components/customer-badge-alerts";
 import {
   OwnerStartupSkeletonItem,
   OwnerStartupSkeletonPulse,
@@ -794,6 +798,7 @@ export default function PrenotazioniScreen() {
     openToken?: string | string[];
   }>();
   const scrollRef = useRef<ScrollView | null>(null);
+  useTabScrollReset(scrollRef, 'prenotazioni');
   const isScreenFocusedRef = useRef(false);
   const cancelledSectionYRef = useRef(0);
   const requestCardRefs = useRef(new Map<string, View | null>());
@@ -889,6 +894,7 @@ export default function PrenotazioniScreen() {
     workspaceAccessAllowed,
   } = useAppContext();
   const { unreadCountsBySection, refreshBadges } = useUnreadBadges();
+  const customerBadges = useCustomerBadgeMap(salonWorkspace.id ?? "");
   const [selectedRequest, setSelectedRequest] = useState<
     (typeof richiestePrenotazione)[number] | null
   >(null);
@@ -4482,6 +4488,12 @@ export default function PrenotazioniScreen() {
                   <Text style={{ fontSize: 11, lineHeight: 15, fontWeight: "600", color: statusTone }} numberOfLines={1}>{statusLabel}</Text>
                 </View>
               </View>
+              {customerBadges.size > 0 ? (
+                <CustomerBadgeAlerts
+                  hideStandard
+                  status={customerBadges.get(findCustomerOnlinePolicyForBookingRequest(clienti, item)?.id ?? "")}
+                />
+              ) : null}
               <Text style={{ fontSize: 13, lineHeight: 18, color: rp.ink, opacity: 0.86 }} numberOfLines={IS_WEB ? 2 : 1}>
                 {logicalTitle}
               </Text>
@@ -4522,6 +4534,23 @@ export default function PrenotazioniScreen() {
             </View>
           </HapticTouchable>
           <View style={{ justifyContent: "center", gap: 8, paddingRight: 12, paddingLeft: 2, paddingVertical: 12 }}>
+            {item.stato !== "Annullata" && item.stato !== "Rifiutata" && item.data && item.ora
+              ? contactButton("calendar-outline", "In agenda", () => {
+                  // Same landing as notifications and banners: the agenda opens on the slot and flashes it.
+                  const openToken = String(Date.now());
+                  router.push({
+                    pathname: "/(tabs)/agenda",
+                    params: {
+                      start: item.data,
+                      requestId: String(item.id ?? ""),
+                      requestTime: item.ora.trim().slice(0, 5),
+                      openDetails: "true",
+                      openToken,
+                      requestOpenToken: openToken,
+                    },
+                  });
+                })
+              : null}
             {contactButton("call-outline", "Chiama", () => openExternalUrl(`tel:${buildDialablePhone(item.telefono)}`))}
             {contactButton("logo-whatsapp", "WhatsApp", () => openExternalUrl(buildWhatsappUrl(item.telefono)))}
             {item.instagram ? contactButton("logo-instagram", "Instagram", () => openExternalUrl(buildInstagramUrl(item.instagram))) : null}
@@ -5804,8 +5833,10 @@ export default function PrenotazioniScreen() {
                     pressScale={0.98}
                     pressOpacity={0.95}
                     style={{
-                      flexBasis: tilesInRow ? `${100 / count - 2}%` : "100%",
-                      flexGrow: 1,
+                      // In colonna la base al 100% vale per l'altezza: le card si allungavano e si accavallavano.
+                      flexBasis: tilesInRow ? `${100 / count - 2}%` : "auto",
+                      flexGrow: tilesInRow ? 1 : 0,
+                      flexShrink: 0,
                       minWidth: 0,
                       flexDirection: tilesInRow ? "column" : "row",
                       alignItems: tilesInRow ? "flex-start" : "center",
@@ -5906,7 +5937,7 @@ export default function PrenotazioniScreen() {
           {!IS_WEB ? <NativeRequestsHeader today={getTodayDateString()} pending={shouldHoldRequestStats?'—':String(richiesteDaAccettare.length)} handled={shouldHoldRequestStats?'—':String(richiesteGestite.length)} cancelledBySalon={shouldHoldRequestStats?'—':String(richiesteCancellateORifiutateDalSaloneRecenti.length)} cancelledByClient={shouldHoldRequestStats?'—':String(richiesteAnnullateClienteRecenti.length)} cancelled={shouldHoldRequestStats?'—':String(richiesteCancellateORifiutateDalSaloneRecenti.length+richiesteAnnullateClienteRecenti.length)}/> : (
           <View style={styles.heroCard}>
             <View style={{gap:14,marginBottom:16}}>
-              {Platform.OS!=='web'&&responsive.width<1000?<View style={{height:64,flexDirection:'row',alignItems:'center',justifyContent:'space-between'}}><OwnerBrandMark compact/><HapticTouchable onPress={toggleRequestsTheme} accessibilityRole="button" accessibilityLabel={premiumRequestsPalette.night?'Attiva tema chiaro':'Attiva tema scuro'} style={{width:36,height:36,borderRadius:18,borderWidth:1,borderColor:premiumRequestsPalette.border,backgroundColor:premiumRequestsPalette.field,alignItems:'center',justifyContent:'center'}}><Ionicons name={premiumRequestsPalette.night?'sunny-outline':'moon-outline'} size={19} color={premiumRequestsPalette.ink}/></HapticTouchable></View>:null}
+              {Platform.OS!=='web'&&responsive.width<1000?<View style={{height:64,flexDirection:'row',alignItems:'center',justifyContent:'space-between'}}><OwnerBrandMark compact/><HapticTouchable hapticType="none" onPress={toggleRequestsTheme} accessibilityRole="button" accessibilityLabel={premiumRequestsPalette.night?'Attiva tema chiaro':'Attiva tema scuro'} style={{width:36,height:36,borderRadius:18,borderWidth:1,borderColor:premiumRequestsPalette.border,backgroundColor:premiumRequestsPalette.field,alignItems:'center',justifyContent:'center'}}><Ionicons name={premiumRequestsPalette.night?'sunny-outline':'moon-outline'} size={19} color={premiumRequestsPalette.ink}/></HapticTouchable></View>:null}
               <View style={{gap:7}}><OwnerWebPageTitle>Richieste</OwnerWebPageTitle><Text style={{fontSize:13,lineHeight:19,color:premiumRequestsPalette.muted}}>Le prenotazioni, sotto controllo.</Text></View>
             </View>
 
@@ -6797,7 +6828,7 @@ const baseRequestStyles = StyleSheet.create({
     backgroundColor: "#F3F6FA",
   },
   content: {
-    paddingTop: Platform.OS === 'web' ? 8 : 54,
+    paddingTop: Platform.OS === 'web' ? 8 : Platform.OS === 'android' ? 14 : 54,
     paddingBottom: 140,
   },
   pageShell: {

@@ -7,6 +7,8 @@ import { useCustomerPremiumColor, useCustomerPremiumStyles } from './owner-premi
 import { CustomerPopupClose } from './customer-popup-close';
 import { CustomerPopupSkin } from './customer-popup-skin';
 import { NativeMedal } from './owner-premium-native-home';
+import { CustomerPremiumBadge } from './customer-premium-settings';
+import type { CustomerPremiumStatus } from '../src/lib/use-customer-premium';
 import { useAccessAppearance } from './access-premium';
 import { CustomerSheetFrame, useCustomerSheetDockStyle } from "./customer-sheet-frame";
 import { CommunicationPosterPicker } from "./communication-poster";
@@ -53,7 +55,15 @@ type CommunicationClient = {
   name: string;
   email?: string | null;
   phone?: string | null;
+  badge?: CustomerPremiumStatus | null;
 };
+
+const BADGE_GROUPS: { tier: string; label: string; icon: React.ComponentProps<typeof Ionicons>["name"] }[] = [
+  { tier: "standard", label: "Standard", icon: "person-outline" },
+  { tier: "frequente", label: "Frequente", icon: "repeat-outline" },
+  { tier: "premium", label: "Premium", icon: "ribbon-outline" },
+  { tier: "top_premium", label: "Top Premium", icon: "diamond-outline" },
+];
 
 const showCommunicationNotice = (title: string, message: string) => {
   if (Platform.OS === "web") window.alert(`${title}\n\n${message}`);
@@ -507,6 +517,15 @@ function CustomerCommunicationsModalBody({
     () => eligibleClients.filter((client) => selectedIds.has(client.id)),
     [eligibleClients, selectedIds],
   );
+  // Gruppi per badge: solo quelli che hanno almeno un cliente raggiungibile.
+  const badgeGroups = useMemo(
+    () =>
+      BADGE_GROUPS.map((group) => {
+        const ids = eligibleClients.filter((client) => client.badge?.tier === group.tier).map((client) => client.id);
+        return { ...group, ids, selected: ids.length > 0 && ids.every((id) => selectedIds.has(id)) };
+      }).filter((group) => group.ids.length > 0),
+    [eligibleClients, selectedIds],
+  );
   const canSend =
     !uploadingPoster &&
     !sending &&
@@ -708,6 +727,15 @@ function CustomerCommunicationsModalBody({
       const next = new Set(current);
       if (next.has(id)) next.delete(id);
       else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleBadgeGroup = (ids: string[], selected: boolean) => {
+    setAudienceAll(false);
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      ids.forEach((id) => (selected ? next.delete(id) : next.add(id)));
       return next;
     });
   };
@@ -1108,6 +1136,38 @@ function CustomerCommunicationsModalBody({
             </PremiumSectionHeader>
 
             {period.enabled && audienceAll && <Text style={styles.recipientSummary}>Tutti i clienti, anche chi si registrerà durante il periodo.</Text>}
+            {badgeGroups.length > 0 ? (
+              <View style={{ gap: 7 }}>
+                <Text style={styles.recipientSummary}>Per badge: aggiungi o togli un gruppo, poi ritocca a mano se serve.</Text>
+                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                  {badgeGroups.map((group) => (
+                    <HapticTouchable
+                      key={group.tier}
+                      disabled={sending}
+                      onPress={() => toggleBadgeGroup(group.ids, group.selected)}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: group.selected }}
+                      accessibilityLabel={`${group.selected ? "Togli" : "Aggiungi"} i clienti ${group.label}, ${group.ids.length}`}
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        gap: 6,
+                        paddingHorizontal: 12,
+                        paddingVertical: 8,
+                        borderRadius: 999,
+                        borderWidth: 1,
+                        borderColor: group.selected ? premiumColor("#C9AE7E", "borderColor") : premiumColor("#E2DCCF", "borderColor"),
+                        backgroundColor: group.selected ? (premiumNight ? "rgba(216,194,155,.22)" : "rgba(216,194,155,.28)") : premiumColor("#FFFFFF", "backgroundColor"),
+                      }}
+                    >
+                      <Ionicons name={group.selected ? "checkmark-circle" : group.icon} size={15} color={premiumNight ? "#E3D1AE" : "#70592E"} />
+                      <Text style={{ fontSize: 13, fontWeight: "600", color: premiumNight ? "#F2E8D8" : "#3B3226" }}>{group.label}</Text>
+                      <Text style={{ fontSize: 12, fontWeight: "600", color: premiumNight ? "#BFB4A3" : "#7A6E5D" }}>{group.ids.length}</Text>
+                    </HapticTouchable>
+                  ))}
+                </View>
+              </View>
+            ) : null}
             <DeferredCommunicationQueryInput
               seed={querySeed}
               onCommit={commitQuery}
@@ -1121,7 +1181,7 @@ function CustomerCommunicationsModalBody({
                     key={client.id}
                     style={[
                       styles.clientRow,
-                      selected && styles.clientRowSelected,
+                      selected && styles.clientRowChecked,
                     ]}
                     onPress={() => toggleClient(client.id)}
                   >
@@ -1133,7 +1193,10 @@ function CustomerCommunicationsModalBody({
                       ) : null}
                     </View>
                     <View style={styles.clientText}>
-                      <Text style={styles.clientName}>{client.name}</Text>
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
+                        <Text style={styles.clientName}>{client.name}</Text>
+                        <CustomerPremiumBadge status={client.badge ?? undefined} />
+                      </View>
                       <Text style={styles.clientContact} numberOfLines={1}>
                         {[client.email, client.phone]
                           .filter(Boolean)
@@ -1494,7 +1557,8 @@ const baseCustomerComponentStyles = StyleSheet.create({
     borderColor: "#e4e7ed",
     borderRadius: 13,
   },
-  clientRowSelected: { borderColor: "#8d73df", backgroundColor: "#f7f4ff" },
+  // Non "Selected": il tema premium riempirebbe la riga di beige lasciando il testo chiaro.
+  clientRowChecked: { borderColor: "#C9AE7E", backgroundColor: "rgba(216,194,155,.16)" },
   check: {
     width: 22,
     height: 22,

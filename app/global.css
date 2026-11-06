@@ -91,14 +91,14 @@
   grid-template-columns: minmax(0, 1fr) 188px;
   min-height: 82px;
   padding-right: 34px !important;
-  border: 1px solid #d3dfed;
+  border: 1px solid #e2dccf;
   border-radius: 14px !important;
-  background: #edf3fa;
+  background: #fbf8f3;
   box-shadow: 0 2px 5px rgb(29 52 84 / 4%) !important;
 }
 :root [data-testid='quick-slot-phase']:has([data-testid='quick-slot-phase-overlap']) {
-  background: #fff6e9 !important;
-  border-color: #dbb680 !important;
+  background: #f8f0e2 !important;
+  border-color: #d6b47c !important;
 }
 :root [data-testid='quick-slot-phase-body'] {
   grid-column: 1;
@@ -114,7 +114,7 @@
   width: 28px !important;
   height: 28px !important;
   border-radius: 9px !important;
-  background: #294b70 !important;
+  background: #343735 !important;
 }
 :root [data-testid='quick-slot-phase-order'] > * { color: #fff !important; }
 :root [data-testid='quick-slot-phase-header'] {
@@ -128,7 +128,7 @@
 :root [data-testid='quick-slot-phase-meta'] { margin-top: 5px !important; }
 :root [data-testid='quick-slot-phase-assignment'] {
   padding-left: 14px !important;
-  border-left: 1px solid #d2deed !important;
+  border-left: 1px solid #e2dccf !important;
 }
 :root [data-testid='quick-slot-phase-assignment-controls'] { gap: 7px !important; }
 :root [data-testid='quick-slot-phase-operator-wrap'] { flex: 1 !important; width: auto !important; min-width: 0 !important; }
@@ -152,7 +152,7 @@
   align-self: center !important;
   align-items: stretch !important;
   flex-direction: column !important;
-  border-left: 1px solid #d2deed !important;
+  border-left: 1px solid #e2dccf !important;
   border-radius: 0 !important;
   margin: 0 12px 0 0 !important;
   padding: 0 0 0 12px !important;
@@ -169,8 +169,8 @@
 :root [data-testid='quick-slot-phase'] > :not([data-testid='quick-slot-phase-body']):not([data-testid='quick-slot-phase-actions']):not([data-testid='salon-composition-grab']) { grid-column: 1 / -1; }
 :root [data-testid='quick-slot-phase-pause'] { padding-right: 12px !important; }
 :root [data-testid='quick-slot-phase'] > [data-testid='salon-composition-grab'] {
-  background: #e6edf6 !important;
-  border-left-color: #d3dfed !important;
+  background: #f3eee5 !important;
+  border-left-color: #e2dccf !important;
   width: 34px !important;
 }
 @container quick-slot-phases (max-width: 820px) {
@@ -179,7 +179,7 @@
     grid-column: 1;
     grid-row: auto;
     border-left: 0 !important;
-    border-top: 1px solid #d2deed !important;
+    border-top: 1px solid #e2dccf !important;
     margin: 0 12px 10px 50px !important;
     padding: 8px 0 0 !important;
   }
@@ -189,7 +189,7 @@
 @container quick-slot-phases (max-width: 610px) {
   :root [data-testid='quick-slot-phase-body'] { align-items: flex-start !important; }
   :root [data-testid='quick-slot-phase-header'] { grid-template-columns: minmax(0, 1fr); gap: 9px !important; }
-  :root [data-testid='quick-slot-phase-assignment'] { border-left: 0 !important; border-top: 1px solid #d2deed !important; padding: 9px 0 0 !important; }
+  :root [data-testid='quick-slot-phase-assignment'] { border-left: 0 !important; border-top: 1px solid #e2dccf !important; padding: 9px 0 0 !important; }
 }
 @media (hover: hover) and (pointer: fine) {
   :root :is([data-testid='quick-slot-fit-card'], [data-testid='quick-slot-fit-cross-card']):hover {
@@ -740,6 +740,7 @@ html body [data-customer-directory-title] {flex:0 1 auto!important;width:auto!im
 /* Agenda: the floating operator banner replaces the grid header while scrolling. */
 html[data-agenda-sticky-on="true"] [data-agenda-operator-header="true"]{visibility:hidden;}
 html[data-agenda-sticky-on="true"] [data-testid="agenda-sticky-operator-header"] [data-agenda-operator-header="true"]{visibility:visible;}
+html:not([data-agenda-route="true"]) [data-testid="agenda-sticky-operator-header"]{display:none!important;}
 /* Browser autofill must not repaint app fields (light fill under light text in Night). */
 input:-webkit-autofill,input:-webkit-autofill:hover,input:-webkit-autofill:focus{-webkit-text-fill-color:currentColor;caret-color:currentColor;transition:background-color 100000s ease-in-out 0s;}
 
@@ -749,3 +750,102 @@ input:-webkit-autofill,input:-webkit-autofill:hover,input:-webkit-autofill:focus
  html body [data-agenda-operator-header="true"] [role="button"]:hover [data-agenda-operator-surface="true"]{filter:brightness(1.14);border-color:rgba(216,194,155,.42)!important;}
 }
 [data-agenda-operator-surface="true"]{transition:filter .18s ease,border-color .18s ease;}
+
+/* Composizione su schermo stretto: il selettore operatore prende tutta la riga
+   invece di schiacciare "Automatico · Sofia" in una colonna di lettere. */
+@container quick-slot-phases (max-width: 610px) {
+  :root [data-testid='quick-slot-phase-assignment-controls'] { flex-wrap: wrap !important; }
+  :root [data-testid='quick-slot-phase-operator-wrap'] { flex: 1 1 100% !important; width: 100% !important; }
+  :root [data-testid='quick-slot-phase-operator'] > :has(> [data-testid='quick-slot-phase-operator-label']) { flex: 0 0 auto !important; min-width: max-content !important; }
+  :root [data-testid='quick-slot-phase-operator'] > :has(> [data-testid='quick-slot-phase-operator-label']) ~ div:not(:last-child) { flex-shrink: 1 !important; min-width: 0 !important; overflow: hidden !important; }
+  :root [data-testid='quick-slot-phase-operator'] > :has(> [data-testid='quick-slot-phase-operator-label']) ~ div:not(:last-child) > div:last-child { overflow: hidden !important; text-overflow: ellipsis !important; white-space: nowrap !important; }
+  :root [data-testid='quick-slot-phase-operator'] :is([data-testid='quick-slot-phase-operator-label'], [data-testid='quick-slot-phase-operator-name']) { white-space: nowrap !important; overflow-wrap: normal !important; word-break: normal !important; }
+}
+/* Tema scuro: niente fondi crema o azzurri nelle fasi della composizione. */
+:root[data-premium-appearance="night"] [data-testid='quick-slot-phase'] {
+  background: #272c2d !important;
+  border-color: rgba(216, 194, 155, 0.2) !important;
+  box-shadow: none !important;
+}
+:root[data-premium-appearance="night"] [data-testid='quick-slot-phase']:has([data-testid='quick-slot-phase-overlap']) {
+  background: #2d2a25 !important;
+  border-color: rgba(201, 160, 98, 0.55) !important;
+}
+:root[data-premium-appearance="night"] [data-testid='quick-slot-phase'] > [data-testid='salon-composition-grab'] {
+  background: #23282a !important;
+  border-left-color: rgba(255, 255, 255, 0.07) !important;
+}
+:root[data-premium-appearance="night"] [data-testid='quick-slot-phase-order'] { background: #d8c29b !important; }
+:root[data-premium-appearance="night"] [data-testid='quick-slot-phase-order'] > * { color: #1b1f20 !important; }
+:root[data-premium-appearance="night"] :is([data-testid='quick-slot-phase-assignment'], [data-testid='quick-slot-phase-actions']) {
+  border-color: rgba(255, 255, 255, 0.09) !important;
+}
+
+/* Migliori incastri disponibili: stessi toni avorio e bronzo delle fasi (niente azzurri della grafica precedente). */
+:root [data-testid='quick-slot-fits'] { background: #fbf8f3 !important; border-color: #e2dccf !important; }
+:root :is([data-testid='quick-slot-fit-card'], [data-testid='quick-slot-fit-cross-card']) {
+  --fit-ink: #343735;
+  --fit-muted: #7a6f60;
+  --fit-avatar: #e9e1d2;
+  background: linear-gradient(150deg, #fffdf9, #f3eee5) !important;
+  border-color: #e2dccf !important;
+  box-shadow: 0 2px 5px rgb(52 55 53 / 5%) !important;
+}
+:root [data-testid='quick-slot-fit-cross-card'] {
+  --fit-ink: #6b4a22;
+  --fit-muted: #876d4e;
+  background: linear-gradient(150deg, #fbf4e8, #f1e5cf) !important;
+  border-color: #dfc9a3 !important;
+}
+:root :is([data-testid='quick-slot-fit-card'], [data-testid='quick-slot-fit-cross-card']):has([data-slot-fit-content][data-selected='true']) {
+  --fit-ink: #ffffff;
+  --fit-muted: #ddd3c2;
+  --fit-avatar: rgb(255 255 255 / 14%);
+  background: linear-gradient(140deg, #45494a, #2c2f2e) !important;
+  border-color: #343735 !important;
+  box-shadow: 0 4px 10px rgb(52 55 53 / 18%) !important;
+}
+.slot-fit-rank[data-rank='Migliore'] { background: #e5f0e7; border-color: #bfd8c4; color: #2f6b45; }
+.slot-fit-rank[data-rank='Ottimo'] { background: #f1e7d6; border-color: #e0cba6; color: #7a5a2c; }
+.slot-fit-rank[data-rank='Alternativa'] { background: #eee9e0; border-color: #ddd5c7; color: #5d564b; }
+.slot-fit-footer { border-color: rgba(255,255,255,.9); background: linear-gradient(120deg, rgba(255,255,255,.9), rgba(255,253,249,.65)); box-shadow: 0 2px 4px rgba(52,55,53,.06); }
+.slot-fit-footer .slot-fit-avatar { background: #343735; color: #fff; border-color: #fff; box-shadow: 0 1px 3px rgba(52,55,53,.15); }
+.slot-fit-footer .slot-fit-team-badge { background: #f3eee5; color: #5d564b; border-color: #e2dccf; }
+.slot-fit-content[data-selected='true'] .slot-fit-avatar { background: #d8c29b; color: #1b1f20; border-color: rgba(255,255,255,.4); }
+.slot-fit-content[data-selected='true'] .slot-fit-team-badge { background: rgba(255,255,255,.12); color: #f1ece3; border-color: rgba(255,255,255,.2); }
+/* Tema scuro: fondo grafite, testi chiari e accenti bronzo. */
+:root[data-premium-appearance="night"] [data-testid='quick-slot-fits'] { background: #23282a !important; border-color: rgba(216, 194, 155, 0.2) !important; }
+:root[data-premium-appearance="night"] :is([data-testid='quick-slot-fit-card'], [data-testid='quick-slot-fit-cross-card']) {
+  --fit-ink: #f1ece3;
+  --fit-muted: #a79f92;
+  --fit-avatar: rgba(216, 194, 155, 0.18);
+  background: linear-gradient(150deg, #2e3436, #272c2d) !important;
+  border-color: rgba(255, 255, 255, 0.08) !important;
+  box-shadow: none !important;
+}
+:root[data-premium-appearance="night"] [data-testid='quick-slot-fit-cross-card'] {
+  --fit-ink: #ecd9b8;
+  background: linear-gradient(150deg, #332e26, #2b2721) !important;
+  border-color: rgba(201, 160, 98, 0.35) !important;
+}
+:root[data-premium-appearance="night"] :is([data-testid='quick-slot-fit-card'], [data-testid='quick-slot-fit-cross-card']):has([data-slot-fit-content][data-selected='true']) {
+  --fit-ink: #ffffff;
+  --fit-muted: #d8c29b;
+  background: linear-gradient(140deg, #3b3529, #2c2923) !important;
+  border-color: #d8c29b !important;
+}
+:root[data-premium-appearance="night"] .slot-fit-rank { background: rgba(255,255,255,.07); border-color: rgba(255,255,255,.12); color: #d9d2c6; }
+:root[data-premium-appearance="night"] .slot-fit-rank[data-rank='Migliore'] { background: rgba(122,176,135,.16); border-color: rgba(122,176,135,.32); color: #a9d4b3; }
+:root[data-premium-appearance="night"] .slot-fit-rank[data-rank='Ottimo'] { background: rgba(216,194,155,.16); border-color: rgba(216,194,155,.32); color: #e4cfa6; }
+:root[data-premium-appearance="night"] .slot-fit-rank[data-rank='Altro mestiere'] { background: rgba(201,160,98,.18); border-color: rgba(201,160,98,.36); color: #e2bd85; }
+:root[data-premium-appearance="night"] .slot-fit-footer { background: rgba(255,255,255,.05); border-color: rgba(255,255,255,.08); box-shadow: none; }
+:root[data-premium-appearance="night"] .slot-fit-footer .slot-fit-avatar { background: #d8c29b; color: #1b1f20; border-color: rgba(0,0,0,.25); }
+:root[data-premium-appearance="night"] .slot-fit-footer .slot-fit-team-badge { background: rgba(216,194,155,.12); color: #d8c29b; border-color: rgba(216,194,155,.25); }
+/* Tema scuro: l'avviso di sovrapposizione resta ambrato ma su fondo scuro, come il resto del foglio. */
+:root[data-premium-appearance="night"] [data-testid='quick-slot-conflict'] { background: #2d2a25 !important; border-color: rgba(201, 160, 98, 0.55) !important; }
+:root[data-premium-appearance="night"] [data-testid='quick-slot-conflict'] :is(div, span) { color: #e8c48d !important; }
+:root[data-premium-appearance="night"] [data-testid='quick-slot-phase-overlap'] { background: rgba(201, 160, 98, 0.16) !important; }
+:root[data-premium-appearance="night"] [data-testid='quick-slot-phase-overlap'] :is(div, span) { color: #e8c48d !important; }
+/* Bozza in Agenda (web): "Stabilizza bozza" appoggiata al fondo della finestra (sopra la barra in basso solo quando c'è). */
+:root [data-testid='agenda-draft-bar'] { bottom: calc(24px + env(safe-area-inset-bottom)) !important; }
+html:has([data-premium-bottom-bar="true"]) [data-testid='agenda-draft-bar'] { bottom: calc(104px + env(safe-area-inset-bottom)) !important; }

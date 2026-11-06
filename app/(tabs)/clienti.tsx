@@ -1,4 +1,5 @@
 import {OwnerWebPageTitle} from '../../components/owner-web-page-title';
+import { useTabScrollReset } from '../../src/lib/tab-scroll-reset';
 import {CustomerEditorPremiumHeader,CustomerEditorPremiumContent} from '../../components/customer-editor-premium';
 import { customerFeedbackMessage } from '../../src/lib/customer-deletion-errors';
 import { SkeletonSurface } from '../../components/ui/skeleton-shimmer';
@@ -24,7 +25,7 @@ import { OWNER_RAIL_WIDTH } from '../../components/owner-premium-web';
 import { useIsFocused } from '@react-navigation/native';
 import { StatusBar } from 'react-native';
 import { NativeCustomersSkeleton } from '../../components/owner-premium-customers-skeleton';
-import { CustomerPremiumScope, nativeCustomersStyles, useCustomerPremiumStyles } from '../../components/owner-premium-customers-style';
+import { CustomerPremiumScope, nativeCustomersStyles, useCustomerPremiumAppearance, useCustomerPremiumStyles } from '../../components/owner-premium-customers-style';
 import { useAccessAppearance } from '../../components/access-premium';
 import { CustomerNotificationPermission } from '../../components/customer-notification-permission';
 import { CustomerRegistrationReview } from '../../components/customer-registration-review';
@@ -915,6 +916,8 @@ const CustomerOnlinePolicyServiceSearch = React.memo(
     >;
   }) {
     const styles=useCustomerPremiumStyles(baseCustomerStyles);
+    const premium=useCustomerPremiumAppearance();
+    const iconMuted=premium?.muted ?? '#64748B';
     const [query, setQuery] = useState('');
     const deferredQuery = useDeferredValue(query);
     const serviceGroups = useMemo(() => {
@@ -939,13 +942,13 @@ const CustomerOnlinePolicyServiceSearch = React.memo(
     return (
       <>
         <PremiumSearchToolbar><View style={styles.onlinePolicySearchWrap}>
-          <Ionicons name="search" size={18} color="#64748B" />
+          <Ionicons name="search" size={18} color={iconMuted} />
           <TextInput
             style={styles.onlinePolicySearchInput}
             value={query}
             onChangeText={setQuery}
             placeholder="Cerca servizio o mestiere"
-            placeholderTextColor="#94A3B8"
+            placeholderTextColor={iconMuted}
             autoCorrect={false}
             returnKeyType="done"
           />
@@ -954,7 +957,7 @@ const CustomerOnlinePolicyServiceSearch = React.memo(
               style={styles.onlinePolicySearchClear}
               onPress={() => setQuery('')}
             >
-              <Ionicons name="close-circle" size={18} color="#94A3B8" />
+              <Ionicons name="close-circle" size={18} color={iconMuted} />
             </HapticTouchable>
           ) : null}
         </View></PremiumSearchToolbar>
@@ -1038,7 +1041,7 @@ const CustomerOnlinePolicyServiceSearch = React.memo(
           ))}
           {serviceGroups.length === 0 ? (
             <View style={styles.onlinePolicyEmpty}>
-              <Ionicons name="search-outline" size={24} color="#94A3B8" />
+              <Ionicons name="search-outline" size={24} color={iconMuted} />
               <Text style={styles.onlinePolicyEmptyText}>
                 Nessun servizio corrisponde alla ricerca.
               </Text>
@@ -1104,6 +1107,7 @@ export default function ClientiScreen() {
   const customerPremiumStatuses = useMemo(()=>new Map(customerPremium.ready ? customerPremium.summary?.customers.map(item=>[item.customerId,item]) : []),[customerPremium.ready,customerPremium.summary]);
   const { refreshBadges } = useUnreadBadges();
   const listRef = useRef<FlatList<ClientiUnifiedListItem> | null>(null);
+  useTabScrollReset(listRef, 'clienti');
   const startupWasLoading = useRef(ownerStartupLoading);
   React.useEffect(() => {
     if (startupWasLoading.current && !ownerStartupLoading && Platform.OS === 'ios') {
@@ -1212,6 +1216,7 @@ export default function ClientiScreen() {
   >(null);
   const [ricerca, setRicerca] = useState('');
   const [registrationFilter, setRegistrationFilter] = useState<'all' | 'pending'>('all');
+  const [badgeFilter, setBadgeFilter] = useState<string | null>(null);
   const [registrationDecisions, setRegistrationDecisions] = useState<Record<string, 'approved' | 'rejected'>>({});
   const registrationDecisionsRef = useRef(new Set<string>());
 
@@ -3479,11 +3484,24 @@ export default function ClientiScreen() {
     );
   }, [performRegistrationDecision, showSwipeConfirmation]);
 
+  const badgeFilterOptions = useMemo(() => {
+    if (!customerPremium.summary?.enabled) return [];
+    const counts = new Map<string, number>();
+    clienti.forEach(item => { const tier = customerPremiumStatuses.get(item.id)?.tier; if (tier) counts.set(tier, (counts.get(tier) ?? 0) + 1); });
+    return ([['standard','Standard','person-outline'],['frequente','Frequente','repeat-outline'],['premium','Premium','ribbon-outline'],['top_premium','Top Premium','diamond-outline']] as const)
+      .map(([tier,label,icon]) => ({ tier, label, icon, count: counts.get(tier) ?? 0 }))
+      .filter(option => option.count > 0);
+  }, [clienti, customerPremium.summary?.enabled, customerPremiumStatuses]);
+  const activeBadgeFilter = badgeFilter && badgeFilterOptions.some(option => option.tier === badgeFilter) ? badgeFilter : null;
+
   const clientiFiltrati = useMemo(() => {
     const testo = ricerca.trim().toLowerCase();
-    const visibleClients = registrationFilter === 'pending'
+    const byRegistration = registrationFilter === 'pending'
       ? clienti.filter(item => item.registrationStatus === 'pending')
       : clienti;
+    const visibleClients = activeBadgeFilter
+      ? byRegistration.filter(item => customerPremiumStatuses.get(item.id)?.tier === activeBadgeFilter)
+      : byRegistration;
 
     if (!testo) return visibleClients;
 
@@ -3494,7 +3512,7 @@ export default function ClientiScreen() {
       const instagramMatch = item.instagram?.toLowerCase().includes(testo);
       return nomeMatch || telefonoMatch || emailMatch || instagramMatch;
     });
-  }, [clienti, ricerca, registrationFilter]);
+  }, [clienti, ricerca, registrationFilter, activeBadgeFilter, customerPremiumStatuses]);
 
   const clientiSections = useMemo(() => {
     const alphabetical = [...clientiFiltrati].sort((a, b) =>
@@ -3943,7 +3961,7 @@ export default function ClientiScreen() {
       // the two account-level actions set apart below a hairline.
       const tile = (key: string, icon: React.ComponentProps<typeof Ionicons>["name"], label: string, accent: string, onPress: () => void, wide = false) => (
         <HapticTouchable key={key} webHoverLift accessibilityRole="button" accessibilityLabel={`${label} di ${item.full_name}`}
-          style={{ flexBasis: wide ? '100%' : '46%', flexGrow: 1, minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 12, borderRadius: 16, borderWidth: 1, borderColor: p.border, backgroundColor: night ? 'rgba(255,255,255,.04)' : 'rgba(255,255,255,.62)', ...(Platform.OS === 'web' ? { boxShadow: night ? 'inset 0 1px 0 rgba(255,255,255,.05)' : 'inset 0 1px 0 #ffffffcc' } : {}) } as object}
+          style={{ flexBasis: wide ? '100%' : '46%', flexGrow: 1, minWidth: 180, minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 12, borderRadius: 16, borderWidth: 1, borderColor: p.border, backgroundColor: night ? 'rgba(255,255,255,.04)' : 'rgba(255,255,255,.62)', ...(Platform.OS === 'web' ? { boxShadow: night ? 'inset 0 1px 0 rgba(255,255,255,.05)' : 'inset 0 1px 0 #ffffffcc' } : {}) } as object}
           onPress={() => { setOpenWebClientActionsId(null); onPress(); }} pressScale={0.97} pressOpacity={0.97}>
           <NativeMedal icon={icon} size={34} iconSize={16} accent={accent} />
           <Text numberOfLines={2} style={{ flex: 1, minWidth: 0, color: p.ink, fontSize: 14, lineHeight: 19, fontWeight: '500' }}>{label}</Text>
@@ -4282,8 +4300,8 @@ export default function ClientiScreen() {
               </View>
             </Modal>
           ) : null) : null;
-    const directoryRow = <CustomerDirectoryRow premium={Platform.OS==='web'?customerPremiumStatuses.get(item.id):undefined} name={item.full_name} initials={buildClientMonogram(item.full_name)} color={customerIdentityColor} unread={isUnreadFrontendClient} status={isPendingRegistration?'Da approvare':isInibito?'Inibito':isUnreadFrontendClient?'Nuovo cliente':'Attivo'} visit={customerDirectoryVisits.get(item.id)} table={displayMode==='table'} selected={selected} onSelect={()=>{if(isUnreadFrontendClient&&!expanded)markFrontendClientsAsViewed([item.id]);if(Platform.OS!=='web')setClientDetailsId(item.id);else toggleExpanded();}} onOptions={() => setOpenWebClientActionsId(item.id)} onCall={() => Linking.openURL(`tel:${buildDialablePhone(item.phone)}`).catch(() => null)} onMessage={() => { const url=buildWhatsappUrl(item.phone); if(url) Linking.openURL(url).catch(() => null); }} />;
-    const profileDetails = <CustomerProfileSummary premium={Platform.OS==='web'?customerPremiumStatuses.get(item.id):undefined} name={item.full_name} initials={buildClientMonogram(item.full_name)} color={customerIdentityColor} phone={item.phone??''} email={item.email??''} status={isPendingRegistration?'Da approvare':isInibito?'Inibito':'Attivo'} cancellations={cancellationCount} limits={[typeof item.maxFutureAppointments==='number'?`${item.maxFutureAppointments} ${item.maxFutureAppointmentsMode==='total_future'?'prenotazioni future':'prenotazioni al mese'}`:'Senza limite mensile',typeof item.maxDailyAppointments==='number'?`${item.maxDailyAppointments} al giorno`:'Senza limite giornaliero'].join(' · ')} onEdit={()=>leaveClientDetailsFor('edit',item)} onOptions={()=>leaveClientDetailsFor('options',item)} onBenefits={()=>leaveClientDetailsFor('benefits',item)} actions={[
+    const directoryRow = <CustomerDirectoryRow premium={customerPremiumStatuses.get(item.id)} name={item.full_name} initials={buildClientMonogram(item.full_name)} color={customerIdentityColor} unread={isUnreadFrontendClient} status={isPendingRegistration?'Da approvare':isInibito?'Inibito':isUnreadFrontendClient?'Nuovo cliente':'Attivo'} visit={customerDirectoryVisits.get(item.id)} table={displayMode==='table'} selected={selected} onSelect={()=>{if(isUnreadFrontendClient&&!expanded)markFrontendClientsAsViewed([item.id]);if(Platform.OS!=='web')setClientDetailsId(item.id);else toggleExpanded();}} onOptions={() => setOpenWebClientActionsId(item.id)} onCall={() => Linking.openURL(`tel:${buildDialablePhone(item.phone)}`).catch(() => null)} onMessage={() => { const url=buildWhatsappUrl(item.phone); if(url) Linking.openURL(url).catch(() => null); }} />;
+    const profileDetails = <CustomerProfileSummary premium={customerPremiumStatuses.get(item.id)} name={item.full_name} initials={buildClientMonogram(item.full_name)} color={customerIdentityColor} phone={item.phone??''} email={item.email??''} status={isPendingRegistration?'Da approvare':isInibito?'Inibito':'Attivo'} cancellations={cancellationCount} limits={[typeof item.maxFutureAppointments==='number'?`${item.maxFutureAppointments} ${item.maxFutureAppointmentsMode==='total_future'?'prenotazioni future':'prenotazioni al mese'}`:'Senza limite mensile',typeof item.maxDailyAppointments==='number'?`${item.maxDailyAppointments} al giorno`:'Senza limite giornaliero'].join(' · ')} onEdit={()=>leaveClientDetailsFor('edit',item)} onOptions={()=>leaveClientDetailsFor('options',item)} onBenefits={()=>leaveClientDetailsFor('benefits',item)} actions={[
       {label:'Chiama',icon:'call-outline',onPress:()=>{Linking.openURL(`tel:${buildDialablePhone(item.phone)}`).catch(()=>null);}},
       {label:'WhatsApp',icon:'chatbubble-outline',onPress:()=>{Linking.openURL(buildWhatsappUrl(item.phone)).catch(()=>null);}},
       {label:'Instagram',icon:'logo-instagram',disabled:!canOpenInstagram,onPress:()=>{if(canOpenInstagram)Linking.openURL(buildInstagramUrl(item.instagram)||'').catch(()=>null);}},
@@ -4512,6 +4530,28 @@ export default function ClientiScreen() {
                 </View>
               ) : null}
 
+              {badgeFilterOptions.length > 1 ? (
+                <View {...(Platform.OS==='web'?{dataSet:{premiumToolbarFilters:"true"}}:{})} style={styles.registrationFilters}>
+                  {badgeFilterOptions.map(option => {
+                    const active = activeBadgeFilter === option.tier;
+                    return (
+                      <HapticTouchable
+                        key={option.tier}
+                        accessibilityRole="button"
+                        accessibilityLabel={active ? `Mostra tutti i badge` : `Mostra solo i clienti ${option.label}, ${option.count}`}
+                        accessibilityState={{ selected: active }}
+                        aria-pressed={active}
+                        onPress={() => setBadgeFilter(active ? null : option.tier)}
+                        style={[styles.registrationFilterChip, active && styles.registrationFilterSelected]}
+                      >
+                        <Ionicons name={option.icon} size={14} color={active ? '#1D4ED8' : '#64748B'} />
+                        <Text style={[styles.registrationFilterText, active && styles.registrationFilterTextSelected]}>{option.label} · {option.count}</Text>
+                      </HapticTouchable>
+                    );
+                  })}
+                </View>
+              ) : null}
+
               </PremiumSearchToolbar>
 
               {item.sections.length === 0 ? (
@@ -4595,7 +4635,8 @@ export default function ClientiScreen() {
       markHeaderExpandTouchStart,
       unreadFrontendClientIds.length,
       pendingRegistrationCount,
-      registrationFilter, styles, customerPalette
+      registrationFilter, styles, customerPalette,
+      badgeFilterOptions, activeBadgeFilter
     ]
   );
 
@@ -4940,7 +4981,7 @@ export default function ClientiScreen() {
               <View style={{gap:Platform.OS==='web'?14:12,marginBottom:16,...(Platform.OS!=='web'?{marginTop:-9}:{})}}>
                   <View style={{height:64,flexDirection:'row',alignItems:'center',justifyContent:'space-between',...(Platform.OS === 'web' || responsive.sidebar ? {display:'none' as const}: {})}}>
                     <OwnerBrandMark compact />
-                    <HapticTouchable accessibilityRole="button" accessibilityLabel={customerPalette.night?'Attiva tema chiaro':'Attiva tema scuro'} onPress={toggleCustomerTheme} style={{width:36,height:36,borderRadius:18,alignItems:'center',justifyContent:'center',borderWidth:1,borderColor:customerPalette.border,backgroundColor:customerPalette.field}}>
+                    <HapticTouchable hapticType="none" accessibilityRole="button" accessibilityLabel={customerPalette.night?'Attiva tema chiaro':'Attiva tema scuro'} onPress={toggleCustomerTheme} style={{width:36,height:36,borderRadius:18,alignItems:'center',justifyContent:'center',borderWidth:1,borderColor:customerPalette.border,backgroundColor:customerPalette.field}}>
                       <Ionicons name={customerPalette.night?'sunny-outline':'moon-outline'} size={19} color={customerPalette.ink}/>
                     </HapticTouchable>
                   </View>
@@ -5051,6 +5092,7 @@ export default function ClientiScreen() {
           name: item.nome,
           email: item.email,
           phone: item.telefono,
+          badge: customerPremium.summary?.enabled ? customerPremiumStatuses.get(item.id) ?? null : null,
         }))}
         onClose={() => {
           setShowCommunicationsModal(false);
@@ -5708,7 +5750,7 @@ export default function ClientiScreen() {
                   <Ionicons
                     name={onlinePolicySaving ? 'hourglass-outline' : 'shield-checkmark-outline'}
                     size={19}
-                    color={customerPalette.muted}
+                    color={customerPalette.actionText}
                   />
                   <Text style={styles.onlinePolicySaveText}>
                     {onlinePolicySaving ? 'Salvataggio…' : 'Salva servizi e approvazione'}
@@ -5983,7 +6025,7 @@ const baseCustomerStyles = StyleSheet.create({
     backgroundColor: '#EEF2F6',
   },
   listContent: {
-    paddingTop: Platform.OS === 'web' ? 8 : 54,
+    paddingTop: Platform.OS === 'web' ? 8 : Platform.OS === 'android' ? 14 : 54,
     paddingBottom: 128,
   },
   pageShell: {

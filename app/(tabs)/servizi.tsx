@@ -1,4 +1,5 @@
 import { SkeletonSurface } from '../../components/ui/skeleton-shimmer';
+import { useTabScrollReset } from '../../src/lib/tab-scroll-reset';
 import { CustomerSelectionIndicator } from '../../components/customer-selection-indicator';
 import { PremiumSectionHeading, PremiumSectionHeader } from '../../components/ui/premium-section-heading';
 import { PremiumSearchToolbar } from '../../components/ui/premium-search-toolbar';
@@ -6691,6 +6692,7 @@ export default function ServiziScreen() {
   const operatorPhotoPickerTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const operatorPhotoSelectionHandlerRef = useRef<((nextUri: string) => void) | null>(null);
   const listRef = useRef<FlatList<any> | null>(null);
+  useTabScrollReset(listRef, 'servizi');
   const serviceFormExpansionRef = useRef<AppOnlyFastExpansionHandle | null>(null);
   const creationModeRef = useRef<'single' | 'composition'>('single');
   const compositionDraftRef = useRef<ServiceCompositionDraft | null>(null);
@@ -18895,7 +18897,7 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
   content: {
-    paddingTop: Platform.OS === 'web' ? 8 : 54,
+    paddingTop: Platform.OS === 'web' ? 8 : Platform.OS === 'android' ? 14 : 54,
     paddingBottom: 96,
   },
   pageShell: {

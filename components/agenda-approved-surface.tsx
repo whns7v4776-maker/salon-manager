@@ -1,6 +1,6 @@
 import React, { useId, useState } from 'react';
 import { Platform, StyleSheet, View } from 'react-native';
-import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
+import Svg, { Defs, Line, LinearGradient, Rect, Stop } from 'react-native-svg';
 
 /** Decoration only: never contributes to lane measurements or takes a touch. */
 export function AgendaSlotSatin({night,top}:{night:boolean;top:number}) {
@@ -31,4 +31,24 @@ export function AgendaPauseSurface({night}:{night:boolean}){
  const [size,setSize]=useState({width:1,height:1});
 
  return <View pointerEvents="none" onLayout={event=>{const {width,height}=event.nativeEvent.layout;setSize(current=>current.width===width&&current.height===height?current:{width,height});}} style={StyleSheet.absoluteFillObject}><Svg key={`${size.width}x${size.height}`} width={size.width} height={size.height}><Defs><LinearGradient id={id} x1="0%" y1="0%" x2="100%" y2="30%"><Stop offset={0} stopColor={night?'#937141':'#C09D68'} stopOpacity={.24}/><Stop offset={.48} stopColor={night?'#BA9358':'#DEC9A3'} stopOpacity={night?.32:.39}/><Stop offset={1} stopColor={night?'#937141':'#C09D68'} stopOpacity={.20}/></LinearGradient></Defs><Rect width="100%" height="100%" fill={`url(#${id})`}/></Svg></View>;
+}
+
+/** Closed day or operator off: fine bronze diagonals that continue across rows (offset = row top). */
+export function AgendaClosedLane({night,width,height,offset}:{night:boolean;width:number;height:number;offset:number}){
+ if(Platform.OS!=='web'){
+  // App: a calm recessed panel, one even sand wash with hairline edges; rows join without seams.
+  const edge=night?'rgba(216,194,155,.12)':'rgba(150,118,72,.13)';
+  return <View pointerEvents="none" accessible={false} style={[StyleSheet.absoluteFillObject,{backgroundColor:night?'rgba(8,9,10,.34)':'rgba(222,209,186,.40)'}]}>
+   <View style={{position:'absolute',left:0,top:0,bottom:0,width:StyleSheet.hairlineWidth,backgroundColor:edge}}/>
+   <View style={{position:'absolute',right:0,top:0,bottom:0,width:StyleSheet.hairlineWidth,backgroundColor:edge}}/>
+  </View>;
+ }
+ const period=14;
+ const first=Math.floor(offset/period)*period;
+ const lines:number[]=[];
+ for(let c=first;c-offset<=width+height+period;c+=period)lines.push(c-offset);
+ const stroke=night?'rgba(216,194,155,.13)':'rgba(122,100,70,.16)';
+ return <View pointerEvents="none" accessible={false} style={[StyleSheet.absoluteFillObject,{backgroundColor:night?'rgba(14,15,16,.34)':'rgba(233,224,208,.42)',overflow:'hidden'}]}>
+  {width>0&&height>0?<Svg width={width} height={height}>{lines.map(c=><Line key={c} x1={c} y1={0} x2={c-height} y2={height} stroke={stroke} strokeWidth={1}/>)}</Svg>:null}
+ </View>;
 }

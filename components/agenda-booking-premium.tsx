@@ -24,7 +24,8 @@ export function nativeAgendaBookingHeader(p: ReturnType<typeof useAccessAppearan
 export function AgendaBookingStepTitle({step,title,kind,icon,complete,active,locked=false}:{locked?:boolean;step:number;title:string;kind:keyof typeof tones;icon:React.ComponentProps<typeof Ionicons>['name'];complete:boolean;active:boolean}) {
   const {palette:p}=useAccessAppearance();
   const tone=tones[kind], ink=p.night?tone.night:tone.day;
-  return <View style={{flexDirection:'row',alignItems:'center',gap:10,flex:1,minWidth:130}}>
+  // minWidth ampio: su schermo stretto i pulsanti accanto scendono sotto invece di spezzare il titolo a metà parola.
+  return <View style={{flexDirection:'row',alignItems:'center',gap:10,flex:1,minWidth:210}}>
     <View style={{width:34,height:34,borderRadius:11,backgroundColor:`rgba(${tone.rgb},.11)`,alignItems:'center',justifyContent:'center',flexShrink:0}}><Ionicons name={locked?'lock-closed-outline':complete?'checkmark-outline':icon} size={18} color={ink}/></View>
     <View style={{flex:1,minWidth:0,gap:3}}><Text style={{fontSize:9,lineHeight:13,letterSpacing:1.1,fontWeight:'600',color:ink}}>STEP {String(step).padStart(2,'0')}{locked?' · IN ATTESA':active?' · ATTUALE':complete?' · COMPLETATO':''}</Text><Text style={{fontFamily:nativeSerif,fontSize:20,lineHeight:25,color:p.ink}}>{title}</Text></View>
   </View>;

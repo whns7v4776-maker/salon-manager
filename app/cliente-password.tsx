@@ -4,7 +4,8 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { IosSimpleTouchable as TouchableOpacity } from "../components/ui/ios-simple-touchable";
-import { AppWordmark } from "../components/app-wordmark";
+import { AccessAppearanceProvider, AccessBackdrop, AccessWordmark, accessPremiumStyles, useAccessAppearance } from "../components/access-premium";
+import type { Palette } from "../components/access-appearance-context";
 import {
   PasswordMatchRequirement,
   PasswordRequirements,
@@ -49,7 +50,18 @@ const buildOtpErrorMessage = (error: string) => {
   return "Codice non corretto.";
 };
 
+// Recupero password cliente con la stessa grafica premium dell'area di accesso (sfondo satinato, vetro, oro).
 export default function ClientePasswordScreen() {
+  return (
+    <AccessAppearanceProvider>
+      <ClientePasswordContent />
+    </AccessAppearanceProvider>
+  );
+}
+
+function ClientePasswordContent() {
+  const { palette: p } = useAccessAppearance();
+  const styles = useMemo(() => premiumPasswordStyles(p), [p]);
   const router = useRouter();
   const params = useLocalSearchParams<{
     mode?: string | string[];
@@ -448,6 +460,7 @@ export default function ClientePasswordScreen() {
       style={styles.screen}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
+      <AccessBackdrop />
       <ScrollView
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
@@ -463,9 +476,9 @@ export default function ClientePasswordScreen() {
               hitSlop={{ top: 4, right: 4, bottom: 4, left: 4 }}
               activeOpacity={0.85}
             >
-              <Ionicons name="chevron-back" size={22} color="#111827" />
+              <Ionicons name="chevron-back" size={22} color={p.ink} />
             </TouchableOpacity>
-            <AppWordmark />
+            <AccessWordmark />
             <Text style={styles.title}>{copy.title}</Text>
             <Text style={styles.subtitle}>{copy.subtitle}</Text>
           </View>
@@ -507,7 +520,7 @@ export default function ClientePasswordScreen() {
                     clearIdentityFeedback("salon");
                   }}
                   placeholder="Es. ABC123"
-                  placeholderTextColor="#94a3b8"
+                  placeholderTextColor={p.muted}
                   autoCapitalize="characters"
                   autoCorrect={false}
                   maxFontSizeMultiplier={ANDROID_TEXT_MAX_FONT_MULTIPLIER}
@@ -543,7 +556,7 @@ export default function ClientePasswordScreen() {
                   clearIdentityFeedback("email");
                 }}
                 placeholder="nome@email.it"
-                placeholderTextColor="#94a3b8"
+                placeholderTextColor={p.muted}
                 keyboardType="email-address"
                 autoCapitalize="none"
                 autoCorrect={false}
@@ -580,7 +593,7 @@ export default function ClientePasswordScreen() {
                     clearIdentityFeedback("phone");
                   }}
                   placeholder="Es. 333 123 4567"
-                  placeholderTextColor="#94a3b8"
+                  placeholderTextColor={p.muted}
                   keyboardType="phone-pad"
                   autoComplete="tel"
                   textContentType="telephoneNumber"
@@ -606,7 +619,7 @@ export default function ClientePasswordScreen() {
               activeOpacity={0.88}
             >
               {busyAction === "send" ? (
-                <ActivityIndicator color="#ffffff" />
+                <ActivityIndicator color={p.actionText} />
               ) : (
                 <Text
                   maxFontSizeMultiplier={ANDROID_TEXT_MAX_FONT_MULTIPLIER}
@@ -720,7 +733,7 @@ export default function ClientePasswordScreen() {
                     }
                   }}
                   placeholder="Inserisci una password sicura"
-                  placeholderTextColor="#94a3b8"
+                  placeholderTextColor={p.muted}
                   autoCapitalize="none"
                   autoCorrect={false}
                   autoComplete="new-password"
@@ -756,7 +769,7 @@ export default function ClientePasswordScreen() {
                     }
                   }}
                   placeholder="Ripeti la nuova password"
-                  placeholderTextColor="#94a3b8"
+                  placeholderTextColor={p.muted}
                   autoCapitalize="none"
                   autoCorrect={false}
                   autoComplete="new-password"
@@ -792,7 +805,7 @@ export default function ClientePasswordScreen() {
                 activeOpacity={0.9}
               >
                 {busyAction === "save" ? (
-                  <ActivityIndicator color="#ffffff" />
+                  <ActivityIndicator color={p.actionText} />
                 ) : (
                   <Text
                     maxFontSizeMultiplier={ANDROID_TEXT_MAX_FONT_MULTIPLIER}
@@ -850,7 +863,24 @@ export default function ClientePasswordScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+function premiumPasswordStyles(p: Palette) {
+  const s = accessPremiumStyles(baseStyles, p);
+  return {
+    ...s,
+    screen: { ...s.screen, backgroundColor: p.canvas },
+    hero: { ...s.hero, backgroundColor: "transparent", borderWidth: 0, shadowOpacity: 0, elevation: 0 },
+    backButton: { ...s.backButton, backgroundColor: p.field, borderColor: p.border, borderWidth: 1 },
+    title: { ...s.title, color: p.ink, fontFamily: Platform.OS === "android" ? "serif" : "Georgia", fontWeight: "400" as const, letterSpacing: -0.5 },
+    fieldLabel: { ...s.fieldLabel, color: p.muted },
+    otpBox: { ...s.otpBox, backgroundColor: p.field, borderColor: p.line },
+    // "Invia codice email" era il pulsante principale scuro: nella grafica premium diventa oro come gli altri.
+    secondaryButton: { ...s.secondaryButton, ...s.primaryButton, marginTop: 4 },
+    secondaryButtonText: { ...s.secondaryButtonText, ...s.primaryButtonText },
+    successModalCard: { ...s.successModalCard, backgroundColor: p.surface, borderColor: p.border },
+  };
+}
+
+const baseStyles = StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: "#edf2f6",
